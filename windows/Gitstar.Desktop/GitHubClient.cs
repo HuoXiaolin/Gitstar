@@ -12,7 +12,7 @@ public sealed partial class GitHubClient : IDisposable
     private readonly string clientId;
     private string token="";
     private string[]? oauthScopes;
-    public const string OAuthScopes="repo user workflow";
+    public const string OAuthScopes="repo user workflow delete_repo";
     public string Token { get=>token;set{if(token!=value){oauthScopes=null;credential=null;}token=value;} }
     public GitHubClient(Settings settings,HttpMessageHandler? transport=null)
     {

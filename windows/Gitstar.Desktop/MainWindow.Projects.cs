@@ -106,6 +106,7 @@ public partial class MainWindow
         var p=project;var writable=ProjectWritable(p);var info=ProjectSection(p.Name);info.Children.Add(ProjectText(p.FullName+"   ·   "+p.Visibility+"   ·   "+p.Access+"   ·   默认分支 "+p.DefaultBranch,12,true));info.Children.Add(ProjectText(p.Description.Length>0?p.Description:"还没有项目说明",13,p.Description.Length==0));
         info.Children.Add(ProjectText("项目同步："+(projectsSynced?.ToLocalTime().ToString("MM-dd HH:mm")??"尚未同步"),11,true));var infoActions=new WrapPanel();info.Children.Add(infoActions);
         ProjectAction(infoActions,"打开 GitHub",()=>ProjectDialog(()=>WindowsServices.Open("https://github.com/"+p.FullName)));ProjectAction(infoActions,"项目设置",()=>OpenProjectSettings(p),enabled:p.CanAdmin&&api.Token.Length>0);
+        var deleteProject=ProjectAction(infoActions,"删除项目",()=>OpenDeleteProject(p),enabled:p.CanAdmin&&api.Token.Length>0&&!automaticPublishing.ContainsKey(p.FullName));deleteProject.SetResourceReference(Control.ForegroundProperty,"DangerInk");
         RenderProjectAutomation(p);
         var workspace=Workspace(p);var source=ProjectSection("源码工作区");
         if(workspace==null)source.Children.Add(ProjectText("关联现有 Git 仓库、初始化已有源码，或克隆远程项目到电脑。",13,true));

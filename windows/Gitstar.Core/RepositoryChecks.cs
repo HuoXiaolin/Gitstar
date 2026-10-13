@@ -2,7 +2,7 @@ namespace Gitstar.Core;
 
 public static class RepositoryChecks
 {
-    public static string[] Targets(bool matchedOnly,IEnumerable<Repository> stars,Settings settings)=>(matchedOnly?settings.Bindings.Select(binding=>binding.Repository):stars.Select(repo=>repo.FullName).Concat(settings.ExtraRepositories).Concat(settings.Bindings.Select(binding=>binding.Repository))).Where(Rules.ValidRepository).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    public static string[] Targets(bool matchedOnly,IEnumerable<Repository> stars,Settings settings)=>(matchedOnly?settings.Bindings.Where(binding=>!binding.Disabled).Select(binding=>binding.Repository):stars.Select(repo=>repo.FullName).Concat(settings.ExtraRepositories).Concat(settings.Bindings.Where(binding=>!binding.Disabled).Select(binding=>binding.Repository))).Where(Rules.ValidRepository).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     public static async Task Run(IReadOnlyList<string> names,Func<string,CancellationToken,Task> check,CancellationToken ct,int concurrency=24)
     {
         var next=-1;var stopped=0;
