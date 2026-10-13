@@ -6,8 +6,8 @@
 
 安装 **x64 .NET Desktop Runtime 10.x**，再运行 `Gitstar.exe`。ZIP 和安装版均不携带运行时。下载地址：https://dotnet.microsoft.com/download/dotnet/10.0 。请选择 Desktop Runtime，不是 SDK 或仅 .NET Runtime。
 
-- ZIP：解压到单独目录，运行 `Gitstar.exe`。
-- 发行目录：`D:\Agant\Github_Releases\Gitstar\`，所有文件直接放在此目录，没有发行子文件夹：`Gitstar.exe`、`使用说明.md`、`Gitstar-win-x64.zip`、`Gitstar-setup.exe`、`SHA256SUMS.txt`。ZIP 内也只有 EXE 与使用说明。DLL、运行配置及资源已打包到 EXE，Git 认证直接调用 EXE。构建完成后，最新精简源码自动同步到 `D:\Agant\Github_Source\Gitstar`，保留该目录的 Git 信息，排除编译产物、工具链和外部参考仓库。源码保留必要的工程目录结构。普通修改覆盖最新版；构建脚本可通过 `-OutputRoot` 和 `-SourceRoot` 自定义发行目录及源码上级目录。
+- 免安装版：直接运行 `Gitstar.exe`。
+- 发行目录：`D:\Agant\Github_Releases\Gitstar\`，所有文件直接放在此目录，没有发行子文件夹：`Gitstar.exe`、`使用说明.md`、`Gitstar-setup.exe`、`SHA256SUMS.txt`。不生成 ZIP。DLL、运行配置及资源已打包到 EXE，Git 认证直接调用 EXE。构建完成后，最新精简源码自动同步到 `D:\Agant\Github_Source\Gitstar`，保留该目录的 Git 信息，排除编译产物、工具链和外部参考仓库。源码保留必要的工程目录结构。普通修改覆盖最新版；构建脚本可通过 `-OutputRoot` 和 `-SourceRoot` 自定义发行目录及源码上级目录。
 - 安装版：运行 `Gitstar-setup.exe`，安装到当前用户目录。安装器会检查运行时，不会下载或安装运行时。
 - 配置和 SQLite 数据库：`%LOCALAPPDATA%\Gitstar\gitstar.db`。凭据使用当前 Windows 用户的 DPAPI 加密。账户缓存与任务记录按账号隔离。卸载保留个人数据。
 - 设置中的“本地数据与清理”显示当前用户实际的数据目录和数据库路径，可打开目录或复制路径。删除运行残留数据时，先从系统托盘选择“彻底退出”，再删除整个应用数据目录（包含数据库及可能存在的 WAL/SHM 文件）；登录、设置、分组、软件/源码关联、缓存和任务记录会一并清除，之后启动恢复初始状态。下载目录中的安装包需单独整理。

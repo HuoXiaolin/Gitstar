@@ -28,11 +28,17 @@ foreach($releaseName in $releaseNames){
     Write-Output 'Running app preserved; restart to load the updated executable.'
   }
 }
-Compress-Archive -LiteralPath ($releaseNames | ForEach-Object {Join-Path $releasePath $_}) -DestinationPath (Join-Path $outputRoot 'Gitstar-win-x64.zip') -Force
- $installerBuilt=$false
+$installerBuilt=$false
 if(Test-Path -LiteralPath $Inno){& $Inno "/DReleaseRoot=$outputRoot" "/DAppVersion=$version" (Join-Path $PSScriptRoot 'installer\Gitstar.iss');if($LASTEXITCODE -ne 0){throw 'Installer build failed'};$installerBuilt=$true}
-else {Write-Warning 'ISCC unavailable; ZIP is built, installer script retained.'}
+else {Write-Warning 'ISCC unavailable; portable EXE is built, installer script retained.'}
 $outputBoundary=[IO.Path]::GetFullPath($outputRoot).TrimEnd('\')+'\'
+$obsoleteZip=[IO.Path]::GetFullPath((Join-Path $outputRoot 'Gitstar-win-x64.zip'))
+if(Test-Path -LiteralPath $obsoleteZip){
+  if(-not $obsoleteZip.StartsWith($outputBoundary,[StringComparison]::OrdinalIgnoreCase)){throw 'ZIP cleanup path escaped output directory'}
+  $zipItem=Get-Item -LiteralPath $obsoleteZip -Force
+  if($zipItem.PSIsContainer -or ($zipItem.Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Obsolete ZIP is not a regular file'}
+  Remove-Item -LiteralPath $obsoleteZip -Force
+}
 $legacyFolder=[IO.Path]::GetFullPath((Join-Path $outputRoot 'Gitstar-win-x64'))
 if(Test-Path -LiteralPath $legacyFolder){
   if(-not $legacyFolder.StartsWith($outputBoundary,[StringComparison]::OrdinalIgnoreCase)){throw 'Legacy folder escaped output directory'}
@@ -58,7 +64,7 @@ foreach($oldRelease in Get-ChildItem -LiteralPath $outputRoot){
     if($oldRelease.PSIsContainer){Remove-Item -LiteralPath $oldPath -Recurse -Force}else{Remove-Item -LiteralPath $oldPath -Force}
   }
 }
-$hashFiles=@((Join-Path $outputRoot 'Gitstar.exe'),(Join-Path $outputRoot '使用说明.md'),(Join-Path $outputRoot 'Gitstar-win-x64.zip'))
+$hashFiles=@((Join-Path $outputRoot 'Gitstar.exe'),(Join-Path $outputRoot '使用说明.md'))
 if($installerBuilt){$hashFiles+=(Join-Path $outputRoot 'Gitstar-setup.exe')}
 Get-Item -LiteralPath $hashFiles | ForEach-Object {$releaseHash=Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256; "$($releaseHash.Hash)  $($_.Name)"} | Set-Content (Join-Path $outputRoot 'SHA256SUMS.txt') -Encoding UTF8
 & (Join-Path $PSScriptRoot 'export-source.ps1') -ProjectRoot $projectRoot -SourceRoot $SourceRoot
