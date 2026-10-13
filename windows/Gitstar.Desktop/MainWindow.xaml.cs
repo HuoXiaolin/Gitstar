@@ -41,6 +41,7 @@ public partial class MainWindow : Window
     private bool localPage,exit,ready;
     private bool notificationLocal=true;
     private bool syncingGroups;
+    private string? automaticCheckId;
     private DateTimeOffset? lastAttempt;
     private string CacheKey=>"cache/"+(settings.Account.Length>0?settings.Account:"guest");
     private string OperationsKey=>"operations/"+(settings.Account.Length>0?settings.Account:"guest");
@@ -61,7 +62,7 @@ public partial class MainWindow : Window
         menu.Items.Add("设置",null,(_,_)=>Dispatcher.Invoke(()=>Settings_Click(this,new RoutedEventArgs())));
         menu.Items.Add("彻底退出",null,(_,_)=>Dispatcher.Invoke(RequestExit));tray.ContextMenuStrip=menu;
         Closing+=OnClosing;
-        timer.Tick+=async(_,_)=>{if(!refreshing && !quitting && !clearingCache && RefreshSchedule.IsDue(settings.RefreshIntervalHours,settings.LastCheck,lastAttempt,DateTimeOffset.UtcNow))await RefreshAsync(true);};
+        timer.Tick+=async(_,_)=>{if(RefreshSchedule.CanStartAutomatic(refreshing,busy,batchPublishing,quitting,clearingCache) && RefreshSchedule.IsDue(settings.RefreshIntervalHours,settings.LastCheck,lastAttempt,DateTimeOffset.UtcNow))await RefreshAsync(true);};
         Loaded+=async(_,_)=>{
             ready=true;PlanUpdates();Display();
             if(smoke)return;
@@ -166,10 +167,11 @@ public partial class MainWindow : Window
     private async Task RefreshAsync(bool background=false,bool matchedOnly=false)
     {
         if(refreshing||quitting)return;
+        if(background&&!RefreshSchedule.CanStartAutomatic(refreshing,busy,batchPublishing,quitting,clearingCache))return;
         if(matchedOnly && settings.Bindings.Count==0){model.Status="尚未关联本机软件，请先使用自动匹配 / 批量关联。";return;}
         if(api.Token.Length==0 && settings.ExtraRepositories.Count==0 && settings.Bindings.Count==0 && settings.SelfRepository.Length==0){await ScanInstalledAsync(true);if(exit)return;if(!background)model.Status="已重新扫描本机软件；登录 GitHub 或添加仓库后可检查新版本。";return;}
         if(!matchedOnly)lastAttempt=DateTimeOffset.UtcNow;
-        await Execute("检查",matchedOnly?"检查已关联软件":"同步收藏与版本",async ct=>{
+        await Execute("检查",matchedOnly?"检查已关联软件":background?"后台自动检查关注项目":"手动检查关注项目",async ct=>{
             var clock=Stopwatch.StartNew();var warnings=new List<string>();model.Status=matchedOnly?"正在复检已关联软件…":"正在重新检测本机版本…";if(matchedOnly)await ScanMatchedAsync();else await ScanInstalledAsync(true);if(exit)return;ct.ThrowIfCancellationRequested();PlanUpdates();Display();model.Status=matchedOnly?"正在检查已关联仓库…":"正在同步收藏和分组…";
             if(!matchedOnly && api.Token.Length>0) {
                 repositories=await api.Stars(ct);
@@ -200,17 +202,18 @@ public partial class MainWindow : Window
     private async Task Execute(string kind,string description,Func<CancellationToken,Task> work,bool background=false,string[]? resources=null,TransferState? transfer=null)
     {
         if(quitting)return;
+        if((kind is "自动发布" or "发布" or "源码上传") && automaticCheckId is {} scanning)taskCoordinator.Pause(scanning);
         var op=new Operation {Kind=kind,Description=description,State="等待执行"};operations.Add(op);
         using var run=taskCoordinator.Start(op.Id,resources??["cache"]);if(transfer!=null)taskTransfers[op.Id]=transfer;SaveOperations();
         var previous=currentOperation.Value;currentOperation.Value=op;var started=false;
-        if(kind=="检查")refreshing=true;
+        if(kind=="检查"){refreshing=true;if(background)automaticCheckId=op.Id;}
         try {await run.WaitAsync();started=true;op.State="执行中";SaveOperations();var runningStatus=kind+" · "+description+" · 正在处理…";model.Status=runningStatus;await work(run.Token);op.State=op.Results.Any(r=>r.StartsWith("待处理"))?(op.Results.Any(r=>r.StartsWith("成功"))?"部分完成，请核实待处理项":"未完成，请核实待处理项"):"完成";if(model.Status==runningStatus)model.Status=description+" · "+op.State;}        catch(OperationCanceledException){
             var remote=kind is "自动发布" or "发布" or "发布包管理" or "源码上传" or "Star管理" or "分组管理" or "批量管理" or "项目管理";
             op.State=!started?"已"+run.StopReason+"等待":remote?"已"+run.StopReason+" · 远程结果待核实":run.StopReason=="取消"?"已取消":kind=="下载"?"已暂停（下载重试会重新开始）":"已暂停";
             if(run.StopReason=="取消" && kind=="下载" && op.File.EndsWith(".partial",StringComparison.OrdinalIgnoreCase)){try{if(File.Exists(op.File))File.Delete(op.File);}catch(Exception ex)when(ex is IOException or UnauthorizedAccessException){op.Results.Add("临时文件清理待处理："+ex.Message);}}
             model.Status=description+" · "+op.State;
         }        catch(Exception e){op.State=kind is "自动发布" or "发布" or "发布包管理" or "源码上传" or "Star管理" or "分组管理" or "批量管理" or "项目管理"?"结果待核实："+e.Message:"失败："+e.Message;model.Status=e.Message;if(!background)DialogMessage.Show(this,e.Message,"操作未完成",MessageBoxButton.OK,MessageBoxImage.Warning);}
-        finally{if(started && (kind is "Star管理" or "分组管理" or "批量管理" or "项目管理")){Save();SaveCache();RebuildGroups();PlanUpdates();Display();}op.Updated=DateTimeOffset.Now;taskTransfers.Remove(op.Id);SaveOperations();currentOperation.Value=previous;if(kind=="检查")refreshing=false;run.Dispose();if(settings.KeepLatestPackages && !quitting && !exit)_=Dispatcher.BeginInvoke(async()=>await CleanupOldPackages());}
+        finally{if(started && (kind is "Star管理" or "分组管理" or "批量管理" or "项目管理")){Save();SaveCache();RebuildGroups();PlanUpdates();Display();}op.Updated=DateTimeOffset.Now;taskTransfers.Remove(op.Id);SaveOperations();currentOperation.Value=previous;if(kind=="检查"){refreshing=false;if(automaticCheckId==op.Id){automaticCheckId=null;if(run.Token.IsCancellationRequested)lastAttempt=null;}}run.Dispose();if(settings.KeepLatestPackages && !quitting && !exit)_=Dispatcher.BeginInvoke(async()=>await CleanupOldPackages());}
     }
     private async void Login_Click(object sender,RoutedEventArgs e)
     {
@@ -243,7 +246,7 @@ public partial class MainWindow : Window
                 var authorization=await api.DeviceAuthorization(settings.ClientId,(c,u)=>{code.Text=c;verificationUrl=u;try{Clipboard.SetText(c);}catch(System.Runtime.InteropServices.ExternalException){code.ToolTip="自动复制不可用，请手动复制授权码。";}WindowsServices.Open(verificationUrl);},loginCancel.Token);
                 var previous=api.Credentials;api.SetCredentials(authorization);string name;try{name=await api.Account(loginCancel.Token);}catch{api.SetCredentials(previous);throw;}var old=settings;
                 if(old.Account.Length>0)store.Set("profile/"+old.Account,old);settings=name==old.Account?old:store.Get("profile/"+name,new Settings());settings.Account=name;settings.ClientId=old.ClientId;settings.Proxy=old.Proxy;settings.DirectConnection=old.DirectConnection;settings.Startup=old.Startup;settings.Dark=old.Dark;
-                CredentialStorage.Save(store,authorization);Save();SwitchOperations();LoadCache();RebuildGroups();AccountLabel();f.Close();await RefreshAsync();
+                CredentialStorage.Save(store,authorization);Save();SwitchOperations();LoadCache();RebuildGroups();AccountLabel();f.Close();if(projectsPage)await SyncProjects();else await RefreshAsync(matchedOnly:localPage);
             }catch(OperationCanceledException){}catch(Exception ex){code.Text=ex.Message;}
         };f.ShowDialog();
     }

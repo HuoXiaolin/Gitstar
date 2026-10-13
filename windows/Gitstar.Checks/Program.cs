@@ -8,6 +8,12 @@ using System.Security.Cryptography;
 using System.IO.Compression;
 
 try {
+if(args.FirstOrDefault()=="--inspect-git-auth"){
+    var repository=args[1];GitHubClient.Validate(repository);using var db=new LocalStore();using var client=new GitHubClient(db.Get("settings",new Settings()));client.Token=CredentialStorage.Load(db).AccessToken;if(client.Token.Length==0)throw new IOException("应用没有已保存的登录授权。");
+    var project=await client.Project(repository,CancellationToken.None);var git=new GitWorkspace(client.Token);var start=git.CreateStartInfo(Environment.CurrentDirectory,"ls-remote","https://github.com/"+repository+".git","refs/heads/"+project.DefaultBranch);start.Environment["GIT_ASKPASS"]=args[2];
+    using var process=System.Diagnostics.Process.Start(start)!;var output=process.StandardOutput.ReadToEndAsync();var errors=process.StandardError.ReadToEndAsync();using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(30));try{await process.WaitForExitAsync(timeout.Token);}catch{try{process.Kill(true);}catch{}throw;}
+    var gitOutput=await output;await errors;Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new{Project=project.FullName,project.Private,project.CanPush,GitReadSucceeded=process.ExitCode==0,BranchConfirmed=gitOutput.Contains("refs/heads/"+project.DefaultBranch)}));return;
+}
 if(args.FirstOrDefault()=="--inspect-release"){
     using var db=new LocalStore();using var client=new GitHubClient(db.Get("settings",new Settings()));client.Token=CredentialStorage.Load(db).AccessToken;if(client.Token.Length==0)throw new IOException("请先在 Gitstar 登录。");
     var release=await client.ReleaseDetails(args[1],long.Parse(args[2]),CancellationToken.None);
@@ -88,6 +94,9 @@ Check(!RefreshSchedule.IsDue(24,scheduleNow.AddHours(-23),null,scheduleNow) && R
 Check(!RefreshSchedule.IsDue(0,null,null,scheduleNow),"manual-only disables startup and scheduled refresh");
 Check(RefreshSchedule.IsDue(6,scheduleNow.AddHours(-7),null,scheduleNow) && !RefreshSchedule.IsDue(12,scheduleNow.AddHours(-7),null,scheduleNow),"selected frequency controls refresh");
 Check(!RefreshSchedule.IsDue(1,null,scheduleNow.AddMinutes(-30),scheduleNow) && RefreshSchedule.IsDue(1,null,scheduleNow.AddHours(-1),scheduleNow),"failed checks use bounded retry after wake");
+Check(RefreshSchedule.CanStartAutomatic(false,false,false,false,false),"automatic scan remains available when application is idle");
+Check(!RefreshSchedule.CanStartAutomatic(false,true,false,false,false)&&!RefreshSchedule.CanStartAutomatic(false,false,true,false,false),"automatic scans defer during active tasks and batch publishing without serializing project workers");
+Check(!RefreshSchedule.CanStartAutomatic(true,false,false,false,false)&&!RefreshSchedule.CanStartAutomatic(false,false,false,true,false)&&!RefreshSchedule.CanStartAutomatic(false,false,false,false,true),"automatic scan does not overlap refresh shutdown or cache cleanup");
 Check(ReleasePreview.Create("2026-09-29 · v2.7.0","v2.7.0")=="","duplicate version and date preview hidden");
 Check(ReleasePreview.Create("# v2.7.0\n## What's Changed\n- **修复**窗口恢复\n- 新增[搜索](https://example.test)\n- 改善性能\n- 第四项","v2.7.0")=="修复窗口恢复\n新增搜索\n改善性能","preview skips metadata and keeps three meaningful changes");
 Check(ReleasePreview.Create("```sh\ninstall tool\n```\n![badge](https://example.test/badge)\n- 修复崩溃","v1.0")=="修复崩溃","preview omits code blocks and image markup");

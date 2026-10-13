@@ -51,5 +51,11 @@ static class WorkflowChecks
         var server=Deny();string denied="";try{await git.Run(folder,timeout.Token,"-c","http.proxy=","ls-remote",$"http://127.0.0.1:{port}/repo.git");}catch(IOException ex){denied=ex.Message;}finally{timeout.Cancel();await server;listener.Stop();}
         check((denied.Contains("terminal prompts disabled")||denied.Contains("unable to get password from user"))&&!denied.Contains("gitstar-test-helper-was-run"),"unauthorized Git request fails promptly without invoking configured external login helper");
         check((await git.Run(folder,CancellationToken.None,"config","--local","--get","credential.helper")).Contains("gitstar-test-helper-was-run"),"silent Git policy leaves repository and global credential configuration unchanged");
+        var askpass=Path.Combine(folder,"app-askpass.cmd");await File.WriteAllTextAsync(askpass,"@echo off\r\necho fixture-answer\r\n");
+        var authenticated=new GitWorkspace("fixture-token");var start=authenticated.CreateStartInfo(folder,"credential","fill");start.RedirectStandardInput=true;start.Environment["GIT_ASKPASS"]=askpass;
+        using(var process=System.Diagnostics.Process.Start(start)!){var output=process.StandardOutput.ReadToEndAsync();var error=process.StandardError.ReadToEndAsync();await process.StandardInput.WriteAsync("protocol=https\nhost=github.com\n\n");process.StandardInput.Close();using var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(8));await process.WaitForExitAsync(deadline.Token);var actual=await output;var diagnostic=await error;
+            check(process.ExitCode==0&&actual.Contains("password=fixture-answer")&&!diagnostic.Contains("gitstar-test-helper-was-run"),"saved app authentication can use its own askpass while external credential managers stay disabled");
+        }
+        check(start.Environment["GCM_INTERACTIVE"]=="0"&&start.Environment["GIT_TERMINAL_PROMPT"]=="0","allowing app credential delivery does not enable external GUI or terminal login");
     }
 }

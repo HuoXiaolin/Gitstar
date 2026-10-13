@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
+[assembly:System.Runtime.CompilerServices.InternalsVisibleTo("Gitstar.Checks")]
 namespace Gitstar.Desktop;
 
 public static partial class WindowsServices
@@ -87,15 +88,20 @@ public sealed partial class GitWorkspace
 {
     private readonly string token;
     public GitWorkspace(string token)=>this.token=token;
-    public async Task<string> Run(string folder,CancellationToken ct,params string[] args)
+    internal ProcessStartInfo CreateStartInfo(string folder,params string[] args)
     {
         var psi=new ProcessStartInfo("git") {WorkingDirectory=folder,UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,StandardOutputEncoding=Encoding.UTF8,StandardErrorEncoding=Encoding.UTF8};
-        foreach(var option in new[]{"-c","core.quotepath=false","-c","i18n.logOutputEncoding=utf-8","-c","credential.helper=","-c","credential.interactive=false","-c","core.askPass="})psi.ArgumentList.Add(option);
+        foreach(var option in new[]{"-c","core.quotepath=false","-c","i18n.logOutputEncoding=utf-8","-c","credential.helper=","-c","credential.interactive="+(token.Length>0?"true":"false"),"-c","core.askPass="})psi.ArgumentList.Add(option);
         foreach(var arg in args)psi.ArgumentList.Add(arg);
         psi.Environment["GIT_TERMINAL_PROMPT"]="0";
         psi.Environment["GCM_INTERACTIVE"]="0";
         foreach(var key in new[]{"GIT_ASKPASS","SSH_ASKPASS","GITSTAR_ASKPASS_MODE","GITSTAR_OAUTH_TOKEN"})psi.Environment.Remove(key);
         if(token.Length>0) {psi.Environment["GIT_ASKPASS"]=Environment.ProcessPath!;psi.Environment["GITSTAR_ASKPASS_MODE"]="1";psi.Environment["GITSTAR_OAUTH_TOKEN"]=token;}
+        return psi;
+    }
+    public async Task<string> Run(string folder,CancellationToken ct,params string[] args)
+    {
+        var psi=CreateStartInfo(folder,args);
         using var process=Process.Start(psi)??throw new IOException("无法启动 Git，请先安装 Git for Windows。");
         var stdout=process.StandardOutput.ReadToEndAsync(ct); var stderr=process.StandardError.ReadToEndAsync(ct);
         try {await process.WaitForExitAsync(ct);} catch {try{process.Kill(true);}catch{}throw;}
