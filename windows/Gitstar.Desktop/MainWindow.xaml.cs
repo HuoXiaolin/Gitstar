@@ -470,39 +470,48 @@ public partial class MainWindow : Window
     }
     private void PublishDialog(ManagedProject? project=null,ProjectVersion? version=null,string? previewPath=null)
     {
-        var f=new Form(this,"发布版本",850,740);f.Label("目标项目："+(project?.FullName??"在高级操作中填写"));var tag=f.Text("版本号",SuggestedReleaseTag(project,version));f.Label("支持 1.0.0.0；安装包文件名无需包含版本号。临时草稿可在这里修正版本标签。");var beta=f.Check("测试版",version?.Prerelease??false);var notes=f.Text("更新日志（Markdown）",version?.Body??"",true);var assets=f.Text("安装包", "",true);assets.IsReadOnly=true;assets.MinHeight=70;
+        var f=new Form(this,"更新发布版本",850,800);f.Label("目标项目："+(project?.FullName??"在高级操作中填写"));var config=project==null?null:SuggestedAutomation(project);var releaseFolder=f.Text("本地发行目录",config?.ReleaseFolder??"");releaseFolder.IsReadOnly=true;var tag=f.Text("版本号","");f.Label("留空读取应用文件的版本号；相同版本默认跳过；确认强制覆盖后更新附件，填写新版本号则发布新版本。");var beta=f.Check("测试版",version?.Prerelease??false);var notes=f.Text("更新日志（Markdown）",version?.Body??"",true);var assets=f.Text("安装包",config==null?"":string.Join(Environment.NewLine,ManualReleaseRules.Assets(config.ReleaseFolder,config.AssetPatterns)),true);assets.IsReadOnly=true;assets.MinHeight=70;
+        var versionHint=new TextBlock{TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,10),FontSize=12};versionHint.SetResourceReference(TextBlock.ForegroundProperty,"Muted");f.Fields.Children.Add(versionHint);
+        f.Fields.Children.Remove(versionHint);f.Fields.Children.Insert(f.Fields.Children.IndexOf(beta),versionHint);notes.MinHeight=70;notes.Height=70;assets.Height=90;
+        void ReadVersionHint(){try{var resolved=ManualReleaseRules.Version(tag.Text,assets.Text.Split('\n').Select(p=>p.Trim()).Where(p=>p.Length>0),releaseFolder.Text,project?.Name??"");versionHint.Text=(tag.Text.Trim().Length==0?"应用文件版本：":"使用填写版本：")+resolved;}catch(IOException ex){versionHint.Text=ex.Message;}}
+        assets.TextChanged+=(_,_)=>ReadVersionHint();tag.TextChanged+=(_,_)=>ReadVersionHint();ReadVersionHint();
         var advanced=f.Advanced();TextBox repo=null!,commit=null!,id=null!;f.Into(advanced,()=>{repo=f.Text("目标仓库",project?.FullName??"");commit=f.Text("提交 SHA（自动读取，可手动指定）",project!=null&&projectStates.TryGetValue(project.FullName,out var localState)?localState.Commit:"");id=f.Text("草稿 ID（继续发布时自动填写）",version?.Draft==true?version.Id.ToString():"");});repo.IsReadOnly=project!=null;if(version?.Draft==true)id.IsReadOnly=true;
         var readiness=new TextBlock{Text=version?.Draft==true?"继续已有草稿，上传后核对并发布。":"将自动读取本地或远程默认分支提交。",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,5,0,8),FontSize=12};readiness.SetResourceReference(TextBlock.ForegroundProperty,"Muted");f.Fields.Children.Add(readiness);
         Button? publishButton=null;var reading=previewPath==null&&project!=null&&version?.Draft!=true;
         if(reading)f.ContentRendered+=async(_,_)=>{try{var workspace=Workspace(project!);if(workspace!=null&&Directory.Exists(workspace.Folder)){var local=await new GitWorkspace("").Inspect(workspace.Folder,CancellationToken.None);if(!ProjectRules.MatchesRemote(local.Remote,project!.FullName))throw new IOException("本地 origin 与项目不一致，请先关联正确的源码目录。");commit.Text=local.Commit;}else commit.Text=await api.BranchCommit(project!.FullName,project.DefaultBranch,CancellationToken.None);readiness.Text=commit.Text.Length>0?"提交已读取；发布前会验证已上传到 GitHub。":"源码还没有提交，请先上传更新。";}catch(Exception ex){commit.Text="";readiness.Text=ex.Message+" 可在高级操作指定提交。";}finally{reading=false;if(publishButton!=null)publishButton.IsEnabled=true;}};
-        f.Action("选择安装包",()=>{var d=new OpenFileDialog {Multiselect=true,Filter="安装包|*.exe;*.msi;*.zip;*.apk;*.aab|所有文件|*.*"};if(d.ShowDialog(f)==true)assets.Text=string.Join(Environment.NewLine,d.FileNames);return Task.CompletedTask;});
+        f.Action("选择安装包",()=>{var d=new OpenFileDialog {Multiselect=true,Filter="安装包|*.exe;*.msi;*.zip;*.apk;*.aab|所有文件|*.*"};if(project!=null){var releaseFolder=SuggestedAutomation(project).ReleaseFolder;if(Directory.Exists(releaseFolder))d.InitialDirectory=releaseFolder;}if(d.ShowDialog(f)==true)assets.Text=string.Join(Environment.NewLine,d.FileNames);return Task.CompletedTask;});
         var openRelease=f.Action("查看仓库",()=>{var r=Rules.RepositoryName(repo.Text);GitHubClient.Validate(r);WindowsServices.Open("https://github.com/"+r+"/releases");return Task.CompletedTask;});
         f.Buttons.Children.Remove(openRelease);advanced.Children.Add(openRelease);
         async Task Publish(bool releaseNow){
             if(reading)throw new IOException("正在读取提交，请稍候。");
             if(api.Token.Length==0)throw new IOException("请先登录 GitHub。");var r=Rules.RepositoryName(repo.Text);GitHubClient.Validate(r);
             var paths=assets.Text.Split('\n').Select(x=>x.Trim()).Where(x=>x.Length>0).ToList();if(paths.Any(p=>!File.Exists(p)))throw new IOException("有安装包路径不存在。");if(paths.Select(Path.GetFileName).Distinct(StringComparer.OrdinalIgnoreCase).Count()!=paths.Count)throw new IOException("安装包文件名重复。");
-            if(!ReleaseRules.ValidTag(tag.Text.Trim()))throw new IOException("请填写有效版本号，例如 1.0.0.0，不能使用草稿临时标签。");
-            var resume=long.TryParse(id.Text,out var existing);if(!resume && !System.Text.RegularExpressions.Regex.IsMatch(commit.Text,@"^[a-fA-F0-9]{40}$"))throw new IOException("请输入已推送的完整 commit SHA。");
-            var t=tag.Text.Trim();var sha=commit.Text.Trim();var body=notes.Text;var pre=beta.IsChecked==true;f.Close();
+            if(paths.Count==0)throw new IOException("请选择需要上传的安装包。");
+            var resolvedTag=ManualReleaseRules.Version(tag.Text,paths,releaseFolder.Text,project?.Name??r.Split('/').Last());
+            var resume=long.TryParse(id.Text,out var existing);
+            var t=resolvedTag;var sha=commit.Text.Trim();var body=notes.Text;var pre=beta.IsChecked==true;await api.EnsureFreshToken(CancellationToken.None);var found=await api.AutomationRelease(r,t,"",pre,CancellationToken.None);var overwrite=false;
+            if(found.Release is {} prior){
+                var confirmation=new Form(f,"版本已存在",650,530);confirmation.Label(r+" · "+prior.GetProperty("tag_name").GetString()+" 已存在。默认跳过上传；强制覆盖会更新所选附件和日志，保留版本标签。");var files=confirmation.Text("将上传的附件",string.Join(Environment.NewLine,paths.Select(p=>Path.GetFileName(p)+" · "+new FileInfo(p).Length.ToString("N0")+" 字节")),true);files.IsReadOnly=true;
+                confirmation.Action("强制覆盖",()=>{overwrite=true;confirmation.Close();return Task.CompletedTask;},true);confirmation.Action("跳过",()=>{confirmation.Close();return Task.CompletedTask;});confirmation.ShowDialog();if(!overwrite){readiness.Text="同版本已存在，已跳过上传。";return;}
+            }
+            f.Close();
             await Execute("发布",r+" · "+t,async ct=>{
                 var op=currentOperation.Value!;op.Repository=r;op.Tag=t;SaveOperations();
                 var stage=Path.Combine(store.Root,"release-staging",Guid.NewGuid().ToString("N"));try{
                 var packages=await ReleaseAssetFiles.Stage(paths,stage,ct);
-                JsonElement draft;
-                if(resume){draft=await api.ReleaseDetails(r,existing,ct);RememberProjectVersion(r,GitHubClient.ParseProjectVersion(draft));if(!draft.GetProperty("draft").GetBoolean())throw new IOException("此版本已经发布，界面状态已更新，可点击“管理”查看。");await api.EditDraft(r,existing,t,body,pre,ct,t);draft=await api.ReleaseDetails(r,existing,ct);RememberProjectVersion(r,GitHubClient.ParseProjectVersion(draft));}
-                else {await api.VerifyCommit(r,sha,ct);draft=await api.CreateDraft(r,t,sha,body,pre,ct);}
+                var draft=await api.PrepareManualRelease(r,t,sha,body,pre,resume?existing:null,ct,overwrite);RememberProjectVersion(r,GitHubClient.ParseProjectVersion(draft));
                 var releaseId=draft.GetProperty("id").GetInt64();op.RemoteId=releaseId;SaveOperations();
                 foreach(var package in packages){model.Status="同步安装包："+package.OriginalName;await api.SyncReleaseAsset(r,releaseId,package.Path,package.Name,package.Size,package.Sha,ct);}
                 var verified=await api.ReleaseDetails(r,releaseId,ct);var assetNames=string.Join("\n",verified.GetProperty("assets").EnumerateArray().Select(a=>$"{a.GetProperty("name").GetString()} · {a.GetProperty("size").GetInt64()/1024.0/1024:F1} MB"));
-                if(releaseNow)await api.Publish(r,releaseId,ct);
+                if(!draft.GetProperty("draft").GetBoolean()){await api.UpdateAutomationRelease(r,releaseId,draft.GetProperty("tag_name").GetString()!,sha,body.Length>0?body:draft.GetProperty("body").GetString()??"",pre,ct);}
+                else if(releaseNow)await api.Publish(r,releaseId,ct);
                 var latest=await api.ProjectVersionDetails(r,releaseId,ct);RememberProjectVersion(r,latest);
                 if(releaseNow&&latest.Draft)throw new IOException("GitHub 尚未确认版本已发布，草稿记录已更新，可点击“核实状态”继续核实。");
                 model.Status=latest.Draft?$"草稿已保留，Release ID：{releaseId}。":"版本已发布："+r+" · "+latest.Tag;
                 }finally{try{Directory.Delete(stage,true);}catch(IOException){}catch(UnauthorizedAccessException){}}
             },resources:["repo:"+r]);
         }
-        publishButton=f.Action("发布版本",()=>Publish(true),true);publishButton.IsEnabled=!reading;var saveDraft=f.Action("保存为草稿",()=>Publish(false));f.Buttons.Children.Remove(saveDraft);advanced.Children.Add(saveDraft);if(previewPath!=null){tag.Text=version==null?"1.0.0.0":SuggestedReleaseTag(project,version);notes.Text="简化项目创建、目录关联和源码上传流程。";assets.Text="Gitstar.exe\nGitstar-setup.exe";File.WriteAllText(Path.ChangeExtension(previewPath,".version.json"),JsonSerializer.Serialize(new{Tag=tag.Text,Editable=!tag.IsReadOnly,DraftId=id.Text}));f.RenderPreview(previewPath);}f.ShowDialog();
+        publishButton=f.Action("更新",()=>Publish(true),true);publishButton.IsEnabled=!reading;var saveDraft=f.Action("保存为草稿",()=>Publish(false));f.Buttons.Children.Remove(saveDraft);advanced.Children.Add(saveDraft);if(previewPath!=null){notes.Text="优化发布流程，支持同版本安装包覆盖更新。";versionHint.Text="应用文件版本：1.0.0.0";File.WriteAllText(Path.ChangeExtension(previewPath,".version.json"),JsonSerializer.Serialize(new{Tag=tag.Text,Directory=releaseFolder.Text,Editable=!tag.IsReadOnly,DraftId=id.Text}));f.RenderPreview(previewPath);}f.ShowDialog();
     }
     public void Reopen(){Show();WindowState=WindowState.Normal;Activate();}
     private void OnClosing(object? sender,CancelEventArgs e) {if(exit)return;e.Cancel=true;Hide();model.Status="Gitstar 已收起到托盘，后台任务继续运行。";}
@@ -528,6 +537,7 @@ public partial class MainWindow : Window
             if(progressPreview){model.Cards[0].Transfer.Stage("下载中 0%",false);model.Cards[0].Transfer.Downloaded(27000000,50000000);if(model.Cards.Count>1)model.Cards[1].Transfer.Stage("安装器运行中");var before=model.Cards[0].Transfer;Page(!local);Page(local);File.WriteAllText(Path.ChangeExtension(path,".progress.json"),JsonSerializer.Serialize(new{ProgressPreserved=ReferenceEquals(before,model.Cards[0].Transfer),Label=model.Cards[0].Transfer.Label,CountCaption=model.CountCaption,Count=model.Count},new JsonSerializerOptions{WriteIndented=true}));}
         }
         if(projectsPreview){api.Token="offline-fixture";settings.Account="example";AccountLabel();settings.Dark=dark;ApplyTheme();myProjects=[new("example/Gitstar","跨设备 GitHub 项目管理与软件更新助手",false,"main",true,true,false,DateTimeOffset.Now),new("example/NotesKit","轻量笔记与知识库工具",true,"main",true,true,false,DateTimeOffset.Now.AddDays(-1)),new("team/CloudBridge","参与协作的服务连接组件",false,"develop",true,false,false,DateTimeOffset.Now.AddDays(-2))];projectAutomation["example/Gitstar"]=new("example/Gitstar",@"D:\Agant\Github_Source\Gitstar",@"D:\Agant\Github_Releases\Gitstar","windows/Directory.Build.props","main");projectsSynced=DateTimeOffset.Now;projectWorkspaces=[new("example/Gitstar",@"D:\Projects\Gitstar","main")];projectStates["example/Gitstar"]=new(@"D:\Projects\Gitstar","main","https://github.com/example/Gitstar.git","8a72bd918e23f41c456789012345678901234567",[new(" M","src/MainWindow.xaml"),new("??","docs/Gitstar使用说明.md"),new("??","docs/Windows版本设计.md"),new("??","docs/产品与技术设计.md")],"2 files changed");projectVersions["example/Gitstar"]=[new(2,"v0.2.0-beta.1","工作区管理升级","新增项目工作台、源码变更选择与草稿管理。",true,true,2,DateTimeOffset.Now,""),new(1,"v0.1.1","正式版","优化扫描速度与本机更新体验。",false,false,2,DateTimeOffset.Now.AddDays(-2),"")];Projects_Click(this,new());}
+        if(projectsPreview&&Environment.GetCommandLineArgs().Contains("--release-directory")){LinkReleaseDirectoryDialog(myProjects.First(),path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(projectsPreview&&Environment.GetCommandLineArgs().Contains("--published-state")){
             var repo="example/Gitstar";var confirmed=projectVersions[repo][0] with{Tag="1.0.0.0",Draft=false,Prerelease=false,AssetCount=4};RememberProjectVersion(repo,confirmed);
             using var reopened=new LocalStore(store.Root);var persisted=reopened.Get(ProjectsKey+"/versions",new Dictionary<string,List<ProjectVersion>>())[repo].Single(version=>version.Id==confirmed.Id);

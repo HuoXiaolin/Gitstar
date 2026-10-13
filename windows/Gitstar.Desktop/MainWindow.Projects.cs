@@ -122,14 +122,22 @@ public partial class MainWindow
             }else source.Children.Add(ProjectText("已关联 · 点击检查变更读取当前本地状态",13,true));
         }
         var sourceActions=new WrapPanel();source.Children.Add(sourceActions);
-        ProjectAction(sourceActions,"上传更新",()=>ProjectDialog(()=>SourceDialog(p)),true,writable);
+        ProjectAction(sourceActions,"更新",()=>ProjectDialog(()=>SourceDialog(p)),true,writable);
         ProjectAction(sourceActions,"检查变更",()=>InspectProject(p),enabled:workspace!=null);
         ProjectAction(sourceActions,"切换 / 关联目录",()=>ProjectDialog(()=>LinkProjectDialog(p)));
         ProjectAction(sourceActions,"克隆项目",()=>ProjectDialog(()=>CloneProjectDialog(p)),enabled:api.Token.Length>0);
         if(workspace!=null){ProjectAction(sourceActions,"打开目录",()=>ProjectDialog(()=>{if(!Directory.Exists(workspace.Folder))throw new IOException("关联目录已不存在。");WindowsServices.Open(workspace.Folder);}));ProjectAction(sourceActions,"解除关联",()=>ProjectDialog(()=>{projectWorkspaces.RemoveAll(w=>w.Repository==p.FullName);projectStates.Remove(p.FullName);SaveProjects();RenderProjectDetails(p);}));}
-        var versions=ProjectSection("版本与安装包");var versionActions=new WrapPanel();versions.Children.Add(versionActions);
-        if(projectVersions.ContainsKey(p.FullName))versions.Children.Add(ProjectText("上次同步结果 · 点击“同步版本”核实 GitHub 上的当前版本；“同步项目”也会刷新当前项目的版本。",11,true));
-        ProjectAction(versionActions,"创建发布版本",()=>ProjectDialog(()=>PublishDialog(p)),true,writable);ProjectAction(versionActions,"同步版本",()=>SyncProjectVersions(p),enabled:api.Token.Length>0);ProjectAction(versionActions,"打开 Releases",()=>ProjectDialog(()=>WindowsServices.Open("https://github.com/"+p.FullName+"/releases")));
+        foreach(var button in sourceActions.Children.OfType<Button>()){button.Width=126;button.SetResourceReference(StyleProperty,typeof(Button));}
+        var versions=ProjectSection("版本与安装包");var releaseConfig=projectAutomation.GetValueOrDefault(p.FullName);
+        versions.Children.Add(ProjectText(releaseConfig==null?"尚未关联本地发行目录。":"本地发行目录："+releaseConfig.ReleaseFolder+(Directory.Exists(releaseConfig.ReleaseFolder)?"":"（目录不存在，请重新关联）"),12,true));
+        if(projectVersions.ContainsKey(p.FullName))versions.Children.Add(ProjectText("上次同步结果 · 点击“同步版本”核实 GitHub 上的当前版本。",11,true));
+        var versionActions=new WrapPanel();versions.Children.Add(versionActions);
+        ProjectAction(versionActions,"更新",()=>ProjectDialog(()=>PublishDialog(p)),true,writable);
+        ProjectAction(versionActions,"同步版本",()=>SyncProjectVersions(p),enabled:api.Token.Length>0);
+        ProjectAction(versionActions,"切换 / 关联目录",()=>ProjectDialog(()=>LinkReleaseDirectoryDialog(p)),enabled:!automaticPublishing.ContainsKey(p.FullName));
+        ProjectAction(versionActions,"打开 Releases",()=>ProjectDialog(()=>WindowsServices.Open("https://github.com/"+p.FullName+"/releases")));
+        if(releaseConfig!=null)ProjectAction(versionActions,"打开目录",()=>ProjectDialog(()=>{if(!Directory.Exists(releaseConfig.ReleaseFolder))throw new IOException("发行目录不存在，请重新关联。");WindowsServices.Open(releaseConfig.ReleaseFolder);}));
+        foreach(var button in versionActions.Children.OfType<Button>()){button.Width=126;button.SetResourceReference(StyleProperty,typeof(Button));}
         if(!projectVersions.TryGetValue(p.FullName,out var history))versions.Children.Add(ProjectText("同步后查看最近 30 个正式版、测试版及草稿。",12,true));
         else if(history.Count==0)versions.Children.Add(ProjectText("此项目还没有发布版本。",12,true));
         else foreach(var version in history){

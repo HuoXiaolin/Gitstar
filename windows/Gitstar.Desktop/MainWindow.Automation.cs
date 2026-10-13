@@ -27,6 +27,20 @@ public partial class MainWindow
         var linked=Workspace(project);var source=linked!=null&&Directory.Exists(linked.Folder)?linked.Folder:Path.Combine(@"D:\Agant\Github_Source",Rules.SafeSegment(project.Name));var release=Path.Combine(@"D:\Agant\Github_Releases",Rules.SafeSegment(project.Name));
         return new(project.FullName,source,release,AutomationRules.VersionFile(source,release,project.Name),Workspace(project)?.Branch??project.DefaultBranch);
     }
+    private void LinkReleaseDirectoryDialog(ManagedProject project,string? previewPath=null)
+    {
+        var config=SuggestedAutomation(project);var key=ProjectsKey;var f=new Form(this,"切换 / 关联发行目录",720,470);f.Label("项目："+project.FullName);
+        var folder=f.Text("本地发行目录",config.ReleaseFolder);f.Label("选择存放安装包的文件夹。保存后，“同步并发布最新”和手动选择安装包都使用此目录；不移动或删除原目录中的文件。");
+        f.Action("选择目录",()=>{var d=new OpenFolderDialog{Title="选择安装包所在的发行目录"};if(Directory.Exists(folder.Text))d.InitialDirectory=folder.Text;if(d.ShowDialog(f)==true)folder.Text=d.FolderName;return Task.CompletedTask;});
+        f.Action("保存关联",()=>{
+            if(string.IsNullOrWhiteSpace(folder.Text))throw new IOException("请选择发行目录。");var path=Path.GetFullPath(folder.Text.Trim());if(!Directory.Exists(path))throw new IOException("发行目录不存在，请重新选择。");
+            if(ProjectsKey!=key)throw new IOException("登录账号已改变，请重新打开目录关联。");if(automaticPublishing.ContainsKey(project.FullName))throw new IOException("本项目正在同步发布，请完成后再切换目录。");
+            var current=SuggestedAutomation(project);var version=current.VersionFile;
+            if(Path.IsPathRooted(version)&&Path.GetFullPath(version).StartsWith(Path.GetFullPath(current.ReleaseFolder).TrimEnd('\\','/')+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))version="";
+            if(version.Length==0)version=AutomationRules.VersionFile(current.SourceFolder,path,project.Name);
+            projectAutomation[project.FullName]=current with{ReleaseFolder=path,VersionFile=version};SaveProjects();RenderProjectDetails(project);model.Status="已关联发行目录："+path;f.Close();return Task.CompletedTask;
+        },true);f.Action("取消",()=>{f.Close();return Task.CompletedTask;});if(previewPath!=null)f.RenderPreview(previewPath);f.ShowDialog();
+    }
     private async Task<bool> InferAutomation(ManagedProject project)
     {
         if(projectAutomation.ContainsKey(project.FullName))return true;var key=ProjectsKey;var config=SuggestedAutomation(project);

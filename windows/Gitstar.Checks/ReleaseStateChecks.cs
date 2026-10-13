@@ -11,6 +11,23 @@ static class ReleaseStateChecks
     private static HttpResponseMessage Json(object value)=>new(HttpStatusCode.OK){Content=new StringContent(JsonSerializer.Serialize(value))};
     public static async Task Run(Action<bool,string> check,string root)
     {
+        check(ManualReleaseRules.Version("1.0.0.0",[],root,"repo")=="1.0.0.0","explicit four-part release version overrides automatic file detection");
+        var app=typeof(GitHubClient).Assembly.Location;check(ManualReleaseRules.Version("",[app],root,"repo")==AutomationRules.ReadVersion(app),"blank version reads actual application binary metadata");
+        var missingVersion=false;try{ManualReleaseRules.Version("",[],root,"repo");}catch(IOException){missingVersion=true;}check(missingVersion,"missing application version never invents a default tag");
+        var writesForSame=0;
+        using(var api=new GitHubClient(new(),new FakeHttp((request,ct)=>{if(request.Method!=HttpMethod.Get)writesForSame++;return Task.FromResult(Json(request.RequestUri!.AbsolutePath.EndsWith("/9")?Release(9,false):new[]{Release(9,false)}));}))){
+            var skipped=false;try{await api.PrepareManualRelease("owner/repo","1.0.0.0","","",false,null,CancellationToken.None);}catch(IOException){skipped=true;}
+            check(skipped&&writesForSame==0,"same version defaults to skip without changing remote releases or assets");
+            var same=await api.PrepareManualRelease("owner/repo","1.0.0.0","","",false,null,CancellationToken.None,true);
+            check(same.GetProperty("id").GetInt64()==9&&!same.GetProperty("draft").GetBoolean()&&writesForSame==0,"confirmed overwrite reuses published release without recreating or demoting its tag");
+        }
+        var createCount=0;var sourceVerified=false;var newSha=new string('a',40);
+        using(var api=new GitHubClient(new(),new FakeHttp(async(request,ct)=>{
+            if(request.Method==HttpMethod.Post){createCount++;using var payload=JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));check(payload.RootElement.GetProperty("tag_name").GetString()=="1.0.0.1"&&payload.RootElement.GetProperty("draft").GetBoolean()&&sourceVerified,"new manually entered version creates draft only after remote commit verification");return Json(new{id=10,tag_name="1.0.0.1",draft=true});}
+            if(request.RequestUri!.AbsolutePath.Contains("/commits/")){sourceVerified=true;return Json(new{sha=newSha});}return Json(Array.Empty<object>());
+        }))){var created=await api.PrepareManualRelease("owner/repo","1.0.0.1",newSha,"notes",false,null,CancellationToken.None);check(createCount==1&&created.GetProperty("id").GetInt32()==10,"new version uses regular release creation rather than overwriting older version");}
+        var locked=false;
+        using(var api=new GitHubClient(new(),new FakeHttp((request,ct)=>Task.FromResult(Json(request.RequestUri!.AbsolutePath.EndsWith("/9")?new{id=9,tag_name="1.0.0.0",draft=false,immutable=true}:new[]{Release(9,false)}))))){try{await api.PrepareManualRelease("owner/repo","1.0.0.0","","",false,null,CancellationToken.None,true);}catch(IOException){locked=true;}check(locked,"immutable status is freshly checked before confirmed overwrite");}
         var bypassed=true;var writes=0;var details=0;
         using(var api=new GitHubClient(new(),new FakeHttp((request,ct)=>{
             bypassed&=request.Headers.CacheControl?.NoCache==true&&request.Headers.CacheControl.NoStore&&request.Headers.IfNoneMatch.Count==0;
