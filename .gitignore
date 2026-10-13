@@ -1,0 +1,9 @@
+windows/**/bin/
+windows/**/obj/
+artifacts/
+outputs/
+build-tools/
+.icon-preview-profile*/
+upstream-komi/
+pantone-line.preview.png
+pantone-line.original.svg

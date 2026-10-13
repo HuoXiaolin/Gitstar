@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">立体彩色色卡图标</title>
+  <desc id="desc">扇形展开的蓝紫、青绿与橙红色卡，带高光、厚度和金属连接轴。背景透明。</desc>
+  <defs>
+    <linearGradient id="violet-body" x1="-68" y1="-350" x2="68" y2="24" gradientUnits="userSpaceOnUse"><stop stop-color="#F8F5FF"/><stop offset="1" stop-color="#BFC7EE"/></linearGradient>
+    <linearGradient id="teal-body" x1="-68" y1="-350" x2="68" y2="24" gradientUnits="userSpaceOnUse"><stop stop-color="#F4FFFE"/><stop offset="1" stop-color="#ADDCCE"/></linearGradient>
+    <linearGradient id="front-body" x1="-68" y1="-350" x2="68" y2="24" gradientUnits="userSpaceOnUse"><stop stop-color="#FFFEFD"/><stop offset=".62" stop-color="#FFF5E8"/><stop offset="1" stop-color="#EACCB6"/></linearGradient>
+    <linearGradient id="purple" x1="-56" y1="-335" x2="56" y2="-269" gradientUnits="userSpaceOnUse"><stop stop-color="#C29BFF"/><stop offset=".48" stop-color="#9961EF"/><stop offset="1" stop-color="#7842D5"/></linearGradient>
+    <linearGradient id="indigo" x1="-56" y1="-258" x2="56" y2="-194" gradientUnits="userSpaceOnUse"><stop stop-color="#A1ACFF"/><stop offset="1" stop-color="#5464E6"/></linearGradient>
+    <linearGradient id="blue" x1="-56" y1="-183" x2="56" y2="-120" gradientUnits="userSpaceOnUse"><stop stop-color="#7DC7FF"/><stop offset="1" stop-color="#297CDB"/></linearGradient>
+    <linearGradient id="cyan" x1="-56" y1="-335" x2="56" y2="-269" gradientUnits="userSpaceOnUse"><stop stop-color="#80ECF7"/><stop offset="1" stop-color="#19B5CE"/></linearGradient>
+    <linearGradient id="mint" x1="-56" y1="-258" x2="56" y2="-194" gradientUnits="userSpaceOnUse"><stop stop-color="#90F0D7"/><stop offset="1" stop-color="#24BD9E"/></linearGradient>
+    <linearGradient id="green" x1="-56" y1="-183" x2="56" y2="-120" gradientUnits="userSpaceOnUse"><stop stop-color="#ACEB9F"/><stop offset="1" stop-color="#4CAC73"/></linearGradient>
+    <linearGradient id="coral" x1="-56" y1="-335" x2="56" y2="-269" gradientUnits="userSpaceOnUse"><stop stop-color="#FFBAAC"/><stop offset=".48" stop-color="#FF7D79"/><stop offset="1" stop-color="#EC526D"/></linearGradient>
+    <linearGradient id="orange" x1="-56" y1="-258" x2="56" y2="-194" gradientUnits="userSpaceOnUse"><stop stop-color="#FFD28F"/><stop offset=".48" stop-color="#FFAF50"/><stop offset="1" stop-color="#F78A36"/></linearGradient>
+    <linearGradient id="gold" x1="-56" y1="-183" x2="56" y2="-120" gradientUnits="userSpaceOnUse"><stop stop-color="#FFF2A7"/><stop offset="1" stop-color="#EBC04D"/></linearGradient>
+    <linearGradient id="sheen" x1="-60" y1="-340" x2="67" y2="-128" gradientUnits="userSpaceOnUse"><stop stop-color="white" stop-opacity=".5"/><stop offset=".5" stop-color="white" stop-opacity=".08"/><stop offset="1" stop-color="white" stop-opacity="0"/></linearGradient>
+    <linearGradient id="edge" x1="68" y1="-346" x2="80" y2="24" gradientUnits="userSpaceOnUse"><stop stop-color="#E2BBAD"/><stop offset="1" stop-color="#B28572"/></linearGradient>
+    <radialGradient id="metal" cx=".32" cy=".24" r=".85"><stop stop-color="white"/><stop offset=".35" stop-color="#F5E8DA"/><stop offset=".7" stop-color="#B7A9A4"/><stop offset="1" stop-color="#81777D"/></radialGradient>
+    <filter id="card-shadow" x="-80%" y="-25%" width="260%" height="160%" color-interpolation-filters="sRGB"><feDropShadow dx="8" dy="12" stdDeviation="10" flood-color="#242B52" flood-opacity=".23"/></filter>
+    <filter id="soft-shadow" x="-50%" y="-200%" width="200%" height="500%" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="11"/></filter>
+  </defs>
+  <ellipse cx="254" cy="462" rx="133" ry="12" fill="#29314B" opacity=".16" filter="url(#soft-shadow)"/>
+  <g transform="translate(256 413) rotate(-30)" filter="url(#card-shadow)">
+    <rect x="-62" y="-344" width="136" height="374" rx="22" fill="#819EB4"/>
+    <rect x="-68" y="-350" width="136" height="374" rx="22" fill="url(#teal-body)"/>
+    <rect x="-65" y="-347" width="130" height="368" rx="20" stroke="white" stroke-opacity=".65" stroke-width="2"/>
+    <rect x="-56" y="-335" width="112" height="66" rx="12" fill="url(#cyan)"/>
+    <rect x="-56" y="-258" width="112" height="64" rx="10" fill="url(#mint)"/>
+    <rect x="-56" y="-183" width="112" height="64" rx="10" fill="url(#green)"/>
+    <path d="M-49-324H46" stroke="white" stroke-opacity=".5" stroke-width="3" stroke-linecap="round"/>
+    <path d="M-47-90H25M-47-76H4" stroke="#659D9A" stroke-opacity=".6" stroke-width="5" stroke-linecap="round"/>
+  </g>
+  <g transform="translate(256 413) rotate(-3)" filter="url(#card-shadow)">
+    <rect x="-62" y="-344" width="136" height="374" rx="22" fill="#8A86B7"/>
+    <rect x="-68" y="-350" width="136" height="374" rx="22" fill="url(#violet-body)"/>
+    <rect x="-65" y="-347" width="130" height="368" rx="20" stroke="white" stroke-opacity=".7" stroke-width="2"/>
+    <rect x="-56" y="-335" width="112" height="66" rx="12" fill="url(#purple)"/>
+    <rect x="-56" y="-258" width="112" height="64" rx="10" fill="url(#indigo)"/>
+    <rect x="-56" y="-183" width="112" height="64" rx="10" fill="url(#blue)"/>
+    <path d="M-49-324H46" stroke="white" stroke-opacity=".55" stroke-width="3" stroke-linecap="round"/>
+    <path d="M-47-90H25M-47-76H4" stroke="#8988B9" stroke-opacity=".6" stroke-width="5" stroke-linecap="round"/>
+  </g>
+  <g transform="translate(256 413) rotate(24)" filter="url(#card-shadow)">
+    <rect x="-61" y="-343" width="136" height="374" rx="22" fill="url(#edge)"/>
+    <rect x="-68" y="-350" width="136" height="374" rx="22" fill="url(#front-body)"/>
+    <rect x="-65" y="-347" width="130" height="368" rx="20" stroke="white" stroke-opacity=".88" stroke-width="2"/>
+    <rect x="-56" y="-335" width="112" height="66" rx="12" fill="url(#coral)"/>
+    <rect x="-56" y="-258" width="112" height="64" rx="10" fill="url(#orange)"/>
+    <rect x="-56" y="-183" width="112" height="64" rx="10" fill="url(#gold)"/>
+    <path d="M-46-335H44Q56-335 56-323V-275L-56-302V-323Q-56-335-46-335Z" fill="url(#sheen)"/>
+    <path d="M-48-324H43" stroke="white" stroke-opacity=".62" stroke-width="3" stroke-linecap="round"/>
+    <path d="M-48-249H43M-48-174H43" stroke="white" stroke-opacity=".35" stroke-width="2" stroke-linecap="round"/>
+    <path d="M-46-91H28" stroke="#A48073" stroke-opacity=".78" stroke-width="6" stroke-linecap="round"/>
+    <path d="M-46-77H9" stroke="#A48073" stroke-opacity=".42" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="0" cy="0" r="18" fill="#B49384" opacity=".32"/>
+    <circle cx="0" cy="-2" r="15" fill="url(#metal)" stroke="#B8A8A0" stroke-width="1.5"/>
+    <circle cx="0" cy="-2" r="6" fill="#8C8290"/>
+    <path d="M-9-9A12 12 0 0 1 5-13" stroke="white" stroke-opacity=".85" stroke-width="2.5" stroke-linecap="round"/>
+  </g>
+</svg>

@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>WinExe</OutputType><TargetFramework>net10.0-windows</TargetFramework><UseWPF>true</UseWPF><UseWindowsForms>true</UseWindowsForms><ImplicitUsings>disable</ImplicitUsings><RuntimeIdentifier>win-x64</RuntimeIdentifier><SelfContained>false</SelfContained><ApplicationIcon>Assets/Gitstar.ico</ApplicationIcon><AssemblyName>Gitstar</AssemblyName></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../Gitstar.Core/Gitstar.Core.csproj"/><Resource Include="Assets/Gitstar.png"/><Resource Include="Assets/Gitstar.ico"/></ItemGroup>
+</Project>
