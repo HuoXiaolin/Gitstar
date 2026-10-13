@@ -134,8 +134,9 @@ public partial class MainWindow
         else foreach(var version in history){
             var row=new Grid{Margin=new(0,12,0,0)};row.ColumnDefinitions.Add(new());row.ColumnDefinitions.Add(new(){Width=GridLength.Auto});var labels=new StackPanel();labels.Children.Add(ProjectText(version.DisplayVersion+"   ·   "+version.Channel,14));labels.Children.Add(ProjectText($"{version.AssetCount} 个安装包 / 附件   ·   {version.Updated.ToLocalTime():yyyy-MM-dd HH:mm}",11,true));row.Children.Add(labels);var actions=new WrapPanel();Grid.SetColumn(actions,1);row.Children.Add(actions);
             ProjectAction(actions,"日志",()=>ProjectDialog(()=>Form.Notes(this,p.Name+" · "+version.Tag,version.Body)));
+            ProjectAction(actions,"管理发布包",()=>OpenReleaseManager(p,version),enabled:api.Token.Length>0);
             if(version.Draft){ProjectAction(actions,"核实状态",async()=>{await VerifyProjectVersion(p,version);},enabled:api.Token.Length>0);ProjectAction(actions,"编辑草稿",()=>OpenDraftAction(p,version,true),enabled:writable);ProjectAction(actions,"继续发布",()=>OpenDraftAction(p,version,false),enabled:writable);}
-            else ProjectAction(actions,"管理",()=>ProjectDialog(()=>WindowsServices.Open("https://github.com/"+p.FullName+"/releases/tag/"+Uri.EscapeDataString(version.Tag))));versions.Children.Add(row);
+            versions.Children.Add(row);
         }
         var recent=operations.Where(o=>o.Repository.Equals(p.FullName,StringComparison.OrdinalIgnoreCase) || o.Description.StartsWith(p.FullName,StringComparison.OrdinalIgnoreCase)).OrderByDescending(o=>o.Updated).Take(4).ToArray();
         if(recent.Length>0){var activity=ProjectSection("最近任务");foreach(var op in recent)activity.Children.Add(ProjectText($"{op.Updated:MM-dd HH:mm}   {op.Kind}   ·   {op.State}",12,true));var actions=new WrapPanel();activity.Children.Add(actions);ProjectAction(actions,"查看任务",()=>ProjectDialog(()=>Tasks_Click(this,new())));}

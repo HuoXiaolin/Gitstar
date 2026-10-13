@@ -27,7 +27,7 @@ public sealed partial class GitHubClient
             list.AddRange(data.EnumerateArray().Select(ParseProject));if(data.GetArrayLength()<100)return list;
         }
     }
-    public async Task<ManagedProject> Project(string repo,CancellationToken ct){Validate(repo);return ParseProject(await Request("repos/"+repo,ct:ct));}
+    public async Task<ManagedProject> Project(string repo,CancellationToken ct){Validate(repo);return ParseProject(await Request("repos/"+repo,ct:ct,fresh:true));}
     public async Task<ManagedProject> CreateProject(string name,string description,bool privateRepo,bool readme,CancellationToken ct)
     {
         if(!Rules.ValidRepository("owner/"+name))throw new ArgumentException("仓库名称不合法。");

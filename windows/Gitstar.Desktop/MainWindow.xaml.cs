@@ -36,6 +36,7 @@ public partial class MainWindow : Window
     private readonly AsyncLocal<Operation?> currentOperation=new();
     private readonly Dictionary<string,TransferState> taskTransfers=[];
     private bool busy=>taskCoordinator.Count>0;
+    private bool clearingCache,recentCacheCleared;
     private bool refreshing,quitting;
     private bool localPage,exit,ready;
     private bool notificationLocal=true;
@@ -60,7 +61,7 @@ public partial class MainWindow : Window
         menu.Items.Add("设置",null,(_,_)=>Dispatcher.Invoke(()=>Settings_Click(this,new RoutedEventArgs())));
         menu.Items.Add("彻底退出",null,(_,_)=>Dispatcher.Invoke(RequestExit));tray.ContextMenuStrip=menu;
         Closing+=OnClosing;
-        timer.Tick+=async(_,_)=>{if(!refreshing && !quitting && RefreshSchedule.IsDue(settings.RefreshIntervalHours,settings.LastCheck,lastAttempt,DateTimeOffset.UtcNow))await RefreshAsync(true);};
+        timer.Tick+=async(_,_)=>{if(!refreshing && !quitting && !clearingCache && RefreshSchedule.IsDue(settings.RefreshIntervalHours,settings.LastCheck,lastAttempt,DateTimeOffset.UtcNow))await RefreshAsync(true);};
         Loaded+=async(_,_)=>{
             ready=true;PlanUpdates();Display();
             if(smoke)return;
@@ -96,8 +97,12 @@ public partial class MainWindow : Window
     private void Save(){store.Set("settings",settings);if(installedFresh)SaveInstalledSnapshot();}
     private void SaveOperations()=>store.Set(OperationsKey,operations);
     private void SwitchOperations(){operations.Clear();operations.AddRange(store.Get(OperationsKey,new List<Operation>()));}
-    private void LoadCache() {PathPreferences.Migrate(settings);store.Set("settings",settings);repositories=store.Get(CacheKey+"/repos",new List<Repository>());releases=ReleaseRetention.Compact(store.Get(CacheKey+"/releases",new List<Release>()),settings.Bindings);groups=store.Get(CacheKey+"/groups",new List<StarGroup>());packages=store.Get(PackagesKey,new List<DownloadedPackage>());installed=InstalledSnapshot.Capture(store.Get(CacheKey+"/installed",new InstalledSnapshot(DateTimeOffset.MinValue,[])).Apps,settings.Bindings).Apps;installedFresh=false;LoadProjects();}
-    private void SaveCache() {releases=ReleaseRetention.Compact(releases,settings.Bindings);PruneTransfers();store.Set(CacheKey+"/repos",repositories);store.Set(CacheKey+"/releases",releases);store.Set(CacheKey+"/groups",groups);}
+    private void LoadCache() {
+        PathPreferences.Migrate(settings);store.Set("settings",settings);repositories=store.Get(CacheKey+"/repos",new List<Repository>());recentCacheCleared=store.Get(CacheKey+"/recent-cleared",false);
+        var saved=store.Get(CacheKey+"/releases",new List<Release>()).Concat(store.Get(CacheKey+"/matched-releases",new List<Release>())).GroupBy(release=>(release.Repository.ToLowerInvariant(),release.Id)).Select(group=>group.First());releases=ReleaseRetention.Compact(saved,settings.Bindings);
+        groups=store.Get(CacheKey+"/groups",new List<StarGroup>());packages=store.Get(PackagesKey,new List<DownloadedPackage>());installed=InstalledSnapshot.Capture(store.Get(CacheKey+"/installed",new InstalledSnapshot(DateTimeOffset.MinValue,[])).Apps,settings.Bindings).Apps;installedFresh=false;LoadProjects();
+    }
+    private void SaveCache() {releases=ReleaseRetention.Compact(releases,settings.Bindings);PruneTransfers();var bound=settings.Bindings.Select(binding=>binding.Repository).ToHashSet(StringComparer.OrdinalIgnoreCase);store.Set(CacheKey+"/repos",repositories);store.Set(CacheKey+"/releases",recentCacheCleared?new List<Release>():releases);store.Set(CacheKey+"/matched-releases",releases.Where(release=>bound.Contains(release.Repository)).ToList());store.Set(CacheKey+"/groups",groups);store.Set(CacheKey+"/recent-cleared",recentCacheCleared);}
     private void PruneTransfers()
     {
         var retained=releases.SelectMany(r=>new[]{TransferKey(r,false),TransferKey(r,true)}).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -134,6 +139,7 @@ public partial class MainWindow : Window
         var search=Search.Text.Trim();var channel=ChannelFilter.SelectedIndex;
         var groupIndex=GroupFilter.SelectedIndex;var allGroups=groups.Concat(settings.LocalGroups).ToList();
         IEnumerable<Card> cards=localPage?updates.Select(u=>new Card {Release=u.Release,Update=u,Transfer=TransferFor(u.Release,true)}):releases.Select(r=>new Card {Release=r});
+        if(!localPage&&recentCacheCleared)cards=[];
         cards=cards.Where(c=>channel==1 || (channel==2?c.Release.Prerelease:!c.Release.Prerelease));
         if(!localPage)cards=cards.Where(c=>!settings.HiddenRepositories.Contains(c.Repository,StringComparer.OrdinalIgnoreCase));
         if(!localPage&&groupIndex==1)cards=cards.Where(c=>!allGroups.Any(g=>g.Repositories.Contains(c.Repository,StringComparer.OrdinalIgnoreCase)));
@@ -168,6 +174,7 @@ public partial class MainWindow : Window
                 try{groups=await api.Lists(ct);}catch(Exception e)when(e is not OperationCanceledException && e is not GitHubRateLimitException){warnings.Add(e.Message);}
             }
             var names=(matchedOnly?settings.Bindings.Select(b=>b.Repository):repositories.Select(r=>r.FullName).Concat(settings.ExtraRepositories).Concat(settings.Bindings.Select(b=>b.Repository)).Concat(settings.SelfRepository.Length>0?[settings.SelfRepository]:Array.Empty<string>())).Where(Rules.ValidRepository).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if(!matchedOnly)recentCacheCleared=false;
             var completed=0;var active=new HashSet<string>();var savedAt=TimeSpan.Zero;
             void Progress()=>model.Status=$"正在检查 {completed}/{names.Count} · {active.Count} 个并行 · 已用 {clock.Elapsed.TotalSeconds:0} 秒 · "+string.Join(" / ",active);
             try{await RepositoryChecks.Run(names,async(name,token)=>{
@@ -196,11 +203,11 @@ public partial class MainWindow : Window
         var previous=currentOperation.Value;currentOperation.Value=op;var started=false;
         if(kind=="检查")refreshing=true;
         try {await run.WaitAsync();started=true;op.State="执行中";SaveOperations();model.Status=kind+" · "+description+" · 正在处理…";await work(run.Token);op.State=op.Results.Any(r=>r.StartsWith("待处理"))?(op.Results.Any(r=>r.StartsWith("成功"))?"部分完成，请核实待处理项":"未完成，请核实待处理项"):"完成";}        catch(OperationCanceledException){
-            var remote=kind is "自动发布" or "发布" or "源码上传" or "Star管理" or "分组管理" or "批量管理" or "项目管理";
-            op.State=!started?"已"+run.StopReason+"等待":remote?"已"+run.StopReason+" · 远程结果待核实":run.StopReason=="取消"?"已取消":"已暂停（下载重试会重新开始）";
+            var remote=kind is "自动发布" or "发布" or "发布包管理" or "源码上传" or "Star管理" or "分组管理" or "批量管理" or "项目管理";
+            op.State=!started?"已"+run.StopReason+"等待":remote?"已"+run.StopReason+" · 远程结果待核实":run.StopReason=="取消"?"已取消":kind=="下载"?"已暂停（下载重试会重新开始）":"已暂停";
             if(run.StopReason=="取消" && kind=="下载" && op.File.EndsWith(".partial",StringComparison.OrdinalIgnoreCase)){try{if(File.Exists(op.File))File.Delete(op.File);}catch(Exception ex)when(ex is IOException or UnauthorizedAccessException){op.Results.Add("临时文件清理待处理："+ex.Message);}}
             model.Status=description+" · "+op.State;
-        }        catch(Exception e){op.State=kind is "自动发布" or "发布" or "源码上传" or "Star管理" or "分组管理" or "批量管理" or "项目管理"?"结果待核实："+e.Message:"失败："+e.Message;model.Status=e.Message;if(!background)DialogMessage.Show(this,e.Message,"操作未完成",MessageBoxButton.OK,MessageBoxImage.Warning);}
+        }        catch(Exception e){op.State=kind is "自动发布" or "发布" or "发布包管理" or "源码上传" or "Star管理" or "分组管理" or "批量管理" or "项目管理"?"结果待核实："+e.Message:"失败："+e.Message;model.Status=e.Message;if(!background)DialogMessage.Show(this,e.Message,"操作未完成",MessageBoxButton.OK,MessageBoxImage.Warning);}
         finally{if(started && (kind is "Star管理" or "分组管理" or "批量管理" or "项目管理")){Save();SaveCache();RebuildGroups();PlanUpdates();Display();}op.Updated=DateTimeOffset.Now;taskTransfers.Remove(op.Id);SaveOperations();currentOperation.Value=previous;if(kind=="检查")refreshing=false;run.Dispose();if(settings.KeepLatestPackages && !quitting && !exit)_=Dispatcher.BeginInvoke(async()=>await CleanupOldPackages());}
     }
     private async void Login_Click(object sender,RoutedEventArgs e)
@@ -399,6 +406,7 @@ public partial class MainWindow : Window
         var f=new Form(this,"设置",940,730);f.Section("GitHub 账号与授权");var client=f.Text("GitHub OAuth App Client ID",settings.ClientId);f.Label("浏览器设备授权无需把 Client Secret 写入客户端。创建 OAuth App 后启用 Device Flow。");
         f.Section("本地数据与清理");var dataFolder=f.Text("应用数据目录",Path.GetFullPath(store.Root));dataFolder.IsReadOnly=true;dataFolder.ToolTip=dataFolder.Text;var database=f.Text("数据库文件",Path.Combine(dataFolder.Text,"gitstar.db"));database.IsReadOnly=true;database.ToolTip=database.Text;
         var dataActions=new WrapPanel{Margin=new Thickness(0,0,0,8)};f.Fields.Children.Add(dataActions);var openData=f.Action("打开数据目录",()=>{WindowsServices.Open(dataFolder.Text);return Task.CompletedTask;});var copyData=f.Action("复制目录路径",()=>{Clipboard.SetText(dataFolder.Text);return Task.CompletedTask;});foreach(var button in new[]{openData,copyData}){f.Buttons.Children.Remove(button);button.Margin=new Thickness(0,0,8,0);dataActions.Children.Add(button);}
+        var cleanCache=f.Action("按模块清理缓存",()=>{CacheCleanupDialog(f);return Task.CompletedTask;});f.Buttons.Children.Remove(cleanCache);cleanCache.Margin=new Thickness(0,0,8,0);dataActions.Children.Add(cleanCache);
         f.Label("此目录保存登录凭据、设置、分组、软件与源码目录关联、缓存及任务记录。数据库运行时可能同时存在 gitstar.db-wal 和 gitstar.db-shm 文件。");f.Label("清理方法：从系统托盘选择“彻底退出”，再删除上面的应用数据目录。关闭窗口只会收起到托盘；删除数据后应用将恢复初始状态。下载目录中的安装包需单独整理。");
         f.Section("安装包管理");var keepLatest=f.Check("只保留各项目、平台和正式/测试通道的最新安装包",settings.KeepLatestPackages);var autoDelete=f.Check("确认安装成功后自动删除安装包",settings.DeleteInstalledPackages);var promptDelete=f.Check("更新检查完成后，询问是否删除已安装的安装包",settings.PromptInstalledPackageCleanup);promptDelete.IsEnabled=!autoDelete.IsChecked.GetValueOrDefault();autoDelete.Checked+=(_,_)=>promptDelete.IsEnabled=false;autoDelete.Unchecked+=(_,_)=>promptDelete.IsEnabled=true;f.Label("清理 Gitstar 记录的下载文件。自动删除默认关闭；确认主程序已达到目标版本后处理。同版本的其他安装包保留。选择保留后不重复询问。旧下载文件可手动整理。");
         f.Section("下载与更新");var folder=f.Text("默认下载目录",settings.DownloadFolder);var sameVersion=f.Select("同版本安装包已存在时",["每次询问：替换或跳过","重新下载并替换","跳过下载和安装"],settings.SameVersionDownload);f.Label("安装包直接保存在此目录，不创建项目或版本子文件夹。文件名包含项目和版本，区分不同项目的同名安装包。替换前会核对旧下载记录，新文件校验成功后才覆盖。");var selfRepo=f.Text("Gitstar 自身更新仓库（owner/repo，可留空）",settings.SelfRepository);f.Section("网络与启动");var proxy=f.Text("应用代理地址（http/https/socks5，无用户名密码；留空使用系统代理）",settings.Proxy);var direct=f.Check("直连（不使用系统代理）",settings.DirectConnection);var startup=f.Check("登录 Windows 后启动，并收起到托盘",settings.Startup);f.Section("外观");var dark=f.Check("深色模式",settings.Dark);
@@ -526,6 +534,25 @@ public partial class MainWindow : Window
             if(persisted!=confirmed)throw new IOException("Published state persistence failed");
             File.WriteAllText(Path.ChangeExtension(path,".release-state.json"),JsonSerializer.Serialize(new{persisted.Draft,persisted.Channel,persisted.AssetCount,Persisted=true}));
             UpdateLayout();var versionSection=(FrameworkElement)ProjectDetails.Children[3];((ScrollViewer)ProjectDetails.Parent).ScrollToVerticalOffset(versionSection.TranslatePoint(new Point(),ProjectDetails).Y);
+        }
+        if(Environment.GetCommandLineArgs().Contains("--cache-clean-state")){
+            var bindings=settings.Bindings.Count;store.Set("settings",settings);SaveCache();SaveInstalledSnapshot();var before=updates.Count;
+            await CacheCleanupService.Clear(store,settings.Account,CacheModule.RecentUpdates,CancellationToken.None,ApplyCacheCleared);Page(false);var recentEmpty=model.Cards.Count==0;Page(true);var localPreserved=updates.Count==before&&installed.Count>0;
+            await CacheCleanupService.Clear(store,settings.Account,CacheModule.InstalledApps,CancellationToken.None,ApplyCacheCleared);var localEmpty=updates.Count==0;LoadCache();PlanUpdates();Display();
+            if(!recentEmpty||!localPreserved||!localEmpty||settings.Bindings.Count!=bindings||!recentCacheCleared||installed.Count!=0)throw new IOException("Module cache isolation failed");
+            File.WriteAllText(Path.ChangeExtension(path,".cache-clean.json"),JsonSerializer.Serialize(new{RecentEmpty=recentEmpty,LocalPreserved=localPreserved,LocalEmpty=localEmpty,BindingsRetained=settings.Bindings.Count,ClearStatePersisted=recentCacheCleared}));
+        }
+        if(Environment.GetCommandLineArgs().Contains("--cache-cleanup")){
+            store.Set("settings",settings);SaveCache();SaveProjects();SaveInstalledSnapshot();operations.AddRange([new(){State="完成",Description="已完成下载"},new(){State="已取消",Description="已取消任务"},new(){State="结果待核实",Description="需要核实的发布",RemoteId=1}]);SaveOperations();CacheCleanupDialog(previewPath:path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;
+        }
+        if(projectsPreview&&Environment.GetCommandLineArgs().Contains("--deleted-release-state")){
+            var repo="example/Gitstar";var id=projectVersions[repo][0].Id;releases=[new(id,repo,"1.0.0.0","","",false,DateTimeOffset.Now,"",[])];ForgetProjectVersion(repo,id);
+            using var reopened=new LocalStore(store.Root);var history=reopened.Get(ProjectsKey+"/versions",new Dictionary<string,List<ProjectVersion>>())[repo];var savedReleases=reopened.Get(CacheKey+"/releases",new List<Release>());
+            if(history.Any(version=>version.Id==id)||savedReleases.Any(version=>version.Id==id))throw new IOException("Deleted release remains in persistent cache");File.WriteAllText(Path.ChangeExtension(path,".deleted-release.json"),JsonSerializer.Serialize(new{RemovedFromProjectCache=true,RemovedFromUpdateCache=true,OtherVersionsRetained=history.Count}));
+        }
+        if(projectsPreview&&Environment.GetCommandLineArgs().Contains("--release-assets")){
+            var project=myProjects.First() with{Id=100};var version=projectVersions[project.FullName][0] with{Tag="1.0.0.0",Name="1.0.0.0",Draft=false,Prerelease=false,AssetCount=4};
+            ReleaseManagerDialog(new(project,version,false,"fixture",[new(10,"Gitstar.exe",1141999,"sha256:fixture","fixture",""),new(20,"Gitstar-setup.exe",2655147,"sha256:fixture","fixture",""),new(30,"USAGE.md",24994,"sha256:fixture","fixture",""),new(40,"SHA256SUMS.txt",250,"sha256:fixture","fixture","")]),path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;
         }
         if(automationPreview){AutomationConfigDialog(myProjects.First(),path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}if(workspacePreview){await ResolveWorkspaceRoot(this,myProjects.First(),@"D:\Agant\github-update\outputs\Gitstar-source","main",previewPath:path);exit=true;tray.Icon?.Dispose();tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(sourcePreview || createPreview || projectSettingsPreview || publishPreview){if(sourcePreview)SourceDialog(myProjects.First(),path);else if(publishPreview)PublishDialog(myProjects.First(),Environment.GetCommandLineArgs().Contains("--temporary-draft")?projectVersions["example/Gitstar"][0] with{Tag="untagged-abcd",Name="1.0.0.0"}:null,path);else if(projectSettingsPreview)EditProjectDialog(myProjects.First(),path);else CreateProjectDialog(path);exit=true;tray.Icon?.Dispose();tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}

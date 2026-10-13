@@ -34,6 +34,16 @@ public sealed class LocalStore : IDisposable
         }
     }
     private void Prepare(string sql, out IntPtr stmt) { if (sqlite3_prepare_v2(db, sql, -1, out stmt, IntPtr.Zero) != 0) throw new IOException("数据库查询失败。"); }
+    public Dictionary<string,long> DocumentSizes()
+    {
+        lock(gate){Prepare("SELECT key,length(CAST(value AS BLOB)) FROM documents",out var statement);try{var result=new Dictionary<string,long>(StringComparer.Ordinal);int code;while((code=sqlite3_step(statement))==100){var bytes=new byte[sqlite3_column_bytes(statement,0)];Marshal.Copy(sqlite3_column_text(statement,0),bytes,0,bytes.Length);result[Encoding.UTF8.GetString(bytes)]=sqlite3_column_int64(statement,1);}if(code!=101)throw new IOException("读取缓存大小失败。");return result;}finally{sqlite3_finalize(statement);}}
+    }
+    public void RemoveDocuments(IEnumerable<string> exact,IEnumerable<string> prefixes)
+    {
+        lock(gate){Exec("BEGIN IMMEDIATE");try{foreach(var key in exact.Distinct(StringComparer.Ordinal))Delete("DELETE FROM documents WHERE key=?1",key);foreach(var prefix in prefixes.Distinct(StringComparer.Ordinal)){if(prefix.Length==0)throw new ArgumentException("缓存前缀不能为空。");Delete("DELETE FROM documents WHERE substr(key,1,length(?1))=?1",prefix);}Exec("COMMIT");}catch{Exec("ROLLBACK");throw;}}
+        void Delete(string sql,string key){Prepare(sql,out var statement);try{Bind(statement,1,key);if(sqlite3_step(statement)!=101)throw new IOException("清理缓存记录失败。");}finally{sqlite3_finalize(statement);}}
+    }
+    public void Compact(){lock(gate){Exec("PRAGMA wal_checkpoint(TRUNCATE); VACUUM; PRAGMA wal_checkpoint(TRUNCATE);");}}
     private static void Bind(IntPtr s, int i, string v) { var b = Encoding.UTF8.GetBytes(v); if (sqlite3_bind_text(s, i, b, b.Length, new IntPtr(-1)) != 0) throw new IOException("数据库绑定失败。"); }
     public void Dispose() { lock (gate) { if (db != IntPtr.Zero) { sqlite3_close(db); db = IntPtr.Zero; } } }
     [DllImport("winsqlite3", CallingConvention=CallingConvention.Cdecl)] private static extern int sqlite3_open([MarshalAs(UnmanagedType.LPUTF8Str)] string path, out IntPtr db);
@@ -45,6 +55,7 @@ public sealed class LocalStore : IDisposable
     [DllImport("winsqlite3", CallingConvention=CallingConvention.Cdecl)] private static extern int sqlite3_step(IntPtr stmt);
     [DllImport("winsqlite3", CallingConvention=CallingConvention.Cdecl)] private static extern IntPtr sqlite3_column_text(IntPtr stmt,int i);
     [DllImport("winsqlite3", CallingConvention=CallingConvention.Cdecl)] private static extern int sqlite3_column_bytes(IntPtr stmt,int i);
+    [DllImport("winsqlite3", CallingConvention=CallingConvention.Cdecl)] private static extern long sqlite3_column_int64(IntPtr stmt,int i);
     [DllImport("winsqlite3", CallingConvention=CallingConvention.Cdecl)] private static extern int sqlite3_finalize(IntPtr stmt);
 }
 public static class SecretStore
