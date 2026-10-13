@@ -44,5 +44,12 @@ static class WorkflowChecks
         check(!SourceWorkflow.SameSnapshot(changed,added),"new files added while source dialog is open require refreshed selection");
         check(SourceWorkflow.SameSnapshot(added,await git.Inspect(folder,CancellationToken.None)),"unchanged refreshed source snapshot remains uploadable");
         check(!SourceWorkflow.SameSnapshot(added,added with{Commit=new string('1',40)})&&!SourceWorkflow.SameSnapshot(added,added with{Remote="https://github.com/other/repo.git"}),"changed HEAD or origin invalidates reviewed upload target");
+        await git.Run(folder,CancellationToken.None,"config","--local","credential.helper","!echo gitstar-test-helper-was-run >&2; exit 1");
+        check(await git.Run(folder,CancellationToken.None,"config","--get","credential.interactive")=="false","all Gitstar Git subprocesses disable credential-manager interaction");
+        var listener=new System.Net.Sockets.TcpListener(IPAddress.Loopback,0);listener.Start();var port=((IPEndPoint)listener.LocalEndpoint).Port;using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        async Task Deny(){try{while(!timeout.IsCancellationRequested){using var client=await listener.AcceptTcpClientAsync(timeout.Token);using var stream=client.GetStream();var buffer=new byte[4096];var received=await stream.ReadAsync(buffer,timeout.Token);if(received==0)continue;await stream.WriteAsync(System.Text.Encoding.ASCII.GetBytes("HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"fixture\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),timeout.Token);}}catch(OperationCanceledException){}}
+        var server=Deny();string denied="";try{await git.Run(folder,timeout.Token,"-c","http.proxy=","ls-remote",$"http://127.0.0.1:{port}/repo.git");}catch(IOException ex){denied=ex.Message;}finally{timeout.Cancel();await server;listener.Stop();}
+        check((denied.Contains("terminal prompts disabled")||denied.Contains("unable to get password from user"))&&!denied.Contains("gitstar-test-helper-was-run"),"unauthorized Git request fails promptly without invoking configured external login helper");
+        check((await git.Run(folder,CancellationToken.None,"config","--local","--get","credential.helper")).Contains("gitstar-test-helper-was-run"),"silent Git policy leaves repository and global credential configuration unchanged");
     }
 }

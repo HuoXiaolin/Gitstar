@@ -43,7 +43,7 @@ public class Settings
     public List<string> HiddenRepositories { get; set; } = [];
     public List<StarGroup> LocalGroups { get; set; } = [];
     public List<string> Notified { get; set; } = [];
-    public string SelfRepository { get; set; } = "";
+    public string SelfRepository { get; set; } = AppInfo.Repository;
 }
 public record DownloadedPackage(string Repository,long ReleaseId,string Tag,bool Prerelease,DateTimeOffset Published,string AssetName,string Path,string Root,long Size,string Sha256,string Family,bool Prompted=false);
 public record UpdateCandidate(InstalledApp App, Binding Binding, Release Release, Asset? Asset);

@@ -9,6 +9,7 @@ public sealed class Form : Window
     private readonly Border surface;
     private readonly ScrollViewer scroll;
     private readonly List<(string Title,FrameworkElement Anchor)> sections=[];
+    private string selectedSection="";
     public WrapPanel Buttons {get;}=new() {Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right,Margin=new Thickness(18,0,18,14)};
     public Form(Window owner,string title,double width=660,double height=650)
     {
@@ -33,9 +34,11 @@ public sealed class Form : Window
     public void SectionNavigation(string? previewSection=null)
     {
         if(sections.Count<2)return;var grid=new Grid();grid.ColumnDefinitions.Add(new(){Width=new GridLength(154)});grid.ColumnDefinitions.Add(new());var nav=new StackPanel{Margin=new Thickness(0,6,18,0)};grid.Children.Add(nav);surface.Child=null;Grid.SetColumn(scroll,1);grid.Children.Add(scroll);surface.Child=grid;
-        var items=new List<(FrameworkElement Anchor,Button Button)>();foreach(var section in sections){var button=new Button{Content=section.Title,HorizontalContentAlignment=HorizontalAlignment.Left,Padding=new Thickness(10,9,10,9),Margin=new Thickness(0,0,0,5),BorderThickness=new Thickness(0)};button.SetResourceReference(StyleProperty,"NavButton");button.Click+=(_,_)=>scroll.ScrollToVerticalOffset(Math.Max(0,section.Anchor.TranslatePoint(new Point(),Fields).Y-8));nav.Children.Add(button);items.Add((section.Anchor,button));}
-        void Select(){if(!IsLoaded)return;var current=items.LastOrDefault(item=>item.Anchor.TranslatePoint(new Point(),Fields).Y<=scroll.VerticalOffset+24);if(current.Button==null)current=items[0];foreach(var item in items){item.Button.SetResourceReference(BackgroundProperty,item.Button==current.Button?"AccentSoft":"Surface");item.Button.SetResourceReference(ForegroundProperty,item.Button==current.Button?"AccentInk":"Muted");}}
-        scroll.ScrollChanged+=(_,_)=>Select();ContentRendered+=(_,_)=>{UpdateLayout();if(previewSection!=null){var target=sections.FirstOrDefault(item=>item.Title==previewSection);if(target.Anchor!=null)scroll.ScrollToVerticalOffset(Math.Max(0,target.Anchor.TranslatePoint(new Point(),Fields).Y-8));}Select();};
+        FrameworkElement? requested=null;double requestedOffset=0;var items=new List<(FrameworkElement Anchor,Button Button)>();
+        void Navigate(FrameworkElement anchor){requested=anchor;requestedOffset=Math.Clamp(anchor.TranslatePoint(new Point(),Fields).Y-8,0,scroll.ScrollableHeight);scroll.ScrollToVerticalOffset(requestedOffset);Select();}
+        foreach(var section in sections){var button=new Button{Content=section.Title,HorizontalContentAlignment=HorizontalAlignment.Left,Padding=new Thickness(10,9,10,9),Margin=new Thickness(0,0,0,5),BorderThickness=new Thickness(0)};button.SetResourceReference(StyleProperty,"NavButton");button.Click+=(_,_)=>Navigate(section.Anchor);nav.Children.Add(button);items.Add((section.Anchor,button));}
+        void Select(){if(!IsLoaded)return;var current=requested!=null?items.First(item=>item.Anchor==requested):items.LastOrDefault(item=>item.Anchor.TranslatePoint(new Point(),Fields).Y<=scroll.VerticalOffset+24);if(current.Button==null)current=items[0];selectedSection=current.Button.Content.ToString()??"";foreach(var item in items){item.Button.SetResourceReference(BackgroundProperty,item.Button==current.Button?"AccentSoft":"Surface");item.Button.SetResourceReference(ForegroundProperty,item.Button==current.Button?"AccentInk":"Muted");}}
+        scroll.ScrollChanged+=(_,e)=>{if(requested!=null&&Math.Abs(scroll.VerticalOffset-requestedOffset)>1)requested=null;Select();};ContentRendered+=(_,_)=>{UpdateLayout();if(previewSection!=null){var target=sections.FirstOrDefault(item=>item.Title==previewSection);if(target.Anchor!=null)Navigate(target.Anchor);}Select();};
     }
     public CheckBox Check(string label,bool value=false) {var check=new CheckBox {Content=label,IsChecked=value,Margin=new Thickness(0,8,0,12)};Fields.Children.Add(check);return check;}
     public StackPanel Advanced(string title="高级操作")
@@ -56,7 +59,7 @@ public sealed class Form : Window
     }
     public static void Notes(Window owner,string title,string text) {var f=new Form(owner,title,780,700);var t=f.Text("更新说明（原文）",text,true);t.IsReadOnly=true;t.MinHeight=500;f.Action("关闭",()=>{f.Close();return Task.CompletedTask;});f.ShowDialog();}
     public void RenderPreview(string path)=>ContentRendered+=(_,_)=>Dispatcher.BeginInvoke(()=>{
-        UpdateLayout();var root=(FrameworkElement)Content;var bitmap=new System.Windows.Media.Imaging.RenderTargetBitmap((int)root.ActualWidth,(int)root.ActualHeight,96,96,PixelFormats.Pbgra32);bitmap.Render(root);var encoder=new System.Windows.Media.Imaging.PngBitmapEncoder();encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));using(var stream=File.Create(path))encoder.Save(stream);Close();
+        UpdateLayout();if(sections.Count>0)File.WriteAllText(Path.ChangeExtension(path,".navigation.json"),JsonSerializer.Serialize(new{Selected=selectedSection,Offset=scroll.VerticalOffset,Maximum=scroll.ScrollableHeight}));var root=(FrameworkElement)Content;var bitmap=new System.Windows.Media.Imaging.RenderTargetBitmap((int)root.ActualWidth,(int)root.ActualHeight,96,96,PixelFormats.Pbgra32);bitmap.Render(root);var encoder=new System.Windows.Media.Imaging.PngBitmapEncoder();encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));using(var stream=File.Create(path))encoder.Save(stream);Close();
     },System.Windows.Threading.DispatcherPriority.ApplicationIdle);
 }
 

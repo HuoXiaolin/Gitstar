@@ -183,6 +183,7 @@ await RepositorySettingsChecks.Run(Check);
 await WorkspaceChecks.Run(Check,root);
 await WorkflowChecks.Run(Check,root);
 await ReleaseStateChecks.Run(Check,root);
+await SelfUpdateChecks.Run(Check);
 await ReleaseManagementChecks.Run(Check);
 await CacheCleanupChecks.Run(Check,root);
 await AutomationChecks.Run(Check,root);

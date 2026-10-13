@@ -5,6 +5,7 @@ namespace Gitstar.Desktop;
 // Uses the SQLite runtime shipped with Windows; prepared statements isolate user data from SQL.
 public sealed class LocalStore : IDisposable
 {
+    public record StorageSize(long Database,long Journal,long Free,long Content);
     private IntPtr db;
     private readonly object gate = new();
     public string Root { get; }
@@ -43,7 +44,9 @@ public sealed class LocalStore : IDisposable
         lock(gate){Exec("BEGIN IMMEDIATE");try{foreach(var key in exact.Distinct(StringComparer.Ordinal))Delete("DELETE FROM documents WHERE key=?1",key);foreach(var prefix in prefixes.Distinct(StringComparer.Ordinal)){if(prefix.Length==0)throw new ArgumentException("缓存前缀不能为空。");Delete("DELETE FROM documents WHERE substr(key,1,length(?1))=?1",prefix);}Exec("COMMIT");}catch{Exec("ROLLBACK");throw;}}
         void Delete(string sql,string key){Prepare(sql,out var statement);try{Bind(statement,1,key);if(sqlite3_step(statement)!=101)throw new IOException("清理缓存记录失败。");}finally{sqlite3_finalize(statement);}}
     }
-    public void Compact(){lock(gate){Exec("PRAGMA wal_checkpoint(TRUNCATE); VACUUM; PRAGMA wal_checkpoint(TRUNCATE);");}}
+    public StorageSize StorageUsage(){lock(gate){long Scalar(string sql){Prepare(sql,out var s);try{if(sqlite3_step(s)!=100)throw new IOException("读取数据库空间失败。");return sqlite3_column_int64(s,0);}finally{sqlite3_finalize(s);}}long Size(string file)=>File.Exists(file)?new FileInfo(file).Length:0;return new(Size(Path.Combine(Root,"gitstar.db")),Size(Path.Combine(Root,"gitstar.db-wal")),Scalar("PRAGMA freelist_count")*Scalar("PRAGMA page_size"),Scalar("SELECT coalesce(sum(length(CAST(value AS BLOB))),0) FROM documents"));}}
+    public void Compact(){lock(gate){Exec("PRAGMA wal_checkpoint(TRUNCATE); PRAGMA auto_vacuum=INCREMENTAL; VACUUM; PRAGMA wal_checkpoint(TRUNCATE);");}}
+    public void ReclaimUnusedSpace(){lock(gate){var size=StorageUsage();if(size.Free>=8*1024*1024&&size.Free>=size.Database/3)Compact();}}
     private static void Bind(IntPtr s, int i, string v) { var b = Encoding.UTF8.GetBytes(v); if (sqlite3_bind_text(s, i, b, b.Length, new IntPtr(-1)) != 0) throw new IOException("数据库绑定失败。"); }
     public void Dispose() { lock (gate) { if (db != IntPtr.Zero) { sqlite3_close(db); db = IntPtr.Zero; } } }
     [DllImport("winsqlite3", CallingConvention=CallingConvention.Cdecl)] private static extern int sqlite3_open([MarshalAs(UnmanagedType.LPUTF8Str)] string path, out IntPtr db);

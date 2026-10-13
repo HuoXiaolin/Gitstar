@@ -90,15 +90,17 @@ public sealed partial class GitWorkspace
     public async Task<string> Run(string folder,CancellationToken ct,params string[] args)
     {
         var psi=new ProcessStartInfo("git") {WorkingDirectory=folder,UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,StandardOutputEncoding=Encoding.UTF8,StandardErrorEncoding=Encoding.UTF8};
-        foreach(var option in new[]{"-c","core.quotepath=false","-c","i18n.logOutputEncoding=utf-8"})psi.ArgumentList.Add(option);
+        foreach(var option in new[]{"-c","core.quotepath=false","-c","i18n.logOutputEncoding=utf-8","-c","credential.helper=","-c","credential.interactive=false","-c","core.askPass="})psi.ArgumentList.Add(option);
         foreach(var arg in args)psi.ArgumentList.Add(arg);
         psi.Environment["GIT_TERMINAL_PROMPT"]="0";
+        psi.Environment["GCM_INTERACTIVE"]="0";
+        foreach(var key in new[]{"GIT_ASKPASS","SSH_ASKPASS","GITSTAR_ASKPASS_MODE","GITSTAR_OAUTH_TOKEN"})psi.Environment.Remove(key);
         if(token.Length>0) {psi.Environment["GIT_ASKPASS"]=Environment.ProcessPath!;psi.Environment["GITSTAR_ASKPASS_MODE"]="1";psi.Environment["GITSTAR_OAUTH_TOKEN"]=token;}
         using var process=Process.Start(psi)??throw new IOException("无法启动 Git，请先安装 Git for Windows。");
         var stdout=process.StandardOutput.ReadToEndAsync(ct); var stderr=process.StandardError.ReadToEndAsync(ct);
         try {await process.WaitForExitAsync(ct);} catch {try{process.Kill(true);}catch{}throw;}
         var output=await stdout; var error=await stderr;
-        if(process.ExitCode!=0){var safe=error.Replace(token.Length>0?token:"\0","[已隐藏]");throw new IOException("Git 操作失败："+safe[..Math.Min(safe.Length,1200)]);}
+        if(process.ExitCode!=0){var safe=error.Replace(token.Length>0?token:"\0","[已隐藏]");var auth=safe.Contains("unable to get password from user",StringComparison.OrdinalIgnoreCase)||safe.Contains("Authentication failed",StringComparison.OrdinalIgnoreCase)||safe.Contains("terminal prompts disabled",StringComparison.OrdinalIgnoreCase)||safe.Contains("could not read Username",StringComparison.OrdinalIgnoreCase);throw new IOException((auth?"此操作需要有效的 GitHub 授权，请在 Gitstar 设置中重新登录或核对仓库权限。\n":"Git 操作失败：")+safe[..Math.Min(safe.Length,1200)]);}
         return output.TrimEnd();
     }
     public async Task<string> Review(string folder,CancellationToken ct)

@@ -7,6 +7,12 @@ static class CacheCleanupChecks
 {
     public static async Task Run(Action<bool,string> check,string parent)
     {
+        using(var compact=new LocalStore(Path.Combine(parent,"space-reclaim"))){
+            compact.Set("settings",new{Theme="dark",Folder="source"});compact.Set("credential-marker","retained");compact.Set("cache/test/large",new string('x',12*1024*1024));compact.Set("cache/test/large","small");var before=compact.StorageUsage();
+            check(before.Free>=8*1024*1024&&before.Content<1024,"database statistics distinguish reusable empty pages from real retained content");
+            compact.ReclaimUnusedSpace();var after=compact.StorageUsage();check(after.Database<before.Database/4&&after.Free<4096,"automatic maintenance reclaims substantial free pages instead of deleting cache records");
+            check(compact.Get("credential-marker","")=="retained"&&compact.Get("cache/test/large","")=="small"&&compact.Get("settings",new Dictionary<string,string>())["Folder"]=="source","database compaction preserves settings credentials and every retained cache record");
+        }
         var root=Path.Combine(parent,"cache-cleanup");using var store=new LocalStore(root);var account="user_a";var prefix="cache/"+account;
         var settings=new Settings{Account=account,ClientId="fixture-client",Bindings=[new(){AppId="fixture-app",Repository="owner/app"}],LocalGroups=[new("group","local","本地",["owner/app"])],PortableApps=[new("portable","Portable","1.0",root,true)],LastCheck=DateTimeOffset.UtcNow};store.Set("settings",settings);store.Set("auth","protected-fixture");store.Set("packages/user_a",new[]{"managed-package"});
         store.Set(prefix+"/repos",new[]{new Repository("owner/app","",false)});store.Set(prefix+"/groups",new[]{new StarGroup("id","group","GitHub",["owner/app"])});var release=new Release(1,"owner/app","1.0.0.0","name","notes",false,DateTimeOffset.UtcNow,"",[]);store.Set(prefix+"/releases",new[]{release});store.Set(prefix+"/installed",new InstalledSnapshot(DateTimeOffset.UtcNow,[new("fixture-app","App","0.9",root)]));store.Set(prefix+"/http-releases/owner/app/1",new{ETag="fixture"});
