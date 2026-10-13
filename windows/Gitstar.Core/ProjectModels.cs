@@ -19,7 +19,12 @@ public record GitChange(string Status,string Path,string Original="")
     public string Label=>StatusName+"  ·  "+Path+(Original.Length>0?"  ← "+Original:"");
     public string[] Paths=>Original.Length>0?[Path,Original]:[Path];
 }
-public record GitProjectState(string Folder,string Branch,string Remote,string Commit,List<GitChange> Changes,string Summary);
+public record GitProjectState(string Folder,string Branch,string Remote,string Commit,List<GitChange> Changes,string Summary)
+{
+    public string? RemoteCommit {get;init;}
+    public bool SourceSynced=>Commit.Length>0 && Commit.Equals(RemoteCommit,StringComparison.OrdinalIgnoreCase);
+    public string SyncSummary=>Changes.Count>0?$"{Changes.Count} 个未提交变更，可上传更新。":Commit.Length==0?"尚无提交，请先添加源码。":SourceSynced?"源码已与 GitHub 同步；安装包更新请使用“同步并发布最新”。":RemoteCommit==null?"没有未提交变更；GitHub 提交状态尚未核实，可推送已有提交。":"没有未提交变更；本地提交与 GitHub 不同，可推送已有提交。";
+}
 public record WorkspaceDiagnosis(string Folder,string Root,string Remote)
 {
     public bool HasRepository=>Root.Length>0;

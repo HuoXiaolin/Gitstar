@@ -114,7 +114,8 @@ public partial class MainWindow
             var available=Directory.Exists(workspace.Folder);var marker=Path.Combine(workspace.Folder,".git");var initialized=available&&(Directory.Exists(marker)||File.Exists(marker));
             if(!initialized){projectStates.Remove(p.FullName);source.Children.Add(ProjectText(available?"此目录已不再是独立 Git 仓库，旧分支和提交信息已清除。请重新关联或初始化源码目录。":"关联目录已不存在，旧分支和提交信息已清除。请重新关联源码目录。",13,true));}
             else if(projectStates.TryGetValue(p.FullName,out var state)){
-                source.Children.Add(ProjectText($"上次检查：{state.Branch}   ·   {state.Changes.Count} 个变更   ·   "+(state.Commit.Length>0?state.Commit[..Math.Min(10,state.Commit.Length)]:"尚无提交")));
+                source.Children.Add(ProjectText($"上次检查：{state.Branch}   ·   {state.Changes.Count} 个未提交变更   ·   "+(state.Commit.Length>0?state.Commit[..Math.Min(10,state.Commit.Length)]:"尚无提交")));
+                source.Children.Add(ProjectText(state.SyncSummary,12,true));
                 source.Children.Add(ProjectText(state.Remote,11,true));
                 foreach(var change in state.Changes.Take(6))source.Children.Add(ProjectText(change.Label,12,true));
                 if(state.Changes.Count>6)source.Children.Add(ProjectText($"还有 {state.Changes.Count-6} 个文件，可在提交窗口查看。",11,true));
@@ -149,7 +150,15 @@ public partial class MainWindow
     }
     private async Task InspectProject(ManagedProject p)
     {
-        var workspace=Workspace(p)??throw new IOException("请先关联本地目录。");projectStates.Remove(p.FullName);RenderProjectDetails(p);await Execute("源码检查",p.FullName,async ct=>{var state=await new GitWorkspace("").Inspect(workspace.Folder,ct);if(!ProjectRules.MatchesRemote(state.Remote,p.FullName))throw new IOException("本地 origin 与项目不一致，请重新关联正确的仓库。");RememberWorkspace(p,state);model.Status=$"{p.Name} · {state.Changes.Count} 个变更";},resources:["git:"+Path.GetFullPath(workspace.Folder)]);
+        var workspace=Workspace(p)??throw new IOException("请先关联本地目录。");projectStates.Remove(p.FullName);RenderProjectDetails(p);await Execute("源码检查",p.FullName,async ct=>{var state=await new GitWorkspace("").Inspect(workspace.Folder,ct);if(!ProjectRules.MatchesRemote(state.Remote,p.FullName))throw new IOException("本地 origin 与项目不一致，请重新关联正确的仓库。");state=await VerifySourceRemote(state,p.FullName,ct);RememberWorkspace(p,state);model.Status=p.Name+" · "+state.SyncSummary;},resources:["git:"+Path.GetFullPath(workspace.Folder)]);
+    }
+    private async Task<GitProjectState> VerifySourceRemote(GitProjectState state,string repo,CancellationToken ct)
+    {
+        if(api.Token.Length==0||state.Branch=="分离 HEAD")return state;
+        try{await api.EnsureFreshToken(ct);return state with{RemoteCommit=await api.BranchCommit(repo,state.Branch,ct)};}
+        catch(GitHubNotFoundException){return state with{RemoteCommit=""};}
+        catch(IOException){return state;}
+        catch(System.Net.Http.HttpRequestException){return state;}
     }
     private async Task SyncProjectVersions(ManagedProject p)
     {

@@ -33,5 +33,16 @@ static class WorkflowChecks
         Task<(string Name,string Email)> Fallback(CancellationToken ct){calls++;return Task.FromResult(("Fixture","17+fixture@users.noreply.github.com"));}
         await git.EnsureIdentity(folder,Fallback,CancellationToken.None);check(calls==1&&await git.Run(folder,CancellationToken.None,"config","--get","user.name")=="Fixture","first upload prepares missing identity in selected repository");
         await git.Run(folder,CancellationToken.None,"config","--local","user.name","Existing author");await git.EnsureIdentity(folder,Fallback,CancellationToken.None);check(calls==1&&await git.Run(folder,CancellationToken.None,"config","--get","user.name")=="Existing author","configured commit identity remains unchanged without another profile request");
+        await File.WriteAllTextAsync(Path.Combine(folder,"source.txt"),"first");await git.Run(folder,CancellationToken.None,"add","--","source.txt");await git.Run(folder,CancellationToken.None,"commit","-m","first");
+        var clean=await git.Inspect(folder,CancellationToken.None);
+        check(clean.Changes.Count==0&&!clean.SourceSynced&&clean.SyncSummary.Contains("尚未核实"),"clean working tree alone does not claim source was uploaded");
+        var synced=clean with{RemoteCommit=clean.Commit};check(synced.SourceSynced&&synced.SyncSummary.Contains("安装包更新"),"matching remote commit distinguishes synchronized source from release package updates");
+        var pending=clean with{RemoteCommit=new string('0',40)};check(!pending.SourceSynced&&pending.SyncSummary.Contains("推送已有提交"),"clean source with different remote commit remains uploadable");
+        await File.WriteAllTextAsync(Path.Combine(folder,"source.txt"),"second");var changed=await git.Inspect(folder,CancellationToken.None);
+        check(!SourceWorkflow.SameSnapshot(clean,changed)&&changed.SyncSummary.Contains("未提交变更"),"fresh edit after clean review invalidates stale push-only decision");
+        await File.WriteAllTextAsync(Path.Combine(folder,"new.txt"),"new");var added=await git.Inspect(folder,CancellationToken.None);
+        check(!SourceWorkflow.SameSnapshot(changed,added),"new files added while source dialog is open require refreshed selection");
+        check(SourceWorkflow.SameSnapshot(added,await git.Inspect(folder,CancellationToken.None)),"unchanged refreshed source snapshot remains uploadable");
+        check(!SourceWorkflow.SameSnapshot(added,added with{Commit=new string('1',40)})&&!SourceWorkflow.SameSnapshot(added,added with{Remote="https://github.com/other/repo.git"}),"changed HEAD or origin invalidates reviewed upload target");
     }
 }
