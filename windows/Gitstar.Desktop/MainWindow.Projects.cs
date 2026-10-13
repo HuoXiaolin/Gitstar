@@ -23,6 +23,24 @@ public partial class MainWindow
         projectWorkspaces=projectWorkspaces.Select(w=>w with{Folder=PathPreferences.ProjectPath(w.Folder)}).ToList();foreach(var key in projectAutomation.Keys.ToArray()){var c=projectAutomation[key];projectAutomation[key]=c with{SourceFolder=PathPreferences.ProjectPath(c.SourceFolder),ReleaseFolder=PathPreferences.ProjectPath(c.ReleaseFolder),VersionFile=PathPreferences.ProjectPath(c.VersionFile),NotesFile=PathPreferences.ProjectPath(c.NotesFile)};}SaveProjects();
     }
     private void SaveProjects(){store.Set(ProjectsKey,myProjects);store.Set(ProjectsKey+"/workspaces",projectWorkspaces);store.Set(ProjectsKey+"/versions",projectVersions);store.Set(ProjectsKey+"/synced",projectsSynced);store.Set(ProjectsKey+"/automation",projectAutomation);}
+    private void RememberProjectVersion(string repo,ProjectVersion version)
+    {
+        var history=projectVersions.GetValueOrDefault(repo)??[];projectVersions[repo]=history.Where(item=>item.Id!=version.Id).Append(version).OrderByDescending(item=>item.Updated).Take(30).ToList();SaveProjects();
+        if(projectsPage&&selectedProject==repo)RenderProjectDetails(myProjects.FirstOrDefault(p=>p.FullName.Equals(repo,StringComparison.OrdinalIgnoreCase)));
+    }
+    private async Task<ProjectVersion?> VerifyProjectVersion(ManagedProject project,ProjectVersion version)
+    {
+        ProjectVersion? fresh=null;
+        await Execute("版本核实",project.FullName+" · "+version.Tag,async ct=>{
+            try{fresh=await api.ProjectVersionDetails(project.FullName,version.Id,ct);RememberProjectVersion(project.FullName,fresh);model.Status=fresh.Tag+" · 已核实为"+fresh.Channel;}
+            catch(GitHubNotFoundException){if(projectVersions.TryGetValue(project.FullName,out var history))history.RemoveAll(item=>item.Id==version.Id);SaveProjects();if(selectedProject==project.FullName)RenderProjectDetails(project);model.Status="此版本已不存在或无权访问，已清除旧记录。";}
+        },resources:["repo:"+project.FullName]);return fresh;
+    }
+    private async Task OpenDraftAction(ManagedProject project,ProjectVersion version,bool edit)
+    {
+        var fresh=await VerifyProjectVersion(project,version);if(fresh?.Draft!=true)return;
+        if(edit)EditDraftDialog(project,fresh);else PublishDialog(project,fresh);
+    }
     private ProjectWorkspace? Workspace(ManagedProject project)=>projectWorkspaces.FirstOrDefault(w=>w.Repository.Equals(project.FullName,StringComparison.OrdinalIgnoreCase));
     private void InvalidateProjectCaches(IEnumerable<string> repositories)
     {
@@ -109,7 +127,7 @@ public partial class MainWindow
         else foreach(var version in history){
             var row=new Grid{Margin=new(0,12,0,0)};row.ColumnDefinitions.Add(new());row.ColumnDefinitions.Add(new(){Width=GridLength.Auto});var labels=new StackPanel();labels.Children.Add(ProjectText(version.Tag+"   ·   "+version.Channel,14));labels.Children.Add(ProjectText($"{version.AssetCount} 个安装包 / 附件   ·   {version.Updated.ToLocalTime():yyyy-MM-dd HH:mm}",11,true));row.Children.Add(labels);var actions=new WrapPanel();Grid.SetColumn(actions,1);row.Children.Add(actions);
             ProjectAction(actions,"日志",()=>ProjectDialog(()=>Form.Notes(this,p.Name+" · "+version.Tag,version.Body)));
-            if(version.Draft){ProjectAction(actions,"编辑草稿",()=>ProjectDialog(()=>EditDraftDialog(p,version)),enabled:writable);ProjectAction(actions,"继续发布",()=>ProjectDialog(()=>PublishDialog(p,version)),enabled:writable);}
+            if(version.Draft){ProjectAction(actions,"核实状态",async()=>{await VerifyProjectVersion(p,version);},enabled:api.Token.Length>0);ProjectAction(actions,"编辑草稿",()=>OpenDraftAction(p,version,true),enabled:writable);ProjectAction(actions,"继续发布",()=>OpenDraftAction(p,version,false),enabled:writable);}
             else ProjectAction(actions,"管理",()=>ProjectDialog(()=>WindowsServices.Open("https://github.com/"+p.FullName+"/releases/tag/"+Uri.EscapeDataString(version.Tag))));versions.Children.Add(row);
         }
         var recent=operations.Where(o=>o.Repository.Equals(p.FullName,StringComparison.OrdinalIgnoreCase) || o.Description.StartsWith(p.FullName,StringComparison.OrdinalIgnoreCase)).OrderByDescending(o=>o.Updated).Take(4).ToArray();
@@ -196,6 +214,6 @@ public partial class MainWindow
     private void EditDraftDialog(ManagedProject p,ProjectVersion v)
     {
         var f=new Form(this,"编辑版本草稿",760,650);f.Label(p.FullName+" · "+v.Tag);var name=f.Text("版本名称",v.Name);var beta=f.Check("测试版",v.Prerelease);var notes=f.Text("更新日志 Markdown",v.Body,true);
-        f.Action("保存草稿",async()=>{var n=name.Text.Trim();var body=notes.Text;var pre=beta.IsChecked==true;f.Close();await Execute("项目管理",p.FullName,async ct=>{await api.EditDraft(p.FullName,v.Id,n,body,pre,ct);projectVersions[p.FullName]=await api.ProjectVersions(p.FullName,ct);SaveProjects();if(selectedProject==p.FullName)RenderProjectDetails(p);},resources:["repo:"+p.FullName]);},true);f.ShowDialog();
+        f.Action("保存草稿",async()=>{var n=name.Text.Trim();var body=notes.Text;var pre=beta.IsChecked==true;f.Close();await Execute("项目管理",p.FullName,async ct=>{await api.EditDraft(p.FullName,v.Id,n,body,pre,ct);RememberProjectVersion(p.FullName,await api.ProjectVersionDetails(p.FullName,v.Id,ct));},resources:["repo:"+p.FullName]);},true);f.ShowDialog();
     }
 }

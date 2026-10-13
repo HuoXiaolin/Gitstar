@@ -64,7 +64,7 @@ public partial class MainWindow
                         await api.EnsureFreshToken(token);git=new GitWorkspace(api.Token);var before=await git.Inspect(config.SourceFolder,token);if(!ProjectRules.MatchesRemote(before.Remote,project.FullName))throw new IOException("源码目录 origin 与项目不一致，请重新关联。");await git.EnsureIdentity(config.SourceFolder,api.CommitIdentity,token);var state=await git.AutoUpload(config.SourceFolder,project.FullName,config.Branch,token);RememberWorkspace(project,state);op.Results.Add("成功：源码已同步 · "+state.Commit[..Math.Min(10,state.Commit.Length)]);SaveOperations();return state;
                     },Progress,ct,token=>git.Run(config.SourceFolder,token,"log","-5","--pretty=format:- %s (%h)"));
                     op.Tag=result.Tag;op.RemoteId=result.ReleaseId;op.Results.Add(result.Skipped?"成功：按配置保留同版本附件":"成功："+result.Tag+" · 上传 "+result.Uploaded+" 个，复用 "+result.Unchanged+" 个附件");
-                    projectVersions[project.FullName]=await api.ProjectVersions(project.FullName,ct);SaveProjects();transfer.Stage("同步发布完成");completed=true;
+                    if(result.Release is {} verified)RememberProjectVersion(project.FullName,verified);transfer.Stage("同步发布完成");completed=true;
                 }finally{automationSlots.Release();}
             },background:true,resources:["repo:"+project.FullName,"git:"+Path.GetFullPath(config.SourceFolder),"release:"+Path.GetFullPath(config.ReleaseFolder)],transfer:transfer);
         }finally{automaticPublishing.Remove(project.FullName);if(projectsPage&&selectedProject==project.FullName)RenderProjectDetails(project);}

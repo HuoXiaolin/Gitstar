@@ -479,19 +479,20 @@ public partial class MainWindow : Window
             await Execute("发布",r+" · "+t,async ct=>{
                 var op=currentOperation.Value!;op.Repository=r;op.Tag=t;SaveOperations();
                 JsonElement draft;
-                if(resume){draft=await api.ReleaseDetails(r,existing,ct);if(!draft.GetProperty("draft").GetBoolean()||draft.GetProperty("tag_name").GetString()!=t)throw new IOException("ID 不是对应版本的草稿。");await api.EditDraft(r,existing,draft.GetProperty("name").GetString()??t,body,pre,ct);}
+                if(resume){draft=await api.ReleaseDetails(r,existing,ct);RememberProjectVersion(r,GitHubClient.ParseProjectVersion(draft));if(!draft.GetProperty("draft").GetBoolean())throw new IOException("此版本已经发布，界面状态已更新，可点击“管理”查看。");if(draft.GetProperty("tag_name").GetString()!=t)throw new IOException("ID 不是对应版本的草稿。");await api.EditDraft(r,existing,draft.GetProperty("name").GetString()??t,body,pre,ct);}
                 else {await api.VerifyCommit(r,sha,ct);draft=await api.CreateDraft(r,t,sha,body,pre,ct);}
                 var releaseId=draft.GetProperty("id").GetInt64();op.RemoteId=releaseId;SaveOperations();
                 var uploaded=draft.GetProperty("assets").EnumerateArray().Select(a=>a.GetProperty("name").GetString()).ToHashSet(StringComparer.OrdinalIgnoreCase);
                 if(paths.Any(p=>uploaded.Contains(Path.GetFileName(p))))throw new IOException("草稿已有同名安装包，不会覆盖；请核对 GitHub，移除已上传路径后恢复。");
                 foreach(var path in paths){model.Status="上传安装包："+Path.GetFileName(path);await api.Upload(r,releaseId,path,ct);}
                 var verified=await api.ReleaseDetails(r,releaseId,ct);var assetNames=string.Join("\n",verified.GetProperty("assets").EnumerateArray().Select(a=>$"{a.GetProperty("name").GetString()} · {a.GetProperty("size").GetInt64()/1024.0/1024:F1} MB"));
-                if(releaseNow){await api.Publish(r,releaseId,ct);model.Status="版本已发布："+r+" · "+t;}
-                else model.Status=$"草稿已保留，Release ID：{releaseId}。";
-                projectVersions[r]=await api.ProjectVersions(r,ct);SaveProjects();if(projectsPage && selectedProject==r)RenderProjectDetails(myProjects.FirstOrDefault(p=>p.FullName==r));
+                if(releaseNow)await api.Publish(r,releaseId,ct);
+                var latest=await api.ProjectVersionDetails(r,releaseId,ct);RememberProjectVersion(r,latest);
+                if(releaseNow&&latest.Draft)throw new IOException("GitHub 尚未确认版本已发布，草稿记录已更新，可点击“核实状态”继续核实。");
+                model.Status=latest.Draft?$"草稿已保留，Release ID：{releaseId}。":"版本已发布："+r+" · "+latest.Tag;
             },resources:["repo:"+r]);
         }
-        publishButton=f.Action("发布版本",()=>Publish(true),true);publishButton.IsEnabled=!reading;var saveDraft=f.Action("保存为草稿",()=>Publish(false));f.Buttons.Children.Remove(saveDraft);advanced.Children.Add(saveDraft);if(previewPath!=null){tag.Text="v0.2.0";notes.Text="简化项目创建、目录关联和源码上传流程。";assets.Text="Gitstar-win-x64.zip";f.RenderPreview(previewPath);}f.ShowDialog();
+        publishButton=f.Action("发布版本",()=>Publish(true),true);publishButton.IsEnabled=!reading;var saveDraft=f.Action("保存为草稿",()=>Publish(false));f.Buttons.Children.Remove(saveDraft);advanced.Children.Add(saveDraft);if(previewPath!=null){tag.Text="v1.0.0.0";notes.Text="简化项目创建、目录关联和源码上传流程。";assets.Text="Gitstar.exe\nGitstar-setup.exe";f.RenderPreview(previewPath);}f.ShowDialog();
     }
     public void Reopen(){Show();WindowState=WindowState.Normal;Activate();}
     private void OnClosing(object? sender,CancelEventArgs e) {if(exit)return;e.Cancel=true;Hide();model.Status="Gitstar 已收起到托盘，后台任务继续运行。";}
@@ -517,6 +518,13 @@ public partial class MainWindow : Window
             if(progressPreview){model.Cards[0].Transfer.Stage("下载中 0%",false);model.Cards[0].Transfer.Downloaded(27000000,50000000);if(model.Cards.Count>1)model.Cards[1].Transfer.Stage("安装器运行中");var before=model.Cards[0].Transfer;Page(!local);Page(local);File.WriteAllText(Path.ChangeExtension(path,".progress.json"),JsonSerializer.Serialize(new{ProgressPreserved=ReferenceEquals(before,model.Cards[0].Transfer),Label=model.Cards[0].Transfer.Label,CountCaption=model.CountCaption,Count=model.Count},new JsonSerializerOptions{WriteIndented=true}));}
         }
         if(projectsPreview){api.Token="offline-fixture";settings.Account="example";AccountLabel();settings.Dark=dark;ApplyTheme();myProjects=[new("example/Gitstar","跨设备 GitHub 项目管理与软件更新助手",false,"main",true,true,false,DateTimeOffset.Now),new("example/NotesKit","轻量笔记与知识库工具",true,"main",true,true,false,DateTimeOffset.Now.AddDays(-1)),new("team/CloudBridge","参与协作的服务连接组件",false,"develop",true,false,false,DateTimeOffset.Now.AddDays(-2))];projectAutomation["example/Gitstar"]=new("example/Gitstar",@"D:\Agant\Github_Source\Gitstar",@"D:\Agant\Github_Releases\Gitstar","windows/Directory.Build.props","main");projectsSynced=DateTimeOffset.Now;projectWorkspaces=[new("example/Gitstar",@"D:\Projects\Gitstar","main")];projectStates["example/Gitstar"]=new(@"D:\Projects\Gitstar","main","https://github.com/example/Gitstar.git","8a72bd918e23f41c456789012345678901234567",[new(" M","src/MainWindow.xaml"),new("??","docs/Gitstar使用说明.md"),new("??","docs/Windows版本设计.md"),new("??","docs/产品与技术设计.md")],"2 files changed");projectVersions["example/Gitstar"]=[new(2,"v0.2.0-beta.1","工作区管理升级","新增项目工作台、源码变更选择与草稿管理。",true,true,2,DateTimeOffset.Now,""),new(1,"v0.1.1","正式版","优化扫描速度与本机更新体验。",false,false,2,DateTimeOffset.Now.AddDays(-2),"")];Projects_Click(this,new());}
+        if(projectsPreview&&Environment.GetCommandLineArgs().Contains("--published-state")){
+            var repo="example/Gitstar";var confirmed=projectVersions[repo][0] with{Tag="1.0.0.0",Draft=false,Prerelease=false,AssetCount=4};RememberProjectVersion(repo,confirmed);
+            using var reopened=new LocalStore(store.Root);var persisted=reopened.Get(ProjectsKey+"/versions",new Dictionary<string,List<ProjectVersion>>())[repo].Single(version=>version.Id==confirmed.Id);
+            if(persisted!=confirmed)throw new IOException("Published state persistence failed");
+            File.WriteAllText(Path.ChangeExtension(path,".release-state.json"),JsonSerializer.Serialize(new{persisted.Draft,persisted.Channel,persisted.AssetCount,Persisted=true}));
+            UpdateLayout();var versionSection=(FrameworkElement)ProjectDetails.Children[3];((ScrollViewer)ProjectDetails.Parent).ScrollToVerticalOffset(versionSection.TranslatePoint(new Point(),ProjectDetails).Y);
+        }
         if(automationPreview){AutomationConfigDialog(myProjects.First(),path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}if(workspacePreview){await ResolveWorkspaceRoot(this,myProjects.First(),@"D:\Agant\github-update\outputs\Gitstar-source","main",previewPath:path);exit=true;tray.Icon?.Dispose();tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(sourcePreview || createPreview || projectSettingsPreview || publishPreview){if(sourcePreview)SourceDialog(myProjects.First(),path);else if(publishPreview)PublishDialog(myProjects.First(),previewPath:path);else if(projectSettingsPreview)EditProjectDialog(myProjects.First(),path);else CreateProjectDialog(path);exit=true;tray.Icon?.Dispose();tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         File.WriteAllText(Path.ChangeExtension(path,".layout.json"),JsonSerializer.Serialize(new {Height=ActualHeight,Width=ActualWidth,WorkAreaHeight=workArea.Height,DpiScale=dpi.DpiScaleY,HeightRatio=ActualHeight*dpi.DpiScaleY/workArea.Height,State=WindowState.ToString(),HeaderHeight=((FrameworkElement)Content).Margin.Top+BrandRow.ActualHeight+PageHeaderRow.ActualHeight+PageHeaderRow.Margin.Top+PageHeaderRow.Margin.Bottom,Cards=model.Cards.Count,SelectedGroup=(GroupSidebar.SelectedItem as GroupEntry)?.Id},new JsonSerializerOptions {WriteIndented=true}));

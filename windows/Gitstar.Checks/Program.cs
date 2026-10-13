@@ -177,6 +177,7 @@ await ProjectChecks.Run(Check,root);
 await RepositorySettingsChecks.Run(Check);
 await WorkspaceChecks.Run(Check,root);
 await WorkflowChecks.Run(Check,root);
+await ReleaseStateChecks.Run(Check);
 await AutomationChecks.Run(Check,root);
 await DownloadPreferencesChecks.Run(Check,root);
 var trackedPath=Path.Combine(root,"owner_tool","setup-x64.exe");Directory.CreateDirectory(Path.GetDirectoryName(trackedPath)!);File.WriteAllText(trackedPath,"owned");var trackedPackage=latestPackage with{Root=root,Path=trackedPath,AssetName="setup-x64.exe",Size=5,Sha256=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("owned")))};

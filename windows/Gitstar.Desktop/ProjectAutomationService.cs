@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 namespace Gitstar.Desktop;
 
-public record AutomationResult(GitProjectState Source,string Version,long ReleaseId,string Tag,int Uploaded,int Unchanged,bool Skipped);
+public record AutomationResult(GitProjectState Source,string Version,long ReleaseId,string Tag,int Uploaded,int Unchanged,bool Skipped,ProjectVersion? Release=null);
 public static class ProjectAutomationService
 {
     private record Snapshot(string Name,string Path,long Size,string Sha);
@@ -19,7 +19,7 @@ public static class ProjectAutomationService
             var manifest=snapshots.FirstOrDefault(item=>item.Name.Equals("SHA256SUMS.txt",StringComparison.OrdinalIgnoreCase));if(manifest!=null){var verified=0;foreach(var line in await File.ReadAllLinesAsync(manifest.Path,ct)){if(string.IsNullOrWhiteSpace(line)||line.TrimStart().StartsWith('#'))continue;var match=System.Text.RegularExpressions.Regex.Match(line,@"^([A-Fa-f0-9]{64})\s+\*?(.+)$");if(!match.Success)throw new IOException("SHA256SUMS.txt 格式无效。");var item=snapshots.FirstOrDefault(item=>item.Name.Equals(match.Groups[2].Value,StringComparison.OrdinalIgnoreCase));if(item==null)continue;if(!item.Sha.Equals(match.Groups[1].Value,StringComparison.OrdinalIgnoreCase))throw new IOException("发行文件与校验清单不一致，可能仍在构建："+item.Name);verified++;}if(verified==0)throw new IOException("校验清单没有覆盖所选安装包，请完成构建后重试。");}
             if(AutomationRules.ReadVersion(plan.VersionFile)!=plan.Version)throw new IOException("准备安装包期间版本号发生变化，请构建完成后重试。");
             progress("自动提交并推送源码",null);var source=await uploadSource(ct);await api.VerifyCommit(config.Repository,source.Commit,ct);
-            var release=found.Release;if(release!=null&&!config.ReplaceSameVersion)return new(source,plan.Version,release.Value.GetProperty("id").GetInt64(),release.Value.GetProperty("tag_name").GetString()!,0,0,true);
+            var release=found.Release;if(release!=null&&!config.ReplaceSameVersion){var currentRelease=await api.ProjectVersionDetails(config.Repository,release.Value.GetProperty("id").GetInt64(),ct);return new(source,plan.Version,currentRelease.Id,currentRelease.Tag,0,0,true,currentRelease);}
             var tag=release?.GetProperty("tag_name").GetString()??plan.Tag;string notes;
             if(configuredNotes!=null)notes=configuredNotes;
             else notes="## 更新内容\n\n"+(sourceNotes!=null?await sourceNotes(ct):"同步最新源码与安装包。")+"\n\n本次上传源码提交：`"+source.Commit+"`\n\n安装包版本："+plan.Version;
@@ -39,7 +39,7 @@ public static class ProjectAutomationService
             }
             var verify=await api.ReleaseDetails(config.Repository,id,ct);foreach(var snapshot in snapshots){var asset=verify.GetProperty("assets").EnumerateArray().FirstOrDefault(item=>item.GetProperty("name").GetString()==snapshot.Name);if(asset.ValueKind==JsonValueKind.Undefined||!await api.AutomationAssetMatches(config.Repository,asset,snapshot.Size,snapshot.Sha,ct))throw new IOException("安装包最终结果未确认。");}
             progress("发布版本并更新日志",id);await api.UpdateAutomationRelease(config.Repository,id,tag,source.Commit,notes,plan.Prerelease,ct);var final=await api.ReleaseDetails(config.Repository,id,ct);if(final.GetProperty("draft").GetBoolean()||final.GetProperty("tag_name").GetString()!=tag||final.GetProperty("prerelease").GetBoolean()!=plan.Prerelease||!final.TryGetProperty("body",out var body)||body.GetString()!=notes)throw new IOException("发布结果尚未确认，可点击重试自动核实。");
-            return new(source,plan.Version,id,tag,uploaded,unchanged,false);
+            return new(source,plan.Version,id,tag,uploaded,unchanged,false,GitHubClient.ParseProjectVersion(final));
         }finally{try{Directory.Delete(stage,true);}catch(IOException){}catch(UnauthorizedAccessException){}}
     }
 }

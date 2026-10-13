@@ -22,13 +22,14 @@ public sealed partial class GitHubClient : IDisposable
         http = new HttpClient(transport??handler) { Timeout=TimeSpan.FromMinutes(3) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("Gitstar/"+(typeof(Program).Assembly.GetName().Version?.ToString()??"1.0.0.0"));
     }
-    private async Task<JsonElement> Request(string url, HttpMethod? method=null, object? body=null, CancellationToken ct=default,Action<JsonElement>? consume=null,string? etag=null,Action<string,bool>? cacheResult=null)
+    private async Task<JsonElement> Request(string url, HttpMethod? method=null, object? body=null, CancellationToken ct=default,Action<JsonElement>? consume=null,string? etag=null,Action<string,bool>? cacheResult=null,bool fresh=false)
     {
         await EnsureFreshToken(ct);
         using var msg = new HttpRequestMessage(method ?? HttpMethod.Get, url.StartsWith("https://",StringComparison.Ordinal) ? url : "https://api.github.com/" + url);
         if (msg.RequestUri!.Host is not ("api.github.com" or "uploads.github.com")) throw new ArgumentException("无效的 GitHub API 主机。");
         msg.Headers.Accept.ParseAdd("application/vnd.github+json"); msg.Headers.Add("X-GitHub-Api-Version","2022-11-28");
         if(etag!=null && EntityTagHeaderValue.TryParse(etag,out var tag))msg.Headers.IfNoneMatch.Add(tag);
+        if(fresh)msg.Headers.CacheControl=new CacheControlHeaderValue{NoCache=true,NoStore=true};
         if (Token.Length > 0) msg.Headers.Authorization = new AuthenticationHeaderValue("Bearer",Token);
         if (body != null) msg.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8,"application/json");
         else if(msg.Method==HttpMethod.Put)msg.Content=new ByteArrayContent([]);
@@ -149,7 +150,7 @@ public sealed partial class GitHubClient : IDisposable
         using var res=await http.SendAsync(req,ct); if(!res.IsSuccessStatusCode)throw new IOException($"上传安装包失败：{(int)res.StatusCode}。草稿已保留。");
         using var doc=JsonDocument.Parse(await res.Content.ReadAsStringAsync(ct)); if(doc.RootElement.GetProperty("size").GetInt64()!=stream.Length || S(doc.RootElement,"state")!="uploaded")throw new IOException("上传结果待核实。");
     }
-    public Task<JsonElement> ReleaseDetails(string repo,long id,CancellationToken ct)=>Request($"repos/{repo}/releases/{id}",ct:ct);
+    public Task<JsonElement> ReleaseDetails(string repo,long id,CancellationToken ct){Validate(repo);return Request($"repos/{repo}/releases/{id}",ct:ct,fresh:true);}
     public Task<JsonElement> Publish(string repo,long id,CancellationToken ct)=>Request($"repos/{repo}/releases/{id}",HttpMethod.Patch,new {draft=false},ct);
     public static void Validate(string repo) { if(!Rules.ValidRepository(repo))throw new ArgumentException("请输入 owner/repository 格式的 GitHub 仓库。"); }
     public void Dispose()=>http.Dispose();

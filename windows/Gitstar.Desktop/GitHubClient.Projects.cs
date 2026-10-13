@@ -56,8 +56,18 @@ public sealed partial class GitHubClient
     }
     public async Task<List<ProjectVersion>> ProjectVersions(string repo,CancellationToken ct)
     {
-        Validate(repo);var data=await Request($"repos/{repo}/releases?per_page=30&page=1",ct:ct);
-        return data.EnumerateArray().Select(e=>new ProjectVersion(e.GetProperty("id").GetInt64(),S(e,"tag_name"),S(e,"name"),S(e,"body"),e.GetProperty("draft").GetBoolean(),e.GetProperty("prerelease").GetBoolean(),e.GetProperty("assets").GetArrayLength(),DateTimeOffset.TryParse(S(e,"published_at"),out var date)||DateTimeOffset.TryParse(S(e,"created_at"),out date)?date:DateTimeOffset.MinValue,S(e,"html_url"))).ToList();
+        Validate(repo);var data=await Request($"repos/{repo}/releases?per_page=30&page=1",ct:ct,fresh:true);
+        var versions=data.EnumerateArray().Select(ParseProjectVersion).ToArray();
+        using var slots=new SemaphoreSlim(4);var reconciled=await Task.WhenAll(versions.Select(async version=>{
+            if(!version.Draft)return version;await slots.WaitAsync(ct);
+            try{return await ProjectVersionDetails(repo,version.Id,ct);}catch(GitHubNotFoundException){return null;}finally{slots.Release();}
+        }));
+        return reconciled.OfType<ProjectVersion>().OrderByDescending(version=>version.Updated).ToList();
+    }
+    internal static ProjectVersion ParseProjectVersion(JsonElement e)=>new(e.GetProperty("id").GetInt64(),S(e,"tag_name"),S(e,"name"),S(e,"body"),e.GetProperty("draft").GetBoolean(),e.GetProperty("prerelease").GetBoolean(),e.GetProperty("assets").GetArrayLength(),DateTimeOffset.TryParse(S(e,"published_at"),out var date)||DateTimeOffset.TryParse(S(e,"created_at"),out date)?date:DateTimeOffset.MinValue,S(e,"html_url"));
+    public async Task<ProjectVersion> ProjectVersionDetails(string repo,long id,CancellationToken ct)
+    {
+        var version=ParseProjectVersion(await ReleaseDetails(repo,id,ct));if(version.Id!=id)throw new IOException("GitHub 返回的版本 ID 不一致，请重新同步版本。");return version;
     }
     public async Task EditDraft(string repo,long id,string name,string notes,bool beta,CancellationToken ct)
     {

@@ -23,6 +23,7 @@ static class AutomationChecks
         using(var server=new AutomationServer())using(var api=new GitHubClient(new(),server.Handler)){
             var result=await ProjectAutomationService.Run(config,api,Path.Combine(root,"stage"),Upload,Progress,CancellationToken.None,ct=>Task.FromResult("- fixture commit"));
             check(result.Uploaded==1&&!server.Draft&&sourceCalls==1&&server.Creates==1,"one-click flow pushes source before draft creation then uploads verifies and publishes");
+            check(result.Release is {Draft:false,Prerelease:false,AssetCount:1}&&result.Release.Id==result.ReleaseId&&result.Release.Body==server.Notes,"automation returns authoritative published state for immediate persistent UI update");
             check(server.Notes.Contains("fixture commit")&&server.Notes.Contains(Sha)&&server.Notes.Contains("SHA-256"),"automatic release notes contain commit information and package digests");
             var repeat=await ProjectAutomationService.Run(config,api,Path.Combine(root,"stage"),Upload,Progress,CancellationToken.None);
             check(repeat.Unchanged==1&&server.Uploads==1&&server.Creates==1,"repeated click reuses verified same-version assets and avoids duplicate release creation");
