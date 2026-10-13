@@ -2,7 +2,7 @@
 
 Gitstar 是一款 Windows 桌面工具，将 GitHub 收藏项目的版本动态、本机软件更新和自己的项目管理集中到一个应用中。
 
-采用 WPF + .NET 10，提供彩色卡片界面、浅色与深色主题，以及免安装 ZIP 和安装版。
+当前版本 **1.0.0.0**，采用 WPF + .NET 10，提供彩色卡片界面、浅色与深色主题，以及免安装 ZIP 和安装版。
 
 ## 最近更新
 
@@ -65,3 +65,5 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File windows/build.ps1 -Dotne
 ```
 
 生成安装版时，再通过 `-Inno` 参数指定 Inno Setup 编译器路径。
+
+构建完成后，EXE、ZIP、安装版和说明直接输出到 `D:\Agant\Github-Releases\Gitstar`，不创建发行子文件夹，最新精简源码自动同步到 `D:\Agant\Github-Source\Gitstar`。可通过 `-OutputRoot` 和 `-SourceRoot` 参数自定义路径。

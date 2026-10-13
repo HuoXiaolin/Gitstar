@@ -20,7 +20,7 @@ public sealed partial class GitHubClient : IDisposable
         var handler = new HttpClientHandler { AllowAutoRedirect=false, UseProxy=!settings.DirectConnection };
         if (settings.Proxy.Length > 0) { var u = new Uri(settings.Proxy); if (u.UserInfo.Length > 0) throw new ArgumentException("代理地址中不要包含密码。"); handler.Proxy = new WebProxy(u); }
         http = new HttpClient(transport??handler) { Timeout=TimeSpan.FromMinutes(3) };
-        http.DefaultRequestHeaders.UserAgent.ParseAdd("Gitstar/0.1.0");
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("Gitstar/"+(typeof(Program).Assembly.GetName().Version?.ToString()??"1.0.0.0"));
     }
     private async Task<JsonElement> Request(string url, HttpMethod? method=null, object? body=null, CancellationToken ct=default,Action<JsonElement>? consume=null,string? etag=null,Action<string,bool>? cacheResult=null)
     {

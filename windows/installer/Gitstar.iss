@@ -1,15 +1,24 @@
-#define AppVersion "0.1.1"
+#ifndef AppVersion
+  #define AppVersion "1.0.0.0"
+#endif
+#ifndef ReleaseRoot
+  #define ReleaseRoot "D:\Agant\Github-Releases\Gitstar"
+#endif
 [Setup]
 AppId={{84F12204-67B1-41E8-956B-63841E986B89}
 AppName=Gitstar
 AppVersion={#AppVersion}
+VersionInfoVersion={#AppVersion}
+VersionInfoTextVersion={#AppVersion}
+VersionInfoProductVersion={#AppVersion}
+VersionInfoProductTextVersion={#AppVersion}
 AppPublisher=Gitstar
 DefaultDirName={localappdata}\Programs\Gitstar
 DefaultGroupName=Gitstar
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64os
 ArchitecturesInstallIn64BitMode=x64os
-OutputDir=..\..\outputs
+OutputDir={#ReleaseRoot}
 OutputBaseFilename=Gitstar-setup
 SetupIconFile=..\Gitstar.Desktop\Assets\Gitstar.ico
 UninstallDisplayIcon={app}\Gitstar.exe
@@ -22,7 +31,8 @@ DisableProgramGroupPage=yes
 [Languages]
 Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 [Files]
-Source: "..\..\outputs\Gitstar-win-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#ReleaseRoot}\Gitstar.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#ReleaseRoot}\使用说明.md"; DestDir: "{app}"; Flags: ignoreversion
 [InstallDelete]
 Type: files; Name: "{app}\Gitstar.dll"
 Type: files; Name: "{app}\Gitstar.Core.dll"
