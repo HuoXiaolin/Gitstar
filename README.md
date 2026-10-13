@@ -2,7 +2,7 @@
 
 Gitstar 是一款 Windows 桌面工具，将 GitHub 收藏项目的版本动态、本机软件更新和自己的项目管理集中到一个应用中。
 
-当前版本 **1.0.0.0**，采用 WPF + .NET 10，提供彩色卡片界面、浅色与深色主题，以及免安装 ZIP 和安装版。
+当前版本 **1.0.0.0**，采用 WPF + .NET 10，提供顶部模块导航、彩色卡片界面、浅色与深色主题，以及免安装 ZIP 和安装版。设置与操作弹窗采用统一控件，设置支持左侧分区导航。
 
 ## 最近更新
 
@@ -25,6 +25,7 @@ Gitstar 是一款 Windows 桌面工具，将 GitHub 收藏项目的版本动态�
 - 关联、初始化或克隆本地源码目录；目录不合适时，提供更换根目录、独立复制及远程地址修正操作。
 - 自动检查源码变更，勾选需要上传的文件，编辑提交说明后提交并推送。
 - 创建正式或测试版本，编写更新日志、上传安装包，支持草稿保存与继续发布。
+- 单项目“同步并发布最新”及“全部同步并发布最新”：按配置目录自动提交源码、读取最新版本并发布安装包；同版本更新附件与日志，保留版本标签，支持并行执行及失败后继续。
 - 管理仓库功能、合并方式和归档状态；协作者与分支保护等设置可跳转到 GitHub 管理。
 
 ## 任务与后台运行
@@ -66,4 +67,4 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File windows/build.ps1 -Dotne
 
 生成安装版时，再通过 `-Inno` 参数指定 Inno Setup 编译器路径。
 
-构建完成后，EXE、ZIP、安装版和说明直接输出到 `D:\Agant\Github-Releases\Gitstar`，不创建发行子文件夹，最新精简源码自动同步到 `D:\Agant\Github-Source\Gitstar`。可通过 `-OutputRoot` 和 `-SourceRoot` 参数自定义路径。
+构建完成后，EXE、ZIP、安装版和说明直接输出到 `D:\Agant\Github_Releases\Gitstar`，不创建发行子文件夹，最新精简源码自动同步到 `D:\Agant\Github_Source\Gitstar`。可通过 `-OutputRoot` 和 `-SourceRoot` 参数自定义路径。

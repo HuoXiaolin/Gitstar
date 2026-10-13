@@ -27,7 +27,7 @@ public sealed class Card : Observable
     private string? summary;
     public string Summary => summary ??= ReleasePreview.Create(Release.Body,Release.Tag);
     public string Action => Update==null ? "保存安装包" : Update.Asset?.Name.EndsWith(".zip",StringComparison.OrdinalIgnoreCase)==true ? "获取便携新版" : "下载并安装";
-    public string Accent => Update!=null ? "#0B9F87" : Release.Prerelease ? "#B77611" : new[]{"#3B6FF5","#7858D9","#078EA9"}[Release.Repository.Sum(c=>(int)c)%3];
+    public string Accent => Update!=null ? "#168673" : "#386AC6";
 }
 public sealed class TransferState : Observable
 {

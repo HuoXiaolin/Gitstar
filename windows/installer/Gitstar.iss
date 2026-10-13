@@ -2,7 +2,7 @@
   #define AppVersion "1.0.0.0"
 #endif
 #ifndef ReleaseRoot
-  #define ReleaseRoot "D:\Agant\Github-Releases\Gitstar"
+  #define ReleaseRoot "D:\Agant\Github_Releases\Gitstar"
 #endif
 [Setup]
 AppId={{84F12204-67B1-41E8-956B-63841E986B89}

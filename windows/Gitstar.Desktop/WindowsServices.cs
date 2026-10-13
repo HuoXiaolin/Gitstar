@@ -60,11 +60,11 @@ public static partial class WindowsServices
         }
         Directory.CreateDirectory(destination); archive.ExtractToDirectory(destination,false); return destination;
     }
-    public static string DownloadPath(Release release,Asset asset,string root)=>Path.Combine(Path.GetFullPath(root),Rules.SafeSegment(release.Repository.Replace('/','_')),Rules.SafeSegment(asset.Name));
-    public static async Task<string> Download(GitHubClient api,Release release,Asset asset,string root,Action<long,long> progress,CancellationToken ct,Action? verifying=null,Func<CancellationToken,Task<bool>>? replaceManaged=null)
+    public static string DownloadPath(Release release,Asset asset,string root)=>Path.Combine(Path.GetFullPath(root),PackageRules.FlatFileName(release.Repository,asset.Name,release.Tag));
+    public static async Task<string> Download(GitHubClient api,Release release,Asset asset,string root,Action<long,long> progress,CancellationToken ct,Action? verifying=null,Func<CancellationToken,Task<bool>>? replaceManaged=null,bool forceDownload=false,string? targetPath=null)
     {
-        var path=DownloadPath(release,asset,root);Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        if(File.Exists(path)) { verifying?.Invoke();if(await Verify(path,asset,ct))return path;if(replaceManaged==null || !await replaceManaged(ct))throw new IOException("同名文件存在但无法确认与此版本一致，请换目录或移走文件。"); }
+        var path=targetPath??DownloadPath(release,asset,root);var expectedRoot=Path.GetFullPath(root);if(!Path.GetDirectoryName(Path.GetFullPath(path))!.Equals(expectedRoot.TrimEnd(Path.DirectorySeparatorChar),StringComparison.OrdinalIgnoreCase))throw new IOException("安装包目标必须直接位于下载目录。");Directory.CreateDirectory(expectedRoot);
+        if(File.Exists(path)) { verifying?.Invoke();if(!forceDownload&&await Verify(path,asset,ct))return path;if(replaceManaged==null || !await replaceManaged(ct))throw new IOException("同名文件存在但无法确认归属，请换目录或移走文件。"); }
         var partial=path+".partial";
         // Partial files are not installed; retry restarts the stream instead of trusting stale ranges.
         using(var response=await api.AssetResponse(release.Repository,asset,ct)) {

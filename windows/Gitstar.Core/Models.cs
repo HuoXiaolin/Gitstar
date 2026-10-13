@@ -24,12 +24,13 @@ public class Binding
 }
 public class Settings
 {
+    public int SameVersionDownload {get;set;}
     public bool KeepLatestPackages {get;set;}
     public bool DeleteInstalledPackages {get;set;}
     public bool PromptInstalledPackageCleanup {get;set;}=true;
     public string ClientId { get; set; } = "";
     public string Account { get; set; } = "";
-    public string DownloadFolder { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "Gitstar");
+    public string DownloadFolder { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "Gitstar_Download");
     public string Proxy { get; set; } = "";
     public bool DirectConnection { get; set; }
     public bool Startup { get; set; }

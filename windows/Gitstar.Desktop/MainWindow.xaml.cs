@@ -96,7 +96,7 @@ public partial class MainWindow : Window
     private void Save(){store.Set("settings",settings);if(installedFresh)SaveInstalledSnapshot();}
     private void SaveOperations()=>store.Set(OperationsKey,operations);
     private void SwitchOperations(){operations.Clear();operations.AddRange(store.Get(OperationsKey,new List<Operation>()));}
-    private void LoadCache() {repositories=store.Get(CacheKey+"/repos",new List<Repository>());releases=ReleaseRetention.Compact(store.Get(CacheKey+"/releases",new List<Release>()),settings.Bindings);groups=store.Get(CacheKey+"/groups",new List<StarGroup>());packages=store.Get(PackagesKey,new List<DownloadedPackage>());installed=InstalledSnapshot.Capture(store.Get(CacheKey+"/installed",new InstalledSnapshot(DateTimeOffset.MinValue,[])).Apps,settings.Bindings).Apps;installedFresh=false;LoadProjects();}
+    private void LoadCache() {PathPreferences.Migrate(settings);store.Set("settings",settings);repositories=store.Get(CacheKey+"/repos",new List<Repository>());releases=ReleaseRetention.Compact(store.Get(CacheKey+"/releases",new List<Release>()),settings.Bindings);groups=store.Get(CacheKey+"/groups",new List<StarGroup>());packages=store.Get(PackagesKey,new List<DownloadedPackage>());installed=InstalledSnapshot.Capture(store.Get(CacheKey+"/installed",new InstalledSnapshot(DateTimeOffset.MinValue,[])).Apps,settings.Bindings).Apps;installedFresh=false;LoadProjects();}
     private void SaveCache() {releases=ReleaseRetention.Compact(releases,settings.Bindings);PruneTransfers();store.Set(CacheKey+"/repos",repositories);store.Set(CacheKey+"/releases",releases);store.Set(CacheKey+"/groups",groups);}
     private void PruneTransfers()
     {
@@ -116,12 +116,6 @@ public partial class MainWindow : Window
             GroupFilter.ItemsSource=model.Groups.Select(g=>g.Name).ToArray();
             var index=model.Groups.ToList().FindIndex(g=>g.Id==selected);GroupFilter.SelectedIndex=Math.Max(index,0);GroupSidebar.SelectedIndex=GroupFilter.SelectedIndex;
         }finally{syncingGroups=false;}Display();
-    }
-    private void ApplyTheme()
-    {
-        var palette=settings.Dark?new[]{"#151B2B","#20283D","#E8EEFF","#A9B4CE","#343F59"}:new[]{"#F4F6FC","#FFFFFF","#202A44","#67748E","#E6EAF4"};
-        var keys=new[]{"Background","Surface","Ink","Muted","Edge"};for(var i=0;i<keys.Length;i++)Resources[keys[i]]=new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette[i]));
-        Resources["ProjectSelection"]=new SolidColorBrush((Color)ColorConverter.ConvertFromString(settings.Dark?"#383053":"#EEE8FC"));
     }
     private void PlanUpdates()
     {
@@ -150,7 +144,7 @@ public partial class MainWindow : Window
         var now=DateTimeOffset.UtcNow;
         model.CountCaption=localPage?"本机待更新软件":"最近 7 天更新";
         model.Count=localPage?$"{model.Cards.Count} 个可更新":$"{Rules.RecentProjectCount(model.Cards.Select(c=>c.Release),now)} 个项目";
-        CountPanel.Background=localPage?new LinearGradientBrush(Color.FromRgb(14,148,116),Color.FromRgb(33,187,197),45):new LinearGradientBrush(Color.FromRgb(50,108,238),Color.FromRgb(134,97,220),45);
+        CountPanel.Background=(Brush)Resources["AccentSoft"];
         model.Empty=localPage?"没有已确认的软件更新":"还没有匹配的版本";
         model.Hint=localPage?$"已检测 {installed.Count} 个软件，已关联 {settings.Bindings.Count} 个。点击「自动匹配 / 批量关联」集中确认软件仓库；未匹配项仍可手动管理。":"登录 GitHub 同步收藏，或添加仓库；也可调整左侧分组、搜索和版本通道。";
         EmptyPanel.Visibility=model.Cards.Count==0?Visibility.Visible:Visibility.Collapsed;
@@ -159,7 +153,7 @@ public partial class MainWindow : Window
     private void Sidebar_Changed(object sender,SelectionChangedEventArgs e){if(syncingGroups||GroupFilter==null)return;syncingGroups=true;try{GroupFilter.SelectedIndex=GroupSidebar.SelectedIndex;}finally{syncingGroups=false;}Display();}
     private void Recent_Click(object sender,RoutedEventArgs e)=>Page(false);
     private void Local_Click(object sender,RoutedEventArgs e)=>Page(true);
-    private void Page(bool local) {projectsPage=false;ProjectsHost.Visibility=Visibility.Collapsed;UpdatesToolbar.Visibility=UpdatesContent.Visibility=Visibility.Visible;ProjectsButton.Background=(Brush)Resources["Surface"];ProjectsButton.Foreground=(Brush)Resources["Ink"];localPage=local;if(local)model.SelectionMode=false;BatchButton.Visibility=local?Visibility.Collapsed:Visibility.Visible;SidebarColumn.Width=new GridLength(local?0:208);GroupPanel.Visibility=local?Visibility.Collapsed:Visibility.Visible;AddButton.Content=local?"自动匹配 / 批量关联":"＋  添加项目";model.Title=local?"这台电脑的软件更新":"关注项目的新版本";model.Subtitle=local?"自动识别软件对应仓库，批量确认后检查更新；安装仍由你完成。":"按收藏分组查看更新内容，将所需安装包保存到指定文件夹。";GroupFilter.IsEnabled=!local;RecentButton.Background=local?(Brush)Resources["Surface"]:new SolidColorBrush(Color.FromRgb(228,236,255));RecentButton.Foreground=local?(Brush)Resources["Ink"]:new SolidColorBrush(Color.FromRgb(52,103,222));LocalButton.Background=local?new SolidColorBrush(Color.FromRgb(218,244,235)):(Brush)Resources["Surface"];LocalButton.Foreground=local?new SolidColorBrush(Color.FromRgb(14,116,88)):(Brush)Resources["Ink"];Display();}
+    private void Page(bool local) {projectsPage=false;ProjectsHost.Visibility=Visibility.Collapsed;UpdatesToolbar.Visibility=UpdatesContent.Visibility=Visibility.Visible;ProjectsButton.Background=(Brush)Resources["Surface"];ProjectsButton.Foreground=(Brush)Resources["Ink"];localPage=local;if(local)model.SelectionMode=false;BatchButton.Visibility=local?Visibility.Collapsed:Visibility.Visible;SidebarColumn.Width=new GridLength(local?0:208);GroupPanel.Visibility=local?Visibility.Collapsed:Visibility.Visible;AddButton.Content=local?"自动匹配 / 批量关联":"添加项目";model.Title=local?"这台电脑的软件更新":"关注项目的新版本";model.Subtitle=local?"自动识别软件对应仓库，批量确认后检查更新；安装仍由你完成。":"按收藏分组查看更新内容，将所需安装包保存到指定文件夹。";GroupFilter.IsEnabled=!local;SetPageAccent(local?1:0);Display();}
     private async void Refresh_Click(object sender,RoutedEventArgs e)=>await RefreshAsync(matchedOnly:localPage);
     private async Task RefreshAsync(bool background=false,bool matchedOnly=false)
     {
@@ -202,16 +196,16 @@ public partial class MainWindow : Window
         var previous=currentOperation.Value;currentOperation.Value=op;var started=false;
         if(kind=="检查")refreshing=true;
         try {await run.WaitAsync();started=true;op.State="执行中";SaveOperations();model.Status=kind+" · "+description+" · 正在处理…";await work(run.Token);op.State=op.Results.Any(r=>r.StartsWith("待处理"))?(op.Results.Any(r=>r.StartsWith("成功"))?"部分完成，请核实待处理项":"未完成，请核实待处理项"):"完成";}        catch(OperationCanceledException){
-            var remote=kind is "发布" or "源码上传" or "Star管理" or "分组管理" or "批量管理" or "项目管理";
+            var remote=kind is "自动发布" or "发布" or "源码上传" or "Star管理" or "分组管理" or "批量管理" or "项目管理";
             op.State=!started?"已"+run.StopReason+"等待":remote?"已"+run.StopReason+" · 远程结果待核实":run.StopReason=="取消"?"已取消":"已暂停（下载重试会重新开始）";
             if(run.StopReason=="取消" && kind=="下载" && op.File.EndsWith(".partial",StringComparison.OrdinalIgnoreCase)){try{if(File.Exists(op.File))File.Delete(op.File);}catch(Exception ex)when(ex is IOException or UnauthorizedAccessException){op.Results.Add("临时文件清理待处理："+ex.Message);}}
             model.Status=description+" · "+op.State;
-        }        catch(Exception e){op.State=kind is "发布" or "源码上传" or "Star管理" or "分组管理" or "批量管理" or "项目管理"?"结果待核实："+e.Message:"失败："+e.Message;model.Status=e.Message;if(!background)DialogMessage.Show(this,e.Message,"操作未完成",MessageBoxButton.OK,MessageBoxImage.Warning);}
+        }        catch(Exception e){op.State=kind is "自动发布" or "发布" or "源码上传" or "Star管理" or "分组管理" or "批量管理" or "项目管理"?"结果待核实："+e.Message:"失败："+e.Message;model.Status=e.Message;if(!background)DialogMessage.Show(this,e.Message,"操作未完成",MessageBoxButton.OK,MessageBoxImage.Warning);}
         finally{if(started && (kind is "Star管理" or "分组管理" or "批量管理" or "项目管理")){Save();SaveCache();RebuildGroups();PlanUpdates();Display();}op.Updated=DateTimeOffset.Now;taskTransfers.Remove(op.Id);SaveOperations();currentOperation.Value=previous;if(kind=="检查")refreshing=false;run.Dispose();if(settings.KeepLatestPackages && !quitting && !exit)_=Dispatcher.BeginInvoke(async()=>await CleanupOldPackages());}
     }
     private async void Login_Click(object sender,RoutedEventArgs e)
     {
-        if(busy){DialogMessage.Show(this,"请先等待当前任务完成。","Gitstar");return;}
+        if(busy||batchPublishing){DialogMessage.Show(this,"请先等待当前任务完成。","Gitstar");return;}
         if(settings.Account.Length>0) {
             if(DialogMessage.Show(this,$"退出 {settings.Account}？此账号缓存将留在本机，界面切回未登录状态。","Gitstar",MessageBoxButton.OKCancel)!=MessageBoxResult.OK)return;
             store.Set("profile/"+settings.Account,settings);CredentialStorage.Clear(store);var old=settings;
@@ -265,13 +259,19 @@ public partial class MainWindow : Window
             if(string.IsNullOrEmpty(asset.Digest)&&DialogMessage.Show(f,"作者未提供 SHA-256 摘要，本次只能核对文件大小。仍要下载吗？","Gitstar",MessageBoxButton.YesNo,MessageBoxImage.Warning)!=MessageBoxResult.Yes)return Task.CompletedTask;
             settings.DownloadFolder=root;Save();f.Tag=(asset,root);f.Close();return Task.CompletedTask;
         },true);f.ShowDialog();if(f.Tag is not ValueTuple<Asset,string> selection)return;
-        card.Transfer.Stage("等待下载任务");
+        var downloadTarget=PackageTarget(card.Release,selection.Item1,selection.Item2);card.Transfer.Stage("等待下载任务");
         await Execute("下载",card.Repository+" · "+selection.Item1.Name,async ct=>{
-            var state=card.Transfer;var operation=currentOperation.Value!;operation.Repository=card.Repository;operation.File=WindowsServices.DownloadPath(card.Release,selection.Item1,selection.Item2)+".partial";state.Percentage=0;state.Detail=selection.Item1.Name;state.Stage("下载中 0%",false);
+            var state=card.Transfer;var operation=currentOperation.Value!;operation.Repository=card.Repository;operation.Tag=card.Release.Tag;operation.File=downloadTarget+".partial";state.Percentage=0;state.Detail=selection.Item1.Name;state.Stage("下载中 0%",false);
             try{
                 var progressAt=DateTime.MinValue;
+                var replaceSame=false;var previousPackage=packages.FirstOrDefault(p=>p.Path.Equals(downloadTarget,StringComparison.OrdinalIgnoreCase)&&PackageRules.SameVersion(p,card.Release,selection.Item1));
+                if(previousPackage!=null&&await PackageFiles.Matches(previousPackage,ct)){
+                    state.Stage("处理同版本安装包");var decision=settings.SameVersionDownload;
+                    if(decision==0){var duplicate=new Form(this,"同版本安装包已存在",640,420);duplicate.Label(card.Repository+" · "+card.Release.Tag+"\n\n"+downloadTarget+"\n\n选择重新下载并替换，或跳过本次下载和安装。旧文件会保留到新文件校验成功。");duplicate.Action("跳过",()=>{decision=2;duplicate.Close();return Task.CompletedTask;}).IsCancel=true;duplicate.Action("重新下载并替换",()=>{decision=1;duplicate.Close();return Task.CompletedTask;},true);duplicate.ShowDialog();if(decision==0)decision=2;}
+                    if(decision==2){state.Finish("已跳过下载");state.Detail=downloadTarget;operation.Results.Add("已存在同版本安装包，跳过下载和安装。");model.Status="已跳过同版本安装包："+selection.Item1.Name;return;}replaceSame=true;
+                }
                 // Download continuations run on the UI context; report directly to avoid queued percentages overwriting later stages.
-                var path=await WindowsServices.Download(api,card.Release,selection.Item1,selection.Item2,(a,b)=>{if(a<b && DateTime.UtcNow-progressAt<TimeSpan.FromMilliseconds(100))return;progressAt=DateTime.UtcNow;state.Downloaded(a,b);model.Status=$"正在下载 {selection.Item1.Name} · {state.Detail}";},ct,()=>{state.Stage("校验中");model.Status="正在校验安装包："+selection.Item1.Name;},token=>CanReplacePackage(card.Release,selection.Item1,selection.Item2,token));
+                var path=await WindowsServices.Download(api,card.Release,selection.Item1,selection.Item2,(a,b)=>{if(a<b && DateTime.UtcNow-progressAt<TimeSpan.FromMilliseconds(100))return;progressAt=DateTime.UtcNow;state.Downloaded(a,b);model.Status=$"正在下载 {selection.Item1.Name} · {state.Detail}";},ct,()=>{state.Stage("校验中");model.Status="正在校验安装包："+selection.Item1.Name;},token=>CanReplacePackage(card.Release,selection.Item1,downloadTarget,token,replaceSame),forceDownload:replaceSame,targetPath:downloadTarget);
                 model.Status="安装包已保存："+path;
                 await RecordPackage(card.Release,selection.Item1,path,selection.Item2,ct);
                 if(!install){state.Finish("已保存安装包");state.Detail=path;return;}
@@ -288,7 +288,7 @@ public partial class MainWindow : Window
                 }
             }catch(OperationCanceledException){if(!state.NeedsDetection){state.Finish("重新下载");state.Detail="下载已停止，重试将重新下载。";}throw;}
             catch(Exception ex){if(state.Label!="安装包架构不兼容")state.Finish("重试下载");state.Detail=ex.Message;throw;}
-        },resources:new[]{"file:"+WindowsServices.DownloadPath(card.Release,selection.Item1,selection.Item2)}.Concat(install?new[]{"app:"+card.Update!.App.Id}:Array.Empty<string>()).ToArray(),transfer:card.Transfer);
+        },resources:new[]{"file:"+downloadTarget}.Concat(install?new[]{"app:"+card.Update!.App.Id}:Array.Empty<string>()).ToArray(),transfer:card.Transfer);
         if(card.Transfer.Active)card.Transfer.Finish("重新下载");
     }
     private async Task ObserveInstaller(Process process,Card card,string account,CancellationToken ct,string packagePath)
@@ -395,13 +395,13 @@ public partial class MainWindow : Window
     private void Settings_Click(object sender,RoutedEventArgs e)=>SettingsDialog();
     private void SettingsDialog(string? previewPath=null)
     {
-        if(busy){DialogMessage.Show(this,"请先等待任务完成，再修改账号与网络设置。","Gitstar");return;}
-        var f=new Form(this,"设置",740,730);f.Section("GitHub 账号与授权");var client=f.Text("GitHub OAuth App Client ID",settings.ClientId);f.Label("浏览器设备授权无需把 Client Secret 写入客户端。创建 OAuth App 后启用 Device Flow。");
+        if(busy||batchPublishing){DialogMessage.Show(this,"请先等待任务完成，再修改账号与网络设置。","Gitstar");return;}
+        var f=new Form(this,"设置",940,730);f.Section("GitHub 账号与授权");var client=f.Text("GitHub OAuth App Client ID",settings.ClientId);f.Label("浏览器设备授权无需把 Client Secret 写入客户端。创建 OAuth App 后启用 Device Flow。");
         f.Section("本地数据与清理");var dataFolder=f.Text("应用数据目录",Path.GetFullPath(store.Root));dataFolder.IsReadOnly=true;dataFolder.ToolTip=dataFolder.Text;var database=f.Text("数据库文件",Path.Combine(dataFolder.Text,"gitstar.db"));database.IsReadOnly=true;database.ToolTip=database.Text;
         var dataActions=new WrapPanel{Margin=new Thickness(0,0,0,8)};f.Fields.Children.Add(dataActions);var openData=f.Action("打开数据目录",()=>{WindowsServices.Open(dataFolder.Text);return Task.CompletedTask;});var copyData=f.Action("复制目录路径",()=>{Clipboard.SetText(dataFolder.Text);return Task.CompletedTask;});foreach(var button in new[]{openData,copyData}){f.Buttons.Children.Remove(button);button.Margin=new Thickness(0,0,8,0);dataActions.Children.Add(button);}
         f.Label("此目录保存登录凭据、设置、分组、软件与源码目录关联、缓存及任务记录。数据库运行时可能同时存在 gitstar.db-wal 和 gitstar.db-shm 文件。");f.Label("清理方法：从系统托盘选择“彻底退出”，再删除上面的应用数据目录。关闭窗口只会收起到托盘；删除数据后应用将恢复初始状态。下载目录中的安装包需单独整理。");
         f.Section("安装包管理");var keepLatest=f.Check("只保留各项目、平台和正式/测试通道的最新安装包",settings.KeepLatestPackages);var autoDelete=f.Check("确认安装成功后自动删除安装包",settings.DeleteInstalledPackages);var promptDelete=f.Check("更新检查完成后，询问是否删除已安装的安装包",settings.PromptInstalledPackageCleanup);promptDelete.IsEnabled=!autoDelete.IsChecked.GetValueOrDefault();autoDelete.Checked+=(_,_)=>promptDelete.IsEnabled=false;autoDelete.Unchecked+=(_,_)=>promptDelete.IsEnabled=true;f.Label("清理 Gitstar 记录的下载文件。自动删除默认关闭；确认主程序已达到目标版本后处理。同版本的其他安装包保留。选择保留后不重复询问。旧下载文件可手动整理。");
-        f.Section("下载与更新");var folder=f.Text("默认下载目录",settings.DownloadFolder);var selfRepo=f.Text("Gitstar 自身更新仓库（owner/repo，可留空）",settings.SelfRepository);f.Section("网络与启动");var proxy=f.Text("应用代理地址（http/https/socks5，无用户名密码；留空使用系统代理）",settings.Proxy);var direct=f.Check("直连（不使用系统代理）",settings.DirectConnection);var startup=f.Check("登录 Windows 后启动，并收起到托盘",settings.Startup);f.Section("外观");var dark=f.Check("深色模式",settings.Dark);
+        f.Section("下载与更新");var folder=f.Text("默认下载目录",settings.DownloadFolder);var sameVersion=f.Select("同版本安装包已存在时",["每次询问：替换或跳过","重新下载并替换","跳过下载和安装"],settings.SameVersionDownload);f.Label("安装包直接保存在此目录，不创建项目或版本子文件夹。文件名包含项目和版本，区分不同项目的同名安装包。替换前会核对旧下载记录，新文件校验成功后才覆盖。");var selfRepo=f.Text("Gitstar 自身更新仓库（owner/repo，可留空）",settings.SelfRepository);f.Section("网络与启动");var proxy=f.Text("应用代理地址（http/https/socks5，无用户名密码；留空使用系统代理）",settings.Proxy);var direct=f.Check("直连（不使用系统代理）",settings.DirectConnection);var startup=f.Check("登录 Windows 后启动，并收起到托盘",settings.Startup);f.Section("外观");var dark=f.Check("深色模式",settings.Dark);
         f.Section("自动检查");var frequency=f.Select("后台刷新频率",RefreshSchedule.Labels,Array.IndexOf(RefreshSchedule.Hours,RefreshSchedule.Normalize(settings.RefreshIntervalHours)));
         f.Label("默认每天刷新一次，也可设为仅手动。切换页面只显示缓存；点击「检查更新」或托盘「立即检查更新」可强制刷新，不受周期限制。后台不下载；关闭窗口收起托盘。");
         f.Action("重新授权 GitHub",()=>{settings.ClientId=client.Text.Trim();Save();f.Close();AuthorizeGitHub();return Task.CompletedTask;});
@@ -410,22 +410,23 @@ public partial class MainWindow : Window
         f.Action("保存",()=>{
             if(proxy.Text.Trim().Length>0 && (!Uri.TryCreate(proxy.Text.Trim(),UriKind.Absolute,out var u)||u.Scheme is not ("http" or "https" or "socks5")||u.UserInfo.Length>0))throw new ArgumentException("代理请输入 http、https 或 socks5 地址，不能包含密码。");
             if(selfRepo.Text.Trim().Length>0)GitHubClient.Validate(selfRepo.Text.Trim());settings.SelfRepository=selfRepo.Text.Trim();settings.ClientId=client.Text.Trim();settings.DownloadFolder=Path.GetFullPath(folder.Text);settings.Proxy=proxy.Text.Trim();settings.DirectConnection=direct.IsChecked==true;settings.Startup=startup.IsChecked==true;settings.Dark=dark.IsChecked==true;
-            settings.KeepLatestPackages=keepLatest.IsChecked==true;settings.DeleteInstalledPackages=autoDelete.IsChecked==true;settings.PromptInstalledPackageCleanup=promptDelete.IsChecked==true;settings.RefreshIntervalHours=RefreshSchedule.Hours[frequency.SelectedIndex];WindowsServices.Startup(settings.Startup);Save();var authorization=api.Credentials;api.Dispose();api=new(settings);ConfigureApiCache();api.CredentialsChanged=auth=>CredentialStorage.Save(store,auth);api.SetCredentials(authorization);AvatarCache.Configure(settings);ApplyTheme();Display();f.Close();return Task.CompletedTask;
-        },true);if(previewPath!=null)f.RenderPreview(previewPath);f.ShowDialog();
+            settings.SameVersionDownload=sameVersion.SelectedIndex;settings.KeepLatestPackages=keepLatest.IsChecked==true;settings.DeleteInstalledPackages=autoDelete.IsChecked==true;settings.PromptInstalledPackageCleanup=promptDelete.IsChecked==true;settings.RefreshIntervalHours=RefreshSchedule.Hours[frequency.SelectedIndex];WindowsServices.Startup(settings.Startup);Save();var authorization=api.Credentials;api.Dispose();api=new(settings);ConfigureApiCache();api.CredentialsChanged=auth=>CredentialStorage.Save(store,auth);api.SetCredentials(authorization);AvatarCache.Configure(settings);ApplyTheme();Display();f.Close();return Task.CompletedTask;
+        },true);f.SectionNavigation(previewPath!=null?"下载与更新":null);if(previewPath!=null)f.RenderPreview(previewPath);f.ShowDialog();
     }
     private void Tasks_Click(object sender,RoutedEventArgs e)=>TasksDialog();
     private void TasksDialog(string? previewPath=null)
     {
         var f=new Form(this,"任务记录",850,620);
-        var rows=new List<(Operation Op,TextBlock Label,Button Pause,Button Cancel)>();
+        var rows=new List<(Operation Op,TextBlock Label,Button Pause,Button Cancel,Button Resume)>();
         foreach(var o in operations.AsEnumerable().Reverse().Take(80)){
             var row=new Grid{Margin=new Thickness(0,6,0,12)};row.ColumnDefinitions.Add(new(){Width=new GridLength(1,GridUnitType.Star)});row.ColumnDefinitions.Add(new(){Width=GridLength.Auto});
             var label=new TextBlock{TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,12,0)};label.SetResourceReference(TextBlock.ForegroundProperty,"Ink");row.Children.Add(label);
             var actions=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Top};Grid.SetColumn(actions,1);
             var pause=new Button{Content="暂停",Padding=new Thickness(12,7,12,7),Margin=new Thickness(0,0,6,0)};var cancel=new Button{Content="取消",Padding=new Thickness(12,7,12,7)};
-            pause.Click+=(_,_)=>taskCoordinator.Pause(o.Id);cancel.Click+=(_,_)=>{if(taskCoordinator.Contains(o.Id))taskCoordinator.Cancel(o.Id);else if(o.State.StartsWith("已暂停")){try{if(o.Kind=="下载" && o.File.EndsWith(".partial",StringComparison.OrdinalIgnoreCase) && File.Exists(o.File))File.Delete(o.File);o.State=o.State.Contains("远程结果待核实")?"已取消 · 远程结果待核实":"已取消";SaveOperations();}catch(Exception ex)when(ex is IOException or UnauthorizedAccessException){DialogMessage.Show(f,ex.Message,"临时文件清理未完成");}}};actions.Children.Add(pause);actions.Children.Add(cancel);row.Children.Add(actions);f.Fields.Children.Add(row);rows.Add((o,label,pause,cancel));
+            pause.Click+=(_,_)=>taskCoordinator.Pause(o.Id);cancel.Click+=(_,_)=>{if(taskCoordinator.Contains(o.Id))taskCoordinator.Cancel(o.Id);else if(o.State.StartsWith("已暂停")){try{if(o.Kind=="下载" && o.File.EndsWith(".partial",StringComparison.OrdinalIgnoreCase) && File.Exists(o.File))File.Delete(o.File);o.State=o.State.Contains("远程结果待核实")?"已取消 · 远程结果待核实":"已取消";SaveOperations();}catch(Exception ex)when(ex is IOException or UnauthorizedAccessException){DialogMessage.Show(f,ex.Message,"临时文件清理未完成");}}};actions.Children.Add(pause);actions.Children.Add(cancel);
+            var resume=new Button{Content="重试 / 继续",Padding=new Thickness(12,7,12,7),Margin=new Thickness(6,0,0,0),Visibility=o.Kind=="自动发布"?Visibility.Visible:Visibility.Collapsed};resume.Click+=async(_,_)=>{var project=myProjects.FirstOrDefault(p=>p.FullName.Equals(o.Repository,StringComparison.OrdinalIgnoreCase));if(project==null){model.Status="此项目已不在当前项目列表，请先刷新项目列表。";return;}f.Close();await AutoPublishProject(project,true);};actions.Children.Add(resume);row.Children.Add(actions);f.Fields.Children.Add(row);rows.Add((o,label,pause,cancel,resume));
         }
-        void Update(){foreach(var row in rows){row.Label.Text=$"{row.Op.Updated:MM-dd HH:mm}  [{row.Op.Kind}] {row.Op.Description}\n{row.Op.State}"+(taskTransfers.TryGetValue(row.Op.Id,out var transfer)?" · "+transfer.Label+"\n"+transfer.Detail:"")+(row.Op.Results.Count>0?"\n"+string.Join("\n",row.Op.Results):"")+(row.Op.RemoteId!=null?$"\n草稿 Release ID：{row.Op.RemoteId}":"");row.Pause.IsEnabled=taskCoordinator.Contains(row.Op.Id);row.Cancel.IsEnabled=row.Pause.IsEnabled||row.Op.State.StartsWith("已暂停");}}
+        void Update(){foreach(var row in rows){row.Label.Text=$"{row.Op.Updated:MM-dd HH:mm}  [{row.Op.Kind}] {row.Op.Description}\n{row.Op.State}"+(taskTransfers.TryGetValue(row.Op.Id,out var transfer)?" · "+transfer.Label+"\n"+transfer.Detail:"")+(row.Op.Results.Count>0?"\n"+string.Join("\n",row.Op.Results):"")+(row.Op.RemoteId!=null?$"\nRelease ID：{row.Op.RemoteId}":"");row.Pause.IsEnabled=taskCoordinator.Contains(row.Op.Id);row.Cancel.IsEnabled=row.Pause.IsEnabled||row.Op.State.StartsWith("已暂停");row.Resume.IsEnabled=!row.Pause.IsEnabled&&row.Op.State!="完成"&&projectAutomation.ContainsKey(row.Op.Repository)&&!automaticPublishing.ContainsKey(row.Op.Repository);}}
         var refresh=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(500)};refresh.Tick+=(_,_)=>Update();f.Closed+=(_,_)=>refresh.Stop();Update();refresh.Start();
         f.Label("每个任务独立暂停或取消。暂停下载保留 .partial，重试从头下载；取消清理未完成临时文件，不删除已完成安装包。上传/发布保留已完成部分，结果不明请核实远程。外部安装器不会被关闭。");
         f.Action("暂停全部任务",()=>{taskCoordinator.CancelAll();return Task.CompletedTask;});f.Action("关闭",()=>{f.Close();return Task.CompletedTask;});if(previewPath!=null)f.RenderPreview(previewPath);f.ShowDialog();
@@ -499,8 +500,9 @@ public partial class MainWindow : Window
         if(quitting)return;if(busy){if(DialogMessage.Show(this,"有多个任务可能正在执行。暂停后退出？下载重试会重新开始；发布或推送结果不明会留待核实。","Gitstar",MessageBoxButton.OKCancel)!=MessageBoxResult.OK)return;quitting=true;taskCoordinator.CancelAll();while(busy)await Task.Delay(100);}
         exit=true;timer.Stop();Save();SaveOperations();tray.Visible=false;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();
     }
-    public async void RenderSmoke(string path,bool cards=false,bool local=false,bool dark=false,bool firstGroup=false,bool matching=false,bool settingsPreview=false,bool avatars=false,bool progressPreview=false,bool groupPreview=false,bool addPreview=false,bool batchPreview=false,bool tasksPreview=false,bool projectsPreview=false,bool sourcePreview=false,bool createPreview=false,bool projectSettingsPreview=false,bool workspacePreview=false,bool publishPreview=false)
+    public async void RenderSmoke(string path,bool cards=false,bool local=false,bool dark=false,bool firstGroup=false,bool matching=false,bool settingsPreview=false,bool avatars=false,bool progressPreview=false,bool groupPreview=false,bool addPreview=false,bool batchPreview=false,bool tasksPreview=false,bool projectsPreview=false,bool sourcePreview=false,bool createPreview=false,bool projectSettingsPreview=false,bool workspacePreview=false,bool publishPreview=false,bool automationPreview=false)
     {
+        settings.Dark=dark;ApplyTheme();
         var workArea=Forms.Screen.FromHandle(new System.Windows.Interop.WindowInteropHelper(this).Handle).WorkingArea;
         var dpi=VisualTreeHelper.GetDpi(this);
         File.WriteAllText(Path.ChangeExtension(path,".layout.json"),JsonSerializer.Serialize(new {Height=ActualHeight,Width=ActualWidth,WorkAreaHeight=workArea.Height,DpiScale=dpi.DpiScaleY,HeightRatio=ActualHeight*dpi.DpiScaleY/workArea.Height,State=WindowState.ToString()},new JsonSerializerOptions {WriteIndented=true}));
@@ -514,8 +516,8 @@ public partial class MainWindow : Window
             if(batchPreview){model.SelectionMode=true;model.Cards[0].IsSelected=true;}
             if(progressPreview){model.Cards[0].Transfer.Stage("下载中 0%",false);model.Cards[0].Transfer.Downloaded(27000000,50000000);if(model.Cards.Count>1)model.Cards[1].Transfer.Stage("安装器运行中");var before=model.Cards[0].Transfer;Page(!local);Page(local);File.WriteAllText(Path.ChangeExtension(path,".progress.json"),JsonSerializer.Serialize(new{ProgressPreserved=ReferenceEquals(before,model.Cards[0].Transfer),Label=model.Cards[0].Transfer.Label,CountCaption=model.CountCaption,Count=model.Count},new JsonSerializerOptions{WriteIndented=true}));}
         }
-        if(projectsPreview){api.Token="offline-fixture";settings.Account="example";AccountLabel();settings.Dark=dark;ApplyTheme();myProjects=[new("example/Gitstar","跨设备 GitHub 项目管理与软件更新助手",false,"main",true,true,false,DateTimeOffset.Now),new("example/NotesKit","轻量笔记与知识库工具",true,"main",true,true,false,DateTimeOffset.Now.AddDays(-1)),new("team/CloudBridge","参与协作的服务连接组件",false,"develop",true,false,false,DateTimeOffset.Now.AddDays(-2))];projectsSynced=DateTimeOffset.Now;projectWorkspaces=[new("example/Gitstar",@"D:\Projects\Gitstar","main")];projectStates["example/Gitstar"]=new(@"D:\Projects\Gitstar","main","https://github.com/example/Gitstar.git","8a72bd918e23f41c456789012345678901234567",[new(" M","src/MainWindow.xaml"),new("??","docs/Gitstar使用说明.md"),new("??","docs/Windows版本设计.md"),new("??","docs/产品与技术设计.md")],"2 files changed");projectVersions["example/Gitstar"]=[new(2,"v0.2.0-beta.1","工作区管理升级","新增项目工作台、源码变更选择与草稿管理。",true,true,2,DateTimeOffset.Now,""),new(1,"v0.1.1","正式版","优化扫描速度与本机更新体验。",false,false,2,DateTimeOffset.Now.AddDays(-2),"")];Projects_Click(this,new());}
-        if(workspacePreview){await ResolveWorkspaceRoot(this,myProjects.First(),@"D:\Agant\github-update\outputs\Gitstar-source","main",previewPath:path);exit=true;tray.Icon?.Dispose();tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
+        if(projectsPreview){api.Token="offline-fixture";settings.Account="example";AccountLabel();settings.Dark=dark;ApplyTheme();myProjects=[new("example/Gitstar","跨设备 GitHub 项目管理与软件更新助手",false,"main",true,true,false,DateTimeOffset.Now),new("example/NotesKit","轻量笔记与知识库工具",true,"main",true,true,false,DateTimeOffset.Now.AddDays(-1)),new("team/CloudBridge","参与协作的服务连接组件",false,"develop",true,false,false,DateTimeOffset.Now.AddDays(-2))];projectAutomation["example/Gitstar"]=new("example/Gitstar",@"D:\Agant\Github_Source\Gitstar",@"D:\Agant\Github_Releases\Gitstar","windows/Directory.Build.props","main");projectsSynced=DateTimeOffset.Now;projectWorkspaces=[new("example/Gitstar",@"D:\Projects\Gitstar","main")];projectStates["example/Gitstar"]=new(@"D:\Projects\Gitstar","main","https://github.com/example/Gitstar.git","8a72bd918e23f41c456789012345678901234567",[new(" M","src/MainWindow.xaml"),new("??","docs/Gitstar使用说明.md"),new("??","docs/Windows版本设计.md"),new("??","docs/产品与技术设计.md")],"2 files changed");projectVersions["example/Gitstar"]=[new(2,"v0.2.0-beta.1","工作区管理升级","新增项目工作台、源码变更选择与草稿管理。",true,true,2,DateTimeOffset.Now,""),new(1,"v0.1.1","正式版","优化扫描速度与本机更新体验。",false,false,2,DateTimeOffset.Now.AddDays(-2),"")];Projects_Click(this,new());}
+        if(automationPreview){AutomationConfigDialog(myProjects.First(),path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}if(workspacePreview){await ResolveWorkspaceRoot(this,myProjects.First(),@"D:\Agant\github-update\outputs\Gitstar-source","main",previewPath:path);exit=true;tray.Icon?.Dispose();tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(sourcePreview || createPreview || projectSettingsPreview || publishPreview){if(sourcePreview)SourceDialog(myProjects.First(),path);else if(publishPreview)PublishDialog(myProjects.First(),previewPath:path);else if(projectSettingsPreview)EditProjectDialog(myProjects.First(),path);else CreateProjectDialog(path);exit=true;tray.Icon?.Dispose();tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         File.WriteAllText(Path.ChangeExtension(path,".layout.json"),JsonSerializer.Serialize(new {Height=ActualHeight,Width=ActualWidth,WorkAreaHeight=workArea.Height,DpiScale=dpi.DpiScaleY,HeightRatio=ActualHeight*dpi.DpiScaleY/workArea.Height,State=WindowState.ToString(),HeaderHeight=((FrameworkElement)Content).Margin.Top+BrandRow.ActualHeight+PageHeaderRow.ActualHeight+PageHeaderRow.Margin.Top+PageHeaderRow.Margin.Bottom,Cards=model.Cards.Count,SelectedGroup=(GroupSidebar.SelectedItem as GroupEntry)?.Id},new JsonSerializerOptions {WriteIndented=true}));
         if(tasksPreview){

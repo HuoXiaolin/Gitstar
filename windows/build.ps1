@@ -1,4 +1,4 @@
-﻿param([string]$Dotnet='D:\Agant\toolchain\dotnet\dotnet.exe',[string]$Inno=(Join-Path $PSScriptRoot '..\build-tools\InnoSetup\ISCC.exe'),[string]$OutputRoot='D:\Agant\Github-Releases\Gitstar',[string]$SourceRoot='D:\Agant\Github-Source')
+﻿param([string]$Dotnet='D:\Agant\toolchain\dotnet\dotnet.exe',[string]$Inno=(Join-Path $PSScriptRoot '..\build-tools\InnoSetup\ISCC.exe'),[string]$OutputRoot='D:\Agant\Github_Releases\Gitstar',[string]$SourceRoot='D:\Agant\Github_Source')
 $ErrorActionPreference='Stop'
 $projectRoot=Split-Path $PSScriptRoot -Parent
 [xml]$versionProps=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Directory.Build.props')
@@ -14,7 +14,20 @@ if($LASTEXITCODE -ne 0){throw 'Publish failed'}
 Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\Gitstar使用说明.md') -Destination (Join-Path $publishPath '使用说明.md')
 New-Item -ItemType Directory -Force -Path $releasePath | Out-Null
 $releaseNames=@('Gitstar.exe','使用说明.md')
-foreach($releaseName in $releaseNames){Copy-Item -LiteralPath (Join-Path $publishPath $releaseName) -Destination (Join-Path $releasePath $releaseName) -Force}
+foreach($releaseName in $releaseNames){
+  $releaseFile=Join-Path $releasePath $releaseName
+  try{Copy-Item -LiteralPath (Join-Path $publishPath $releaseName) -Destination $releaseFile -Force -ErrorAction Stop}
+  catch{
+    if($releaseName -ne 'Gitstar.exe' -or -not(Test-Path -LiteralPath $releaseFile)){throw}
+    $retiredRoot=[IO.Path]::GetFullPath((Join-Path $projectRoot 'artifacts\retired-runtime'))
+    New-Item -ItemType Directory -Path $retiredRoot -Force | Out-Null
+    $retiredFile=[IO.Path]::GetFullPath((Join-Path $retiredRoot ('Gitstar-'+[guid]::NewGuid().ToString('N')+'.exe')))
+    if(-not $retiredFile.StartsWith($retiredRoot.TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Retired executable escaped build directory'}
+    Move-Item -LiteralPath $releaseFile -Destination $retiredFile -ErrorAction Stop
+    try{Copy-Item -LiteralPath (Join-Path $publishPath $releaseName) -Destination $releaseFile -ErrorAction Stop}catch{Move-Item -LiteralPath $retiredFile -Destination $releaseFile -ErrorAction Stop;throw}
+    Write-Output 'Running app preserved; restart to load the updated executable.'
+  }
+}
 Compress-Archive -LiteralPath ($releaseNames | ForEach-Object {Join-Path $releasePath $_}) -DestinationPath (Join-Path $outputRoot 'Gitstar-win-x64.zip') -Force
  $installerBuilt=$false
 if(Test-Path -LiteralPath $Inno){& $Inno "/DReleaseRoot=$outputRoot" "/DAppVersion=$version" (Join-Path $PSScriptRoot 'installer\Gitstar.iss');if($LASTEXITCODE -ne 0){throw 'Installer build failed'};$installerBuilt=$true}

@@ -19,8 +19,10 @@ public partial class MainWindow
         myProjects=store.Get(ProjectsKey,new List<ManagedProject>());projectWorkspaces=store.Get(ProjectsKey+"/workspaces",new List<ProjectWorkspace>());
         projectVersions=new(store.Get(ProjectsKey+"/versions",new Dictionary<string,List<ProjectVersion>>()),StringComparer.OrdinalIgnoreCase);
         projectsSynced=store.Get<DateTimeOffset?>(ProjectsKey+"/synced",null);projectStates.Clear();selectedProject=null;
+        projectAutomation=new(store.Get(ProjectsKey+"/automation",new Dictionary<string,ProjectAutomation>()),StringComparer.OrdinalIgnoreCase);
+        projectWorkspaces=projectWorkspaces.Select(w=>w with{Folder=PathPreferences.ProjectPath(w.Folder)}).ToList();foreach(var key in projectAutomation.Keys.ToArray()){var c=projectAutomation[key];projectAutomation[key]=c with{SourceFolder=PathPreferences.ProjectPath(c.SourceFolder),ReleaseFolder=PathPreferences.ProjectPath(c.ReleaseFolder),VersionFile=PathPreferences.ProjectPath(c.VersionFile),NotesFile=PathPreferences.ProjectPath(c.NotesFile)};}SaveProjects();
     }
-    private void SaveProjects(){store.Set(ProjectsKey,myProjects);store.Set(ProjectsKey+"/workspaces",projectWorkspaces);store.Set(ProjectsKey+"/versions",projectVersions);store.Set(ProjectsKey+"/synced",projectsSynced);}
+    private void SaveProjects(){store.Set(ProjectsKey,myProjects);store.Set(ProjectsKey+"/workspaces",projectWorkspaces);store.Set(ProjectsKey+"/versions",projectVersions);store.Set(ProjectsKey+"/synced",projectsSynced);store.Set(ProjectsKey+"/automation",projectAutomation);}
     private ProjectWorkspace? Workspace(ManagedProject project)=>projectWorkspaces.FirstOrDefault(w=>w.Repository.Equals(project.FullName,StringComparison.OrdinalIgnoreCase));
     private void InvalidateProjectCaches(IEnumerable<string> repositories)
     {
@@ -34,7 +36,7 @@ public partial class MainWindow
     {
         projectsPage=true;model.SelectionMode=false;UpdatesToolbar.Visibility=UpdatesContent.Visibility=Visibility.Collapsed;ProjectsHost.Visibility=Visibility.Visible;
         RecentButton.Background=LocalButton.Background=(Brush)Resources["Surface"];RecentButton.Foreground=LocalButton.Foreground=(Brush)Resources["Ink"];
-        ProjectsButton.Background=new SolidColorBrush(Color.FromRgb(238,232,252));ProjectsButton.Foreground=new SolidColorBrush(Color.FromRgb(120,88,217));
+        SetPageAccent(2);
         model.Title="我的项目工作台";model.Subtitle="管理仓库与本地源码，提交变更，发布正式版与测试版。";RenderProjects();
     }
     private void ProjectFilter_Changed(object sender,RoutedEventArgs e){if(ready && projectsPage)RenderProjects();}
@@ -46,7 +48,7 @@ public partial class MainWindow
             var visible=myProjects.Where(p=>(p.FullName+" "+p.Description).Contains(query,StringComparison.OrdinalIgnoreCase)).Where(p=>filter switch{1=>!p.Private,2=>p.Private,3=>Workspace(p)!=null,_=>true}).OrderByDescending(p=>p.Updated).ToList();
             model.Projects.Clear();foreach(var p in visible)model.Projects.Add(p);
             var chosen=visible.FirstOrDefault(p=>p.FullName==selectedProject)??visible.FirstOrDefault();ProjectList.SelectedItem=chosen;selectedProject=chosen?.FullName;
-            model.CountCaption="项目工作区";model.Count=$"{myProjects.Count} 个项目";CountPanel.Background=new LinearGradientBrush(Color.FromRgb(120,88,217),Color.FromRgb(220,108,177),45);
+            model.CountCaption="项目工作区";model.Count=$"{myProjects.Count} 个项目";CountPanel.Background=(Brush)Resources["AccentSoft"];
             RenderProjectDetails(chosen);
         }finally{renderingProjects=false;}
     }
@@ -61,12 +63,13 @@ public partial class MainWindow
     private StackPanel ProjectSection(string title)
     {
         var content=new StackPanel();var heading=ProjectText(title,16);heading.FontWeight=FontWeights.SemiBold;content.Children.Add(heading);
-        var border=new Border{CornerRadius=new(14),BorderThickness=new(1),Padding=new(20),Margin=new(0,0,0,14),Child=content};border.SetResourceReference(Border.BackgroundProperty,"Surface");border.SetResourceReference(Border.BorderBrushProperty,"Edge");ProjectDetails.Children.Add(border);return content;
+        var border=new Border{CornerRadius=new(14),BorderThickness=new(1),Padding=new(18),Margin=new(0,0,0,12),Child=content};border.SetResourceReference(Border.BackgroundProperty,"Surface");border.SetResourceReference(Border.BorderBrushProperty,"Edge");ProjectDetails.Children.Add(border);return content;
     }
     private Button ProjectAction(Panel parent,string text,Func<Task> work,bool primary=false,bool enabled=true)
     {
         var button=new Button{Content=text,Padding=new(13,8,13,8),Margin=new(0,4,8,4),IsEnabled=enabled};
-        if(primary){button.Background=new SolidColorBrush(Color.FromRgb(120,88,217));button.Foreground=Brushes.White;button.BorderThickness=new(0);}
+        if(!primary && text is "打开 GitHub" or "项目设置" or "打开 Releases" or "同步版本" or "日志" or "管理" or "查看任务")button.SetResourceReference(StyleProperty,"TertiaryButton");
+        if(primary){button.SetResourceReference(BackgroundProperty,"Accent");button.Foreground=Brushes.White;button.BorderThickness=new(0);}
         button.Click+=async(_,_)=>{button.IsEnabled=false;try{await work();}catch(Exception ex){DialogMessage.Show(this,ex.Message,"操作未完成");}finally{button.IsEnabled=enabled;}};parent.Children.Add(button);return button;
     }
     private Task ProjectDialog(Action action){action();return Task.CompletedTask;}
@@ -78,6 +81,7 @@ public partial class MainWindow
         var p=project;var writable=ProjectWritable(p);var info=ProjectSection(p.Name);info.Children.Add(ProjectText(p.FullName+"   ·   "+p.Visibility+"   ·   "+p.Access+"   ·   默认分支 "+p.DefaultBranch,12,true));info.Children.Add(ProjectText(p.Description.Length>0?p.Description:"还没有项目说明",13,p.Description.Length==0));
         info.Children.Add(ProjectText("项目同步："+(projectsSynced?.ToLocalTime().ToString("MM-dd HH:mm")??"尚未同步"),11,true));var infoActions=new WrapPanel();info.Children.Add(infoActions);
         ProjectAction(infoActions,"打开 GitHub",()=>ProjectDialog(()=>WindowsServices.Open("https://github.com/"+p.FullName)));ProjectAction(infoActions,"项目设置",()=>OpenProjectSettings(p),enabled:p.CanAdmin&&api.Token.Length>0);
+        RenderProjectAutomation(p);
         var workspace=Workspace(p);var source=ProjectSection("源码工作区");
         if(workspace==null)source.Children.Add(ProjectText("关联现有 Git 仓库、初始化已有源码，或克隆远程项目到电脑。",13,true));
         else{

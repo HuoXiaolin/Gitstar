@@ -7,12 +7,16 @@ public partial class MainWindow
     private List<DownloadedPackage> packages=[];
     private string PackagesKey=>"packages/"+(settings.Account.Length>0?settings.Account:"guest");
     private void SavePackages()=>store.Set(PackagesKey,packages);
-    private async Task<bool> CanReplacePackage(Release release,Asset asset,string root,CancellationToken ct)
+    private string PackageTarget(Release release,Asset asset,string root)
     {
-        if(!settings.KeepLatestPackages)return false;var path=WindowsServices.DownloadPath(release,asset,root);
+        return WindowsServices.DownloadPath(release,asset,root);
+    }
+    private async Task<bool> CanReplacePackage(Release release,Asset asset,string path,CancellationToken ct,bool replaceSameVersion=false)
+    {
+        if(!settings.KeepLatestPackages&&!replaceSameVersion)return false;
         if(installed.Any(a=>a.ExecutablePath.Equals(path,StringComparison.OrdinalIgnoreCase)))return false;
-        var old=packages.FirstOrDefault(p=>p.Path.Equals(path,StringComparison.OrdinalIgnoreCase) && p.Repository.Equals(release.Repository,StringComparison.OrdinalIgnoreCase) && p.Prerelease==release.Prerelease && p.Published<=release.Published);
-        return old!=null && await PackageFiles.Matches(old,ct);
+        var old=packages.FirstOrDefault(p=>p.Path.Equals(path,StringComparison.OrdinalIgnoreCase) && p.Repository.Equals(release.Repository,StringComparison.OrdinalIgnoreCase) && p.Prerelease==release.Prerelease && (p.Published<=release.Published||PackageRules.SameVersion(p,release,asset)));
+        return old!=null && (settings.KeepLatestPackages||PackageRules.SameVersion(old,release,asset))&&await PackageFiles.Matches(old,ct);
     }
     private async Task RecordPackage(Release release,Asset asset,string path,string root,CancellationToken ct)
     {
@@ -25,8 +29,7 @@ public partial class MainWindow
     {
         if(exit||quitting || (!allowCurrent && taskCoordinator.Uses("file:"+package.Path)))return false;
         if(installed.Any(a=>a.ExecutablePath.Length>0 && Path.GetFullPath(a.ExecutablePath).Equals(package.Path,StringComparison.OrdinalIgnoreCase)))return false;
-        var expected=Path.Combine(Path.GetFullPath(package.Root),Rules.SafeSegment(package.Repository.Replace('/','_')),Rules.SafeSegment(package.AssetName));
-        if(!Path.GetFullPath(package.Path).Equals(expected,StringComparison.OrdinalIgnoreCase))return false;
+        if(!PackageFiles.ExpectedPath(package))return false;
         if(File.Exists(package.Path)){
             try{if(!await PackageFiles.Matches(package))return false;
                 if(exit||quitting || (!allowCurrent && taskCoordinator.Uses("file:"+package.Path)))return false;File.Delete(package.Path);

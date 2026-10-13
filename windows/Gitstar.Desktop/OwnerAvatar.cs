@@ -18,7 +18,7 @@ public sealed class OwnerAvatar : Grid
     public OwnerAvatar()
     {
         Width=38;Height=38;Background=new SolidColorBrush(Color.FromRgb(230,234,244));
-        Clip=new EllipseGeometry(new Point(19,19),19,19);Children.Add(fallback);Children.Add(avatar);
+        Clip=new RectangleGeometry(new Rect(0,0,38,38),9,9);Children.Add(fallback);Children.Add(avatar);
         Loaded+=async(_,_)=>await Load();
     }
     private static void Changed(DependencyObject sender,DependencyPropertyChangedEventArgs e)

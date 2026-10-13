@@ -1,0 +1,32 @@
+using System.Security.Cryptography;
+namespace Gitstar.Desktop;
+
+public sealed partial class GitHubClient
+{
+    public async Task<(JsonElement? Release,string? Higher)> AutomationRelease(string repo,string version,string prefix,bool beta,CancellationToken ct)
+    {
+        Validate(repo);JsonElement? selected=null;string? higher=null;var exact=prefix+version;
+        for(var page=1;;page++){
+            var data=await Request($"repos/{repo}/releases?per_page=100&page={page}",ct:ct);
+            foreach(var release in data.EnumerateArray()){
+                var tag=S(release,"tag_name");var plain=prefix.Length>0?(tag.StartsWith(prefix,StringComparison.Ordinal)?tag[prefix.Length..]:""):tag;var comparison=Rules.CompareVersions(plain,version);
+                if(comparison>0 && release.GetProperty("prerelease").GetBoolean()==beta&&!release.GetProperty("draft").GetBoolean()&&(higher==null||Rules.CompareVersions(plain,higher)>0))higher=plain;
+                if(tag==exact||comparison==0){if(selected is {} prior && S(prior,"tag_name")!=tag){if(tag==exact)selected=release.Clone();else if(S(prior,"tag_name")!=exact)throw new IOException("多个版本标签对应当前版本，无法确定自动发布目标。");}else selected=release.Clone();}
+            }
+            if(data.GetArrayLength()<100)return (selected,higher);
+        }
+    }
+    public Task<JsonElement> UpdateAutomationRelease(string repo,long id,string tag,string commit,string notes,bool beta,CancellationToken ct)=>Request($"repos/{repo}/releases/{id}",HttpMethod.Patch,new{name=tag,body=notes,prerelease=beta,draft=false,make_latest=beta?"false":"true"},ct);
+    public Task<JsonElement> RenameAutomationAsset(string repo,long id,string name,CancellationToken ct)=>Request($"repos/{repo}/releases/assets/{id}",HttpMethod.Patch,new{name},ct);
+    public async Task DeleteAutomationAsset(string repo,long id,CancellationToken ct)=>await Request($"repos/{repo}/releases/assets/{id}",HttpMethod.Delete,ct:ct);
+    public async Task<JsonElement> UploadAutomationAsset(string repo,long id,string path,string name,CancellationToken ct)
+    {
+        await EnsureFreshToken(ct);Validate(repo);using var stream=File.OpenRead(path);using var req=new HttpRequestMessage(HttpMethod.Post,$"https://uploads.github.com/repos/{repo}/releases/{id}/assets?name={Uri.EscapeDataString(name)}"){Content=new StreamContent(stream)};
+        req.Headers.Authorization=new("Bearer",Token);req.Headers.Add("X-GitHub-Api-Version","2022-11-28");req.Content.Headers.ContentType=new("application/octet-stream");using var response=await http.SendAsync(req,ct);if(!response.IsSuccessStatusCode)throw new IOException("自动上传失败："+(int)response.StatusCode+"，已完成部分保留供重试。");using var document=JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));var asset=document.RootElement.Clone();if(asset.GetProperty("size").GetInt64()!=stream.Length||S(asset,"state")!="uploaded")throw new IOException("安装包上传结果未确认。");return asset;
+    }
+    public async Task<bool> AutomationAssetMatches(string repo,JsonElement asset,long size,string sha,CancellationToken ct)
+    {
+        if(asset.GetProperty("size").GetInt64()!=size||S(asset,"state")!="uploaded")return false;var digest=S(asset,"digest");if(digest.StartsWith("sha256:",StringComparison.OrdinalIgnoreCase))return digest[7..].Equals(sha,StringComparison.OrdinalIgnoreCase);
+        using var response=await AssetResponse(repo,new(asset.GetProperty("id").GetInt64(),S(asset,"name"),size,"",null),ct);using var input=await response.Content.ReadAsStreamAsync(ct);using var hash=IncrementalHash.CreateHash(HashAlgorithmName.SHA256);var buffer=new byte[81920];long total=0;int read;while((read=await input.ReadAsync(buffer,ct))>0){total+=read;if(total>size)return false;hash.AppendData(buffer,0,read);}return total==size&&Convert.ToHexString(hash.GetHashAndReset()).Equals(sha,StringComparison.OrdinalIgnoreCase);
+    }
+}
