@@ -106,7 +106,6 @@ public partial class MainWindow
         var p=project;var writable=ProjectWritable(p);var info=ProjectSection(p.Name);info.Children.Add(ProjectText(p.FullName+"   ·   "+p.Visibility+"   ·   "+p.Access+"   ·   默认分支 "+p.DefaultBranch,12,true));info.Children.Add(ProjectText(p.Description.Length>0?p.Description:"还没有项目说明",13,p.Description.Length==0));
         info.Children.Add(ProjectText("项目同步："+(projectsSynced?.ToLocalTime().ToString("MM-dd HH:mm")??"尚未同步"),11,true));var infoActions=new WrapPanel();info.Children.Add(infoActions);
         ProjectAction(infoActions,"打开 GitHub",()=>ProjectDialog(()=>WindowsServices.Open("https://github.com/"+p.FullName)));ProjectAction(infoActions,"项目设置",()=>OpenProjectSettings(p),enabled:p.CanAdmin&&api.Token.Length>0);
-        var deleteProject=ProjectAction(infoActions,"删除项目",()=>OpenDeleteProject(p),enabled:p.CanAdmin&&api.Token.Length>0&&!automaticPublishing.ContainsKey(p.FullName));deleteProject.SetResourceReference(Control.ForegroundProperty,"DangerInk");
         RenderProjectAutomation(p);
         var workspace=Workspace(p);var source=ProjectSection("源码工作区");
         if(workspace==null)source.Children.Add(ProjectText("关联现有 Git 仓库、初始化已有源码，或克隆远程项目到电脑。",13,true));
@@ -209,6 +208,8 @@ public partial class MainWindow
         }
         f.Label("自动合并、Wiki、私有 Fork 等功能受仓库类型、订阅与组织策略限制；GitHub 会校验是否允许修改。");
         Section("仓库状态");var archived=f.Check("归档项目（仓库只读）",p.Archived);f.Label(p.Archived?"当前已归档，可先取消归档，随后重新打开设置修改其他选项。":"归档后无法提交源码或发布版本；需要时可以取消归档。");
+        Section("删除项目");f.Label("删除 GitHub 远程仓库，本地源码和安装包保留。点击后需核对权限，并输入完整仓库名称确认。");
+        var deleteProject=f.Action("删除项目",async()=>{f.Close();await OpenDeleteProject(p);});f.Buttons.Children.Remove(deleteProject);deleteProject.HorizontalAlignment=HorizontalAlignment.Left;deleteProject.Margin=new Thickness(0,4,0,12);deleteProject.SetResourceReference(Control.ForegroundProperty,"DangerInk");deleteProject.IsEnabled=p.CanAdmin&&api.Token.Length>0&&!automaticPublishing.ContainsKey(p.FullName);f.Fields.Children.Add(deleteProject);
         f.Action("协作者 / 团队权限",()=>ProjectDialog(()=>WindowsServices.Open("https://github.com/"+p.FullName+"/settings/access")));
         f.Action("分支保护 / 规则",()=>ProjectDialog(()=>WindowsServices.Open("https://github.com/"+p.FullName+"/settings/branches")));
         f.Action("更多 GitHub 设置",()=>ProjectDialog(()=>WindowsServices.Open("https://github.com/"+p.FullName+"/settings")));
@@ -223,7 +224,7 @@ public partial class MainWindow
         },true);
         void Jump(FrameworkElement anchor){var scroller=((Grid)f.Content).Children.OfType<Border>().Select(b=>b.Child).OfType<ScrollViewer>().First();scroller.ScrollToVerticalOffset(anchor.TransformToAncestor(f.Fields).Transform(new Point(0,0)).Y);}
         var navigation=new WrapPanel{Margin=new Thickness(18,10,18,0)};foreach(var anchor in anchors){var b=new Button{Content=anchor.Key,Padding=new Thickness(12,6,12,6),Margin=new Thickness(0,0,8,4)};b.Click+=(_,_)=>Jump(anchor.Value);navigation.Children.Add(b);}var layout=(Grid)f.Content;foreach(UIElement child in layout.Children)if(Grid.GetRow(child)>0)Grid.SetRow(child,Grid.GetRow(child)+1);layout.RowDefinitions.Insert(1,new RowDefinition{Height=GridLength.Auto});Grid.SetRow(navigation,1);layout.Children.Add(navigation);
-        if(previewPath!=null){if(Environment.GetCommandLineArgs().Contains("--settings-bottom"))f.ContentRendered+=(_,_)=>Jump(anchors["Pull Request 与合并"]);f.RenderPreview(previewPath);}f.ShowDialog();
+        if(previewPath!=null){if(Environment.GetCommandLineArgs().Contains("--settings-delete"))f.ContentRendered+=(_,_)=>Jump(anchors["删除项目"]);else if(Environment.GetCommandLineArgs().Contains("--settings-bottom"))f.ContentRendered+=(_,_)=>Jump(anchors["Pull Request 与合并"]);f.RenderPreview(previewPath);}f.ShowDialog();
     }
     private void LinkProjectDialog(ManagedProject p)
     {
