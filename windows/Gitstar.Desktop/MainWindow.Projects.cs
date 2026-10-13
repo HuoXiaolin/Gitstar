@@ -42,6 +42,13 @@ public partial class MainWindow
         if(edit)EditDraftDialog(project,fresh);else PublishDialog(project,fresh);
     }
     private ProjectWorkspace? Workspace(ManagedProject project)=>projectWorkspaces.FirstOrDefault(w=>w.Repository.Equals(project.FullName,StringComparison.OrdinalIgnoreCase));
+    private string SuggestedReleaseTag(ManagedProject? project,ProjectVersion? version=null)
+    {
+        if(version!=null&&!ReleaseRules.TemporaryTag(version.Tag))return version.Tag;
+        if(version!=null&&Rules.CompareVersions(version.Name,version.Name)!=null)return version.Name.Trim();
+        if(project!=null){var config=SuggestedAutomation(project);try{if(config.VersionFile.Length>0)return config.TagPrefix+AutomationRules.ReadVersion(AutomationRules.ResolveFile(config.SourceFolder,config.VersionFile));}catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or System.Xml.XmlException or System.Text.Json.JsonException or ArgumentException){}}
+        return "";
+    }
     private void InvalidateProjectCaches(IEnumerable<string> repositories)
     {
         foreach(var repo in repositories){projectStates.Remove(repo);projectVersions.Remove(repo);}
@@ -125,7 +132,7 @@ public partial class MainWindow
         if(!projectVersions.TryGetValue(p.FullName,out var history))versions.Children.Add(ProjectText("同步后查看最近 30 个正式版、测试版及草稿。",12,true));
         else if(history.Count==0)versions.Children.Add(ProjectText("此项目还没有发布版本。",12,true));
         else foreach(var version in history){
-            var row=new Grid{Margin=new(0,12,0,0)};row.ColumnDefinitions.Add(new());row.ColumnDefinitions.Add(new(){Width=GridLength.Auto});var labels=new StackPanel();labels.Children.Add(ProjectText(version.Tag+"   ·   "+version.Channel,14));labels.Children.Add(ProjectText($"{version.AssetCount} 个安装包 / 附件   ·   {version.Updated.ToLocalTime():yyyy-MM-dd HH:mm}",11,true));row.Children.Add(labels);var actions=new WrapPanel();Grid.SetColumn(actions,1);row.Children.Add(actions);
+            var row=new Grid{Margin=new(0,12,0,0)};row.ColumnDefinitions.Add(new());row.ColumnDefinitions.Add(new(){Width=GridLength.Auto});var labels=new StackPanel();labels.Children.Add(ProjectText(version.DisplayVersion+"   ·   "+version.Channel,14));labels.Children.Add(ProjectText($"{version.AssetCount} 个安装包 / 附件   ·   {version.Updated.ToLocalTime():yyyy-MM-dd HH:mm}",11,true));row.Children.Add(labels);var actions=new WrapPanel();Grid.SetColumn(actions,1);row.Children.Add(actions);
             ProjectAction(actions,"日志",()=>ProjectDialog(()=>Form.Notes(this,p.Name+" · "+version.Tag,version.Body)));
             if(version.Draft){ProjectAction(actions,"核实状态",async()=>{await VerifyProjectVersion(p,version);},enabled:api.Token.Length>0);ProjectAction(actions,"编辑草稿",()=>OpenDraftAction(p,version,true),enabled:writable);ProjectAction(actions,"继续发布",()=>OpenDraftAction(p,version,false),enabled:writable);}
             else ProjectAction(actions,"管理",()=>ProjectDialog(()=>WindowsServices.Open("https://github.com/"+p.FullName+"/releases/tag/"+Uri.EscapeDataString(version.Tag))));versions.Children.Add(row);
@@ -213,7 +220,7 @@ public partial class MainWindow
     }
     private void EditDraftDialog(ManagedProject p,ProjectVersion v)
     {
-        var f=new Form(this,"编辑版本草稿",760,650);f.Label(p.FullName+" · "+v.Tag);var name=f.Text("版本名称",v.Name);var beta=f.Check("测试版",v.Prerelease);var notes=f.Text("更新日志 Markdown",v.Body,true);
-        f.Action("保存草稿",async()=>{var n=name.Text.Trim();var body=notes.Text;var pre=beta.IsChecked==true;f.Close();await Execute("项目管理",p.FullName,async ct=>{await api.EditDraft(p.FullName,v.Id,n,body,pre,ct);RememberProjectVersion(p.FullName,await api.ProjectVersionDetails(p.FullName,v.Id,ct));},resources:["repo:"+p.FullName]);},true);f.ShowDialog();
+        var f=new Form(this,"编辑版本草稿",760,650);f.Label(p.FullName);var tag=f.Text("版本号",SuggestedReleaseTag(p,v));f.Label("支持 1.0.0.0；这是 GitHub 版本标签，安装包文件名无需包含版本号。");var name=f.Text("版本名称",ReleaseRules.TemporaryTag(v.Tag)&&Rules.CompareVersions(v.Name,v.Name)==null?tag.Text:v.Name);var beta=f.Check("测试版",v.Prerelease);var notes=f.Text("更新日志 Markdown",v.Body,true);
+        f.Action("保存草稿",async()=>{var t=tag.Text.Trim();if(!ReleaseRules.ValidTag(t))throw new IOException("请填写有效版本号，例如 1.0.0.0。");var n=name.Text.Trim();var body=notes.Text;var pre=beta.IsChecked==true;f.Close();await Execute("项目管理",p.FullName,async ct=>{await api.EditDraft(p.FullName,v.Id,n,body,pre,ct,t);RememberProjectVersion(p.FullName,await api.ProjectVersionDetails(p.FullName,v.Id,ct));},resources:["repo:"+p.FullName]);},true);f.ShowDialog();
     }
 }

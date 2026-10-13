@@ -14,6 +14,8 @@ static class AutomationChecks
     {
         var root=Path.Combine(parent,"automation");var source=Path.Combine(root,"source");var release=Path.Combine(root,"release");Directory.CreateDirectory(source);Directory.CreateDirectory(release);await File.WriteAllTextAsync(Path.Combine(source,"version.txt"),"1.0.0.0");await File.WriteAllTextAsync(Path.Combine(release,"app.zip"),"latest package");var config=new ProjectAutomation("owner/repo",source,release,"version.txt",AssetPatterns:"*.zip");
         var props=Path.Combine(source,"Directory.Build.props");await File.WriteAllTextAsync(props,"<Project><PropertyGroup><Version>1.0.0.0</Version></PropertyGroup><PropertyGroup Condition=\"'$(TargetFramework)'=='other'\"><Version>9.0.0</Version></PropertyGroup></Project>");check(AutomationRules.ReadVersion(props)=="1.0.0.0","automatic version reading preserves four components and ignores conditional overrides");
+        check(ReleaseRules.ValidTag("1.0.0.0")&&ReleaseRules.AssetName("Gitstar.exe")=="Gitstar.exe"&&ReleaseRules.AssetName("Gitstar-setup.exe")=="Gitstar-setup.exe","four-part release version does not require renaming installers or adding a v prefix");
+        check(!ReleaseRules.ValidTag("untagged-46f199f7de38a400b02e")&&ReleaseRules.AssetName("使用说明.md")=="USAGE.md","temporary release tags are not versions and Unicode usage asset has stable compatible name");
         await File.WriteAllTextAsync(Path.Combine(source,"package.json"),"{\"version\":\"2.0.0-beta.2\"}");check(AutomationRules.ReadVersion(Path.Combine(source,"package.json"))=="2.0.0-beta.2","package.json prerelease version automatically determines test channel");
         check(AutomationRules.FileVersion("app-v1.2.3-beta.2-windows-x64.zip")=="1.2.3-beta.2","installer filename version excludes platform and file extension");
         await File.WriteAllTextAsync(Path.Combine(release,"app-v0.9.0.zip"),"older");check(AutomationRules.Plan(config).Assets.Length==1,"older version packages are excluded from current flat release folder");
@@ -33,6 +35,20 @@ static class AutomationChecks
             check(server.Tag=="v1.0.0.0"&&result.Tag==server.Tag&&server.Creates==0,"same numeric version reuses existing tag spelling without moving or recreating the tag");
             check(server.Events.FindIndex(e=>e.StartsWith("upload:"))<server.Events.FindIndex(e=>e.StartsWith("delete:"))&&server.Events.Last().StartsWith("publish:"),"replacement asset is uploaded and verified before removing old asset and updating release notes");
             check(server.Assets.Count==1&&server.Assets.Values.Single().Name=="app.zip","temporary upload name becomes final filename without leaving duplicate attachments");
+        }
+        var usage=Path.Combine(release,"使用说明.md");await File.WriteAllTextAsync(usage,"中文使用说明");var usageSha=Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(usage)));var sums=Path.Combine(release,"SHA256SUMS.txt");await File.WriteAllTextAsync(sums,usageSha+"  使用说明.md\n");var originalSums=await File.ReadAllBytesAsync(sums);
+        using(var server=new AutomationServer{NormalizeNames=true})using(var api=new GitHubClient(new(),server.Handler)){
+            var result=await ProjectAutomationService.Run(config with{AssetPatterns="*.zip;*.md;SHA256SUMS.txt"},api,Path.Combine(root,"stage"),Upload,Progress,CancellationToken.None);
+            var remoteUsage=server.Assets.Values.Single(item=>item.Name=="USAGE.md");var remoteSums=Encoding.UTF8.GetString(server.Assets.Values.Single(item=>item.Name=="SHA256SUMS.txt").Data);
+            check(result.Version=="1.0.0.0"&&result.Tag=="1.0.0.0"&&!server.Draft&&remoteSums.Contains(usageSha+"  USAGE.md")&&Convert.ToHexString(SHA256.HashData(remoteUsage.Data))==usageSha,"GitHub filename normalization is avoided without changing version and uploaded checksums match renamed usage asset");
+            check((await File.ReadAllBytesAsync(sums)).SequenceEqual(originalSums)&&File.Exists(usage),"release upload adapts only staged files and preserves original local names and checksums");
+            var repeat=await ProjectAutomationService.Run(config with{AssetPatterns="*.zip;*.md;SHA256SUMS.txt"},api,Path.Combine(root,"stage"),Upload,Progress,CancellationToken.None);
+            check(repeat.Unchanged==3&&server.Uploads==3,"repeating compatible-name upload reuses existing assets instead of duplicate filename failures");
+        }
+        File.Delete(sums);File.Delete(usage);
+        using(var server=new AutomationServer{Exists=true,Tag="untagged-abcd",ReleaseName="1.0.0.0"})using(var api=new GitHubClient(new(),server.Handler)){
+            var result=await ProjectAutomationService.Run(config,api,Path.Combine(root,"stage"),Upload,Progress,CancellationToken.None);
+            check(result.ReleaseId==100&&server.Creates==0&&result.Tag=="1.0.0.0"&&server.Tag=="1.0.0.0"&&!server.Draft,"unique same-version temporary draft is resumed and assigned four-part tag while preserving release ID");
         }
         using(var server=new AutomationServer{Exists=true,FailUpload=true})using(var api=new GitHubClient(new(),server.Handler)){
             server.Add("app.zip",Encoding.UTF8.GetBytes("old"));var failed=false;try{await ProjectAutomationService.Run(config,api,Path.Combine(root,"stage"),Upload,Progress,CancellationToken.None);}catch(IOException){failed=true;}
@@ -82,11 +98,11 @@ static class AutomationChecks
     private sealed class AutomationServer:IDisposable
     {
         public sealed record Item(long Id,string Name,byte[] Data,string? Digest);
-        public readonly Dictionary<long,Item> Assets=[];public readonly List<string> Events=[];public readonly HttpMessageHandler Handler;public bool Exists,Draft=true,Immutable,FailUpload,CorruptUpload,FailCreateResponse,NoDigest;public string Tag="1.0.0.0",Notes="";public int Creates,Uploads,Deletes,Publishes,Downloads;public CancellationTokenSource? CancelAfterDelete;private long next=10;
+        public readonly Dictionary<long,Item> Assets=[];public readonly List<string> Events=[];public readonly HttpMessageHandler Handler;public bool Exists,Draft=true,Immutable,FailUpload,CorruptUpload,FailCreateResponse,NoDigest,NormalizeNames;public string Tag="1.0.0.0",ReleaseName="",Notes="";public int Creates,Uploads,Deletes,Publishes,Downloads;public CancellationTokenSource? CancelAfterDelete;private long next=10;
         public AutomationServer()=>Handler=new FakeHttp(Respond);
         public void Add(string name,byte[] bytes)=>Assets[++next]=new(next,name,bytes,"sha256:"+Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant());
         private object Asset(Item item)=>new{id=item.Id,name=item.Name,size=item.Data.Length,state="uploaded",digest=NoDigest?null:item.Digest};
-        private object Release()=>new{id=100,tag_name=Tag,name=Tag,body=Notes,draft=Draft,prerelease=false,immutable=Immutable,assets=Assets.Values.Select(Asset).ToArray(),target_commitish="original-commit"};
+        private object Release()=>new{id=100,tag_name=Tag,name=ReleaseName.Length>0?ReleaseName:Tag,body=Notes,draft=Draft,prerelease=false,immutable=Immutable,assets=Assets.Values.Select(Asset).ToArray(),target_commitish="original-commit"};
         private static HttpResponseMessage Json(object value,HttpStatusCode status=HttpStatusCode.OK)=>new(status){Content=new StringContent(JsonSerializer.Serialize(value))};
         private async Task<HttpResponseMessage> Respond(HttpRequestMessage request,CancellationToken ct)
         {
@@ -98,11 +114,11 @@ static class AutomationChecks
             if(path=="/repos/owner/repo/releases/100/assets"&&request.Method==HttpMethod.Post){Uploads++;if(FailUpload)return Json(new{},HttpStatusCode.BadGateway);var bytes=await request.Content!.ReadAsByteArrayAsync(ct);var query=request.RequestUri.Query.TrimStart('?').Split('&').First(part=>part.StartsWith("name="))[5..];var name=Uri.UnescapeDataString(query);Add(name,bytes);var item=Assets[next];if(CorruptUpload)Assets[next]=item=item with{Digest="sha256:"+new string('0',64)};Events.Add("upload:"+name);return Json(Asset(item),HttpStatusCode.Created);}
             if(path.StartsWith("/repos/owner/repo/releases/assets/")){
                 var id=long.Parse(path.Split('/').Last());if(request.Method==HttpMethod.Delete){Deletes++;Events.Add("delete:"+Assets[id].Name);Assets.Remove(id);CancelAfterDelete?.Cancel();return new(HttpStatusCode.NoContent);}
-                if(request.Method==HttpMethod.Patch){using var body=JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));Assets[id]=Assets[id] with{Name=body.RootElement.GetProperty("name").GetString()!};Events.Add("rename:"+Assets[id].Name);return Json(Asset(Assets[id]));}
+                if(request.Method==HttpMethod.Patch){using var body=JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));var name=body.RootElement.GetProperty("name").GetString()!;Assets[id]=Assets[id] with{Name=NormalizeNames&&name.Any(c=>c>127)?"default.md":name};Events.Add("rename:"+Assets[id].Name);return Json(Asset(Assets[id]));}
                 if(request.Method==HttpMethod.Get){Downloads++;return new(HttpStatusCode.OK){Content=new ByteArrayContent(Assets[id].Data)};}
             }
             if(path=="/repos/owner/repo/releases/100"){
-                if(request.Method==HttpMethod.Patch){using var body=JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));if(body.RootElement.TryGetProperty("tag_name",out _))throw new Exception("tag must not move");Notes=body.RootElement.GetProperty("body").GetString()!;Draft=false;Publishes++;Events.Add("publish:"+Tag);}return Json(Release());
+                if(request.Method==HttpMethod.Patch){using var body=JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));if(body.RootElement.TryGetProperty("tag_name",out var replacement)){if(!Draft||!ReleaseRules.TemporaryTag(Tag))throw new Exception("tag must not move");Tag=replacement.GetString()!;}Notes=body.RootElement.GetProperty("body").GetString()!;Draft=false;Publishes++;Events.Add("publish:"+Tag);}return Json(Release());
             }
             throw new Exception("Unexpected automation request: "+request.Method+" "+request.RequestUri);
         }

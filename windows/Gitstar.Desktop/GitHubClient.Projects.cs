@@ -69,9 +69,11 @@ public sealed partial class GitHubClient
     {
         var version=ParseProjectVersion(await ReleaseDetails(repo,id,ct));if(version.Id!=id)throw new IOException("GitHub 返回的版本 ID 不一致，请重新同步版本。");return version;
     }
-    public async Task EditDraft(string repo,long id,string name,string notes,bool beta,CancellationToken ct)
+    public async Task EditDraft(string repo,long id,string name,string notes,bool beta,CancellationToken ct,string? tag=null)
     {
         var detail=await ReleaseDetails(repo,id,ct);if(!detail.GetProperty("draft").GetBoolean())throw new IOException("此版本已发布，请在 GitHub 管理已发布版本。");
-        await Request($"repos/{repo}/releases/{id}",HttpMethod.Patch,new{name,body=notes,prerelease=beta},ct);
+        var patch=new Dictionary<string,object>{{"name",name},{"body",notes},{"prerelease",beta}};
+        if(tag!=null){if(!ReleaseRules.ValidTag(tag))throw new IOException("请填写有效版本号，例如 1.0.0.0；不能使用草稿的临时标签。");if(tag!=S(detail,"tag_name")){var found=await AutomationRelease(repo,tag,"",beta,ct);if(found.Release is {} existing&&existing.GetProperty("id").GetInt64()!=id)throw new IOException("版本 "+tag+" 已存在。可使用“同步并发布最新”更新同版本附件，无需增加版本号。");patch["tag_name"]=tag;}}
+        var result=await Request($"repos/{repo}/releases/{id}",HttpMethod.Patch,patch,ct);if(tag!=null&&S(result,"tag_name")!=tag)throw new IOException("草稿版本号修改未确认，请同步版本核实。");
     }
 }

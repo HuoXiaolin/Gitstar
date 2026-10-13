@@ -11,6 +11,7 @@ public record ProjectWorkspace(string Repository,string Folder,string Branch="")
 public record ProjectVersion(long Id,string Tag,string Name,string Body,bool Draft,bool Prerelease,int AssetCount,DateTimeOffset Updated,string Url)
 {
     public string Channel=>Draft?"草稿":Prerelease?"测试版":"正式版";
+    public string DisplayVersion=>Draft&&ReleaseRules.TemporaryTag(Tag)?(Rules.CompareVersions(Name,Name)!=null?Name+" · 未绑定标签":"未设置版本号"):Tag;
 }
 public record GitChange(string Status,string Path,string Original="")
 {

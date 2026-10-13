@@ -8,6 +8,11 @@ using System.Security.Cryptography;
 using System.IO.Compression;
 
 try {
+if(args.FirstOrDefault()=="--inspect-release"){
+    using var db=new LocalStore();using var client=new GitHubClient(db.Get("settings",new Settings()));client.Token=CredentialStorage.Load(db).AccessToken;if(client.Token.Length==0)throw new IOException("请先在 Gitstar 登录。");
+    var release=await client.ReleaseDetails(args[1],long.Parse(args[2]),CancellationToken.None);
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new{Id=release.GetProperty("id").GetInt64(),Tag=release.GetProperty("tag_name").GetString(),Name=release.GetProperty("name").GetString(),Draft=release.GetProperty("draft").GetBoolean(),Assets=release.GetProperty("assets").EnumerateArray().Select(asset=>new{Id=asset.GetProperty("id").GetInt64(),Name=asset.GetProperty("name").GetString(),Size=asset.GetProperty("size").GetInt64()})}));return;
+}
 if(args.FirstOrDefault()=="--inspect-msi"){Console.WriteLine(WindowsServices.MsiPlatform(args[1]));return;}
 if(args.Contains("--scan-installed")){var scanned=WindowsServices.Scan();foreach(var entry in scanned.Where(a=>a.Name.Equals("Lertaro",StringComparison.OrdinalIgnoreCase)))Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(entry));return;}
 var count=0;
@@ -177,7 +182,7 @@ await ProjectChecks.Run(Check,root);
 await RepositorySettingsChecks.Run(Check);
 await WorkspaceChecks.Run(Check,root);
 await WorkflowChecks.Run(Check,root);
-await ReleaseStateChecks.Run(Check);
+await ReleaseStateChecks.Run(Check,root);
 await AutomationChecks.Run(Check,root);
 await DownloadPreferencesChecks.Run(Check,root);
 var trackedPath=Path.Combine(root,"owner_tool","setup-x64.exe");Directory.CreateDirectory(Path.GetDirectoryName(trackedPath)!);File.WriteAllText(trackedPath,"owned");var trackedPackage=latestPackage with{Root=root,Path=trackedPath,AssetName="setup-x64.exe",Size=5,Sha256=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("owned")))};
