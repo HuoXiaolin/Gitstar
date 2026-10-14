@@ -71,7 +71,7 @@ public partial class MainWindow
     private void ProjectSort_Changed(object sender,SelectionChangedEventArgs e){if(!ready)return;settings.ProjectsSort=ProjectSort.SelectedIndex==1?UpdateSort.RepositoryUpdated:UpdateSort.Published;store.Set("settings",settings);if(projectsPage)RenderProjects();}
     private void RenderProjects()
     {
-        if(!projectsPage || ProjectList==null || renderingProjects)return;renderingProjects=true;
+        if(!projectsPage || ProjectList==null || renderingProjects)return;if(IsInBackground){QueueBackgroundMemoryReclaim();return;}renderingProjects=true;
         try{
             var query=ProjectSearch.Text.Trim();var filter=ProjectFilter.SelectedIndex;
             var candidates=myProjects.Where(p=>(p.FullName+" "+p.Description).Contains(query,StringComparison.OrdinalIgnoreCase)).Where(p=>filter switch{1=>!p.Private,2=>p.Private,3=>Workspace(p)!=null,_=>true});var visible=ProjectTimeRules.Order(candidates,projectVersions,settings.ProjectsSort).ToList();
@@ -105,6 +105,7 @@ public partial class MainWindow
     private bool ProjectWritable(ManagedProject p)=>api.Token.Length>0 && p.CanPush && !p.Archived;
     private void RenderProjectDetails(ManagedProject? project)
     {
+        if(IsInBackground){QueueBackgroundMemoryReclaim();return;}
         if(ProjectDetails==null)return;ProjectDetails.Children.Clear();
         if(project==null){var empty=ProjectSection(api.Token.Length==0?"登录后管理你的项目":"创建你的下一个项目");empty.Children.Add(ProjectText(myProjects.Count>0?"没有符合当前筛选的项目。":"同步你的 GitHub 仓库，或创建公开 / 私有项目。关联源码目录后即可检查变更、提交上传和发布版本。",13,true));var actions=new WrapPanel();empty.Children.Add(actions);ProjectAction(actions,api.Token.Length==0?"登录 GitHub":"同步项目",()=>api.Token.Length==0?ProjectDialog(()=>Login_Click(this,new())):SyncProjects(),true);ProjectAction(actions,"创建项目",()=>ProjectDialog(()=>CreateProjectDialog()));return;}
         var p=project;var writable=ProjectWritable(p);var info=ProjectSection(p.Name);info.Children.Add(ProjectText(p.FullName+"   ·   "+p.Visibility+"   ·   "+p.Access+"   ·   默认分支 "+p.DefaultBranch,12,true));info.Children.Add(ProjectText(p.Description.Length>0?p.Description:"还没有项目说明",13,p.Description.Length==0));

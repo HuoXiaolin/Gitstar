@@ -20,6 +20,7 @@ public sealed class OwnerAvatar : Grid
         Width=38;Height=38;Background=new SolidColorBrush(Color.FromRgb(230,234,244));
         Clip=new RectangleGeometry(new Rect(0,0,38,38),9,9);Children.Add(fallback);Children.Add(avatar);
         Loaded+=async(_,_)=>await Load();
+        Unloaded+=(_,_)=>avatar.Source=null;
     }
     private static void Changed(DependencyObject sender,DependencyPropertyChangedEventArgs e)
     {
@@ -29,7 +30,7 @@ public sealed class OwnerAvatar : Grid
     private async Task Load()
     {
         var repository=Repository;var generation=AvatarCache.Generation;var image=await AvatarCache.Load(repository.Split('/')[0]);
-        if(Repository==repository&&generation==AvatarCache.Generation)avatar.Source=image;
+        if(IsLoaded&&Repository==repository&&generation==AvatarCache.Generation)avatar.Source=image;
     }
 }
 
@@ -37,21 +38,24 @@ public static class AvatarCache
 {
     private static HttpClient? http;
     private static bool offline;
+    private static bool suspended;
     private static int generation;
     public static int Generation=>Volatile.Read(ref generation);
+    public static void SuspendDecoded(){suspended=true;Interlocked.Increment(ref generation);images.Clear();}
+    public static void ResumeDecoded()=>suspended=false;
     private static readonly SemaphoreSlim diskGate=new(1,1);
     private static readonly SemaphoreSlim slots=new(4);
     private static readonly ConcurrentDictionary<string,(DateTimeOffset Created,Lazy<Task<BitmapSource?>> Image)> images=new(StringComparer.OrdinalIgnoreCase);
     public static void Configure(Settings settings,bool smoke=false)
     {
-        offline=smoke;Interlocked.Increment(ref generation);images.Clear();http?.Dispose();
+        offline=smoke;suspended=false;Interlocked.Increment(ref generation);images.Clear();http?.Dispose();
         var handler=new HttpClientHandler{AllowAutoRedirect=false,UseProxy=!settings.DirectConnection};
         if(settings.Proxy.Length>0)handler.Proxy=new WebProxy(settings.Proxy);
         http=new HttpClient(handler){Timeout=TimeSpan.FromSeconds(20)};http.DefaultRequestHeaders.UserAgent.ParseAdd("Gitstar");
     }
     public static Task<BitmapSource?> Load(string owner)
     {
-        if(offline || !Regex.IsMatch(owner,@"^[A-Za-z0-9][A-Za-z0-9-]{0,38}$"))return Task.FromResult<BitmapSource?>(null);
+        if(offline || suspended || !Regex.IsMatch(owner,@"^[A-Za-z0-9][A-Za-z0-9-]{0,38}$"))return Task.FromResult<BitmapSource?>(null);
         if(images.TryGetValue(owner,out var existing) && DateTimeOffset.UtcNow-existing.Created>TimeSpan.FromMinutes(5) && existing.Image.IsValueCreated && existing.Image.Value.IsCompletedSuccessfully && existing.Image.Value.Result==null)images.TryRemove(owner,out _);
         var version=Generation;var result=images.GetOrAdd(owner,key=>(DateTimeOffset.UtcNow,new Lazy<Task<BitmapSource?>>(()=>Fetch(key,version)))).Image.Value;
         if(images.Count>64)foreach(var item in images.Where(p=>p.Value.Image.IsValueCreated && p.Value.Image.Value.IsCompleted).OrderBy(p=>p.Value.Created).Take(images.Count-64))images.TryRemove(item.Key,out _);
@@ -68,6 +72,7 @@ public static class AvatarCache
         await slots.WaitAsync();
         try
         {
+            if(version!=Generation)return null;
             using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(20));
             if(File.Exists(path) && DateTime.UtcNow-File.GetLastWriteTimeUtc(path)<TimeSpan.FromDays(7))
             {
@@ -83,10 +88,10 @@ public static class AvatarCache
                 response.EnsureSuccessStatusCode();if(response.Content.Headers.ContentLength>1024*1024)return null;
                 using var input=await response.Content.ReadAsStreamAsync(timeout.Token);using var output=new MemoryStream();var buffer=new byte[8192];int count;
                 while((count=await input.ReadAsync(buffer,timeout.Token))>0){if(output.Length+count>1024*1024)return null;output.Write(buffer,0,count);}
-                var bytes=output.ToArray();var image=Decode(bytes);await diskGate.WaitAsync(timeout.Token);try{if(version!=Generation)return null;try{Directory.CreateDirectory(Path.GetDirectoryName(path)!);await File.WriteAllBytesAsync(path,bytes);}catch(IOException){}catch(UnauthorizedAccessException){}}finally{diskGate.Release();}return image;
+                if(version!=Generation)return null;var bytes=output.ToArray();var image=Decode(bytes);await diskGate.WaitAsync(timeout.Token);try{if(version!=Generation)return null;try{Directory.CreateDirectory(Path.GetDirectoryName(path)!);await File.WriteAllBytesAsync(path,bytes);}catch(IOException){}catch(UnauthorizedAccessException){}}finally{diskGate.Release();}return image;
             }
         }
-        catch{try{if(File.Exists(path))return Decode(await File.ReadAllBytesAsync(path));}catch{} }
+        catch{try{if(version==Generation&&File.Exists(path))return Decode(await File.ReadAllBytesAsync(path));}catch{} }
         finally{slots.Release();}
         return null;
     }

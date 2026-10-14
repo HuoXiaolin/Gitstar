@@ -224,6 +224,7 @@ var snapshotBindings=new[]{new Binding{AppId="bound/alias",Repository="owner/too
 var snapshotApp=new InstalledApp("bound/main","Tool","1.0",root,AliasIds:["bound/alias"]);
 using(var db=new LocalStore(snapshotRoot)){db.Set("cache/user-a/installed",InstalledSnapshot.Capture([snapshotApp,otherPortable],snapshotBindings));}
 using(var db=new LocalStore(snapshotRoot)){
+ db.ReleaseMemory();Check(db.Get("cache/user-a/installed",new InstalledSnapshot(DateTimeOffset.MinValue,[])).Apps.Count==1,"idle memory reclamation preserves stored software snapshot");
  var snapshot=db.Get("cache/user-a/installed",new InstalledSnapshot(DateTimeOffset.MinValue,[]));
  Check(snapshot.Apps.Count==1 && InstalledVersion.Find(snapshot.Apps,"bound/alias")?.Version=="1.0" && snapshot.CheckedAt>DateTimeOffset.MinValue,"restart restores matched software including merged registry aliases");
  Check(db.Get("cache/user-b/installed",new InstalledSnapshot(DateTimeOffset.MinValue,[])).Apps.Count==0,"installed snapshot is isolated per account");

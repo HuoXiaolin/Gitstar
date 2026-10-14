@@ -47,6 +47,7 @@ public sealed class LocalStore : IDisposable
     public StorageSize StorageUsage(){lock(gate){long Scalar(string sql){Prepare(sql,out var s);try{if(sqlite3_step(s)!=100)throw new IOException("读取数据库空间失败。");return sqlite3_column_int64(s,0);}finally{sqlite3_finalize(s);}}long Size(string file)=>File.Exists(file)?new FileInfo(file).Length:0;return new(Size(Path.Combine(Root,"gitstar.db")),Size(Path.Combine(Root,"gitstar.db-wal")),Scalar("PRAGMA freelist_count")*Scalar("PRAGMA page_size"),Scalar("SELECT coalesce(sum(length(CAST(value AS BLOB))),0) FROM documents"));}}
     public void Compact(){lock(gate){Exec("PRAGMA wal_checkpoint(TRUNCATE); PRAGMA auto_vacuum=INCREMENTAL; VACUUM; PRAGMA wal_checkpoint(TRUNCATE);");}}
     public void ReclaimUnusedSpace(){lock(gate){var size=StorageUsage();if(size.Free>=8*1024*1024&&size.Free>=size.Database/3)Compact();}}
+    public void ReleaseMemory(){lock(gate){if(db!=IntPtr.Zero)Exec("PRAGMA shrink_memory;");}}
     private static void Bind(IntPtr s, int i, string v) { var b = Encoding.UTF8.GetBytes(v); if (sqlite3_bind_text(s, i, b, b.Length, new IntPtr(-1)) != 0) throw new IOException("数据库绑定失败。"); }
     public void Dispose() { lock (gate) { if (db != IntPtr.Zero) { sqlite3_close(db); db = IntPtr.Zero; } } }
     [DllImport("winsqlite3", CallingConvention=CallingConvention.Cdecl)] private static extern int sqlite3_open([MarshalAs(UnmanagedType.LPUTF8Str)] string path, out IntPtr db);

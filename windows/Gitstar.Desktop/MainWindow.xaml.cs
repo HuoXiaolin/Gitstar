@@ -62,6 +62,7 @@ public partial class MainWindow : Window
         menu.Items.Add("设置",null,(_,_)=>Dispatcher.Invoke(()=>Settings_Click(this,new RoutedEventArgs())));
         menu.Items.Add("彻底退出",null,(_,_)=>Dispatcher.Invoke(RequestExit));tray.ContextMenuStrip=menu;
         Closing+=OnClosing;
+        ConfigureBackgroundMemory();
         timer.Tick+=async(_,_)=>{if(RefreshSchedule.CanStartAutomatic(refreshing,busy,batchPublishing,quitting,clearingCache) && RefreshSchedule.IsDue(settings.RefreshIntervalHours,settings.LastCheck,lastAttempt,DateTimeOffset.UtcNow))await RefreshAsync(true);};
         Loaded+=async(_,_)=>{
             ready=true;PlanUpdates();Display();
@@ -140,6 +141,7 @@ public partial class MainWindow : Window
     private void Display()
     {
         if(!ready)return;
+        if(IsInBackground){QueueBackgroundMemoryReclaim();return;}
         if(projectsPage){RenderProjects();return;}
         SortFilter.Visibility=localPage?Visibility.Collapsed:Visibility.Visible;
         BulkDownloadButton.Visibility=localPage?Visibility.Collapsed:Visibility.Visible;
@@ -156,8 +158,9 @@ public partial class MainWindow : Window
         if(!localPage&&allGroups.FirstOrDefault(g=>g.Source+"/"+g.Id==selectedGroup) is {} filterGroup)cards=cards.Where(c=>filterGroup.Repositories.Contains(c.Repository,StringComparer.OrdinalIgnoreCase)&&(filterGroup.Source!="GitHub"||githubFollowed.Contains(c.Repository)));
         cards=cards.Where(c=>(c.Title+" "+c.Repository+" "+c.Version).Contains(search,StringComparison.OrdinalIgnoreCase));
         if(!localPage)cards=cards.GroupBy(c=>c.Repository,StringComparer.OrdinalIgnoreCase).Select(g=>{var selectedRelease=Rules.SelectRelease(g.Select(c=>c.Release),new Binding{IncludePrerelease=channel!=0})!;return g.First(c=>ReferenceEquals(c.Release,selectedRelease));});
-        var selected=model.Cards.Where(c=>c.IsSelected).Select(c=>(c.Repository,c.Release.Id)).ToHashSet();
+        var selected=model.Cards.Where(c=>c.IsSelected).Select(c=>(c.Repository,c.Release.Id)).Concat(backgroundSelections).ToHashSet();
         model.Cards.Clear();foreach(var card in Card.Order(cards)){card.Transfer=TransferFor(card.Release,localPage);card.IsSelected=model.SelectionMode&&selected.Contains((card.Repository,card.Release.Id));model.Cards.Add(card);}
+        backgroundSelections.Clear();
         var now=DateTimeOffset.UtcNow;
         model.CountCaption=localPage?"本机待更新软件":"最近 7 天更新";
         model.Count=localPage?$"{model.Cards.Count} 个可更新":$"{Rules.RecentProjectCount(model.Cards.Select(c=>c.Release),now)} 个项目";
@@ -224,6 +227,7 @@ public partial class MainWindow : Window
             model.Status=description+" · "+op.State;
         }        catch(Exception e){op.State=kind is "自动发布" or "发布" or "发布包管理" or "项目删除" or "源码上传" or "Star管理" or "分组管理" or "批量管理" or "项目管理"?"结果待核实："+e.Message:"失败："+e.Message;model.Status=e.Message;if(!background)DialogMessage.Show(this,e.Message,"操作未完成",MessageBoxButton.OK,MessageBoxImage.Warning);}
         finally{if(started && (kind is "Star管理" or "分组管理" or "批量管理" or "项目管理")){Save();SaveCache();RebuildGroups();PlanUpdates();Display();}op.Updated=DateTimeOffset.Now;taskTransfers.Remove(op.Id);SaveOperations();currentOperation.Value=previous;if(kind=="检查"){refreshing=false;if(automaticCheckId==op.Id){automaticCheckId=null;if(run.Token.IsCancellationRequested)lastAttempt=null;}}run.Dispose();if(settings.KeepLatestPackages && !quitting && !exit)_=Dispatcher.BeginInvoke(async()=>await CleanupOldPackages());}
+        QueueBackgroundMemoryReclaim();
     }
     private async void Login_Click(object sender,RoutedEventArgs e)
     {
@@ -531,12 +535,12 @@ public partial class MainWindow : Window
         }
         publishButton=f.Action("更新",()=>Publish(true),true);publishButton.IsEnabled=!reading;var saveDraft=f.Action("保存为草稿",()=>Publish(false));f.Buttons.Children.Remove(saveDraft);advanced.Children.Add(saveDraft);if(previewPath!=null){notes.Text="优化发布流程，支持同版本安装包覆盖更新。";versionHint.Text="应用文件版本：1.0.0.0";File.WriteAllText(Path.ChangeExtension(previewPath,".version.json"),JsonSerializer.Serialize(new{Tag=tag.Text,Directory=releaseFolder.Text,Editable=!tag.IsReadOnly,DraftId=id.Text}));f.RenderPreview(previewPath);}f.ShowDialog();
     }
-    public void Reopen(){Show();WindowState=WindowState.Normal;Activate();}
+    public void Reopen(){Show();WindowState=WindowState.Normal;ResumeBackgroundViews();Activate();}
     private void OnClosing(object? sender,CancelEventArgs e) {if(exit)return;e.Cancel=true;Hide();model.Status="Gitstar 已收起到托盘，后台任务继续运行。";}
     public async void RequestExit()
     {
         if(quitting)return;if(busy){if(DialogMessage.Show(this,"有多个任务可能正在执行。暂停后退出？下载重试会重新开始；发布或推送结果不明会留待核实。","Gitstar",MessageBoxButton.OKCancel)!=MessageBoxResult.OK)return;quitting=true;taskCoordinator.CancelAll();while(busy)await Task.Delay(100);}
-        exit=true;timer.Stop();Save();SaveOperations();tray.Visible=false;tray.Dispose();api.Dispose();try{await Task.Run(store.ReclaimUnusedSpace);}catch(IOException){}store.Dispose();Application.Current.Shutdown();
+        exit=true;timer.Stop();backgroundMemoryTimer.Stop();Save();SaveOperations();tray.Visible=false;tray.Dispose();api.Dispose();try{await Task.Run(store.ReclaimUnusedSpace);}catch(IOException){}store.Dispose();Application.Current.Shutdown();
     }
     public async void RenderSmoke(string path,bool cards=false,bool local=false,bool dark=false,bool firstGroup=false,bool matching=false,bool settingsPreview=false,bool avatars=false,bool progressPreview=false,bool groupPreview=false,bool addPreview=false,bool batchPreview=false,bool tasksPreview=false,bool projectsPreview=false,bool sourcePreview=false,bool createPreview=false,bool projectSettingsPreview=false,bool workspacePreview=false,bool publishPreview=false,bool automationPreview=false)
     {
@@ -615,6 +619,7 @@ public partial class MainWindow : Window
         }        if(settingsPreview){SettingsDialog(path);exit=true;tray.Icon?.Dispose();tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(groupPreview || addPreview){if(groupPreview)GroupEditor(settings.LocalGroups.FirstOrDefault(),path);else AddProjectDialog(path);exit=true;tray.Icon?.Dispose();tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(matching){settings.Bindings.Clear();installed=[new("fixture1","示例编辑器","2.3.0","",RepositoryHint:"example/editor"),new("fixture2","Sync","1.8.0",""),new("fixture3","未识别的软件","1.0","")];repositories=[new("example/editor","",false),new("example/sync","",false)];AutoBindingDialog(path);exit=true;tray.Icon?.Dispose();tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
+        if(Environment.GetCommandLineArgs().Contains("--background-memory"))await BackgroundMemorySmoke(path);
         if(!Environment.GetCommandLineArgs().Contains("--startup-completion"))model.Status=cards?"离线样例渲染 · 示例项目仅用于界面检查，不是已同步的 GitHub 数据":"离线界面渲染检查 · 未连接 GitHub";UpdateLayout();await Dispatcher.InvokeAsync(()=>{},DispatcherPriority.ApplicationIdle);var bitmap=new System.Windows.Media.Imaging.RenderTargetBitmap((int)ActualWidth,(int)ActualHeight,96,96,PixelFormats.Pbgra32);bitmap.Render(this);var root=(FrameworkElement)Content;var client=new System.Windows.Media.Imaging.CroppedBitmap(bitmap,new Int32Rect(0,0,Math.Min(bitmap.PixelWidth,(int)(root.ActualWidth+root.Margin.Left+root.Margin.Right)),Math.Min(bitmap.PixelHeight,(int)(root.ActualHeight+root.Margin.Top+root.Margin.Bottom))));var encoder=new System.Windows.Media.Imaging.PngBitmapEncoder();encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(client));using(var stream=File.Create(path))encoder.Save(stream);exit=true;tray.Icon?.Dispose();tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();
     }
 }
