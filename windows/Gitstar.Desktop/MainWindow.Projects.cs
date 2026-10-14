@@ -11,6 +11,7 @@ public partial class MainWindow
     private List<ProjectWorkspace> projectWorkspaces=[];
     private readonly Dictionary<string,GitProjectState> projectStates=new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string,List<ProjectVersion>> projectVersions=new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string,ReleaseDirectoryStatus> releaseDirectoryStates=new(StringComparer.OrdinalIgnoreCase);
     private DateTimeOffset? projectsSynced;
     private string? selectedProject;
     private string ProjectsKey=>CacheKey+"/my-projects";
@@ -18,16 +19,18 @@ public partial class MainWindow
     {
         myProjects=store.Get(ProjectsKey,new List<ManagedProject>());projectWorkspaces=store.Get(ProjectsKey+"/workspaces",new List<ProjectWorkspace>());
         projectVersions=new(store.Get(ProjectsKey+"/versions",new Dictionary<string,List<ProjectVersion>>()),StringComparer.OrdinalIgnoreCase);
+        releaseDirectoryStates=new(store.Get(ProjectsKey+"/release-status",new Dictionary<string,ReleaseDirectoryStatus>()),StringComparer.OrdinalIgnoreCase);
         projectsSynced=store.Get<DateTimeOffset?>(ProjectsKey+"/synced",null);projectStates.Clear();selectedProject=null;
         projectAutomation=new(store.Get(ProjectsKey+"/automation",new Dictionary<string,ProjectAutomation>()),StringComparer.OrdinalIgnoreCase);
         projectWorkspaces=projectWorkspaces.Select(w=>w with{Folder=PathPreferences.ProjectPath(w.Folder)}).ToList();foreach(var key in projectAutomation.Keys.ToArray()){var c=projectAutomation[key];projectAutomation[key]=c with{SourceFolder=PathPreferences.ProjectPath(c.SourceFolder),ReleaseFolder=PathPreferences.ProjectPath(c.ReleaseFolder),VersionFile=PathPreferences.ProjectPath(c.VersionFile),NotesFile=PathPreferences.ProjectPath(c.NotesFile)};}SaveProjects();
     }
-    private void SaveProjects(){store.Set(ProjectsKey,myProjects);store.Set(ProjectsKey+"/workspaces",projectWorkspaces);store.Set(ProjectsKey+"/versions",projectVersions);store.Set(ProjectsKey+"/synced",projectsSynced);store.Set(ProjectsKey+"/automation",projectAutomation);}
+    private void SaveProjects(){store.Set(ProjectsKey,myProjects);store.Set(ProjectsKey+"/workspaces",projectWorkspaces);store.Set(ProjectsKey+"/versions",projectVersions);store.Set(ProjectsKey+"/release-status",releaseDirectoryStates);store.Set(ProjectsKey+"/synced",projectsSynced);store.Set(ProjectsKey+"/automation",projectAutomation);}
     private void RememberProjectVersion(string repo,ProjectVersion version)
     {
-        var history=projectVersions.GetValueOrDefault(repo)??[];projectVersions[repo]=history.Where(item=>item.Id!=version.Id).Append(version).OrderByDescending(item=>item.Updated).Take(30).ToList();SaveProjects();
-        if(projectsPage&&selectedProject==repo)RenderProjectDetails(myProjects.FirstOrDefault(p=>p.FullName.Equals(repo,StringComparison.OrdinalIgnoreCase)));
+        var history=projectVersions.GetValueOrDefault(repo)??[];version=ProjectTimeRules.PreserveLocalActivity(version,history.FirstOrDefault(item=>item.Id==version.Id));projectVersions[repo]=history.Where(item=>item.Id!=version.Id).Append(version).OrderByDescending(item=>item.LatestActivity).Take(30).ToList();SaveProjects();
+        if(projectsPage)RenderProjects();
     }
+    private void ReplaceProjectVersions(string repo,List<ProjectVersion> versions){var old=projectVersions.GetValueOrDefault(repo)??[];projectVersions[repo]=versions.Select(version=>ProjectTimeRules.PreserveLocalActivity(version,old.FirstOrDefault(item=>item.Id==version.Id))).OrderByDescending(version=>version.LatestActivity).Take(30).ToList();}
     private async Task<ProjectVersion?> VerifyProjectVersion(ManagedProject project,ProjectVersion version)
     {
         ProjectVersion? fresh=null;
@@ -51,7 +54,7 @@ public partial class MainWindow
     }
     private void InvalidateProjectCaches(IEnumerable<string> repositories)
     {
-        foreach(var repo in repositories){projectStates.Remove(repo);projectVersions.Remove(repo);}
+        foreach(var repo in repositories){projectStates.Remove(repo);projectVersions.Remove(repo);releaseDirectoryStates.Remove(repo);}
     }
     private void RememberWorkspace(ManagedProject project,GitProjectState state)
     {
@@ -65,12 +68,13 @@ public partial class MainWindow
         model.Title="我的项目工作台";model.Subtitle="管理仓库与本地源码，提交变更，发布正式版与测试版。";RenderProjects();
     }
     private void ProjectFilter_Changed(object sender,RoutedEventArgs e){if(ready && projectsPage)RenderProjects();}
+    private void ProjectSort_Changed(object sender,SelectionChangedEventArgs e){if(!ready)return;settings.ProjectsSort=ProjectSort.SelectedIndex==1?UpdateSort.RepositoryUpdated:UpdateSort.Published;store.Set("settings",settings);if(projectsPage)RenderProjects();}
     private void RenderProjects()
     {
         if(!projectsPage || ProjectList==null || renderingProjects)return;renderingProjects=true;
         try{
             var query=ProjectSearch.Text.Trim();var filter=ProjectFilter.SelectedIndex;
-            var visible=myProjects.Where(p=>(p.FullName+" "+p.Description).Contains(query,StringComparison.OrdinalIgnoreCase)).Where(p=>filter switch{1=>!p.Private,2=>p.Private,3=>Workspace(p)!=null,_=>true}).OrderByDescending(p=>p.Updated).ToList();
+            var candidates=myProjects.Where(p=>(p.FullName+" "+p.Description).Contains(query,StringComparison.OrdinalIgnoreCase)).Where(p=>filter switch{1=>!p.Private,2=>p.Private,3=>Workspace(p)!=null,_=>true});var visible=ProjectTimeRules.Order(candidates,projectVersions,settings.ProjectsSort).ToList();
             model.Projects.Clear();foreach(var p in visible)model.Projects.Add(p);
             var chosen=visible.FirstOrDefault(p=>p.FullName==selectedProject)??visible.FirstOrDefault();ProjectList.SelectedItem=chosen;selectedProject=chosen?.FullName;
             model.CountCaption="项目工作区";model.Count=$"{myProjects.Count} 个项目";CountPanel.Background=(Brush)Resources["AccentSoft"];
@@ -114,8 +118,11 @@ public partial class MainWindow
             var available=Directory.Exists(workspace.Folder);var marker=Path.Combine(workspace.Folder,".git");var initialized=available&&(Directory.Exists(marker)||File.Exists(marker));
             if(!initialized){projectStates.Remove(p.FullName);source.Children.Add(ProjectText(available?"此目录已不再是独立 Git 仓库，旧分支和提交信息已清除。请重新关联或初始化源码目录。":"关联目录已不存在，旧分支和提交信息已清除。请重新关联源码目录。",13,true));}
             else if(projectStates.TryGetValue(p.FullName,out var state)){
-                source.Children.Add(ProjectText($"上次检查：{state.Branch}   ·   {state.Changes.Count} 个未提交变更   ·   "+(state.Commit.Length>0?state.Commit[..Math.Min(10,state.Commit.Length)]:"尚无提交")));
+                source.Children.Add(ProjectText($"检查时间：{ProjectTimeRules.Time(state.CheckedAt)}   ·   分支：{state.Branch}",12,true));
+                var counts=ProjectText($"已提交快照：{state.CommittedFileCount?.ToString()??"未读取"} 个文件   ·   未提交变更：{state.Changes.Count} 个文件   ·   累计提交：{state.CommitCount?.ToString()??"未读取"} 次");counts.ToolTip="已提交快照为当前 HEAD 中的文件总数；未提交变更包含新增、修改、删除和重命名，可能涉及已提交文件。累计提交为本地可读取的提交记录数。";source.Children.Add(counts);
+                if(state.Commit.Length>0){source.Children.Add(ProjectText($"最近提交：{ProjectTimeRules.Time(state.CommittedAt)}   ·   {state.Commit[..Math.Min(10,state.Commit.Length)]}",12,true));source.Children.Add(ProjectText($"提交说明：{(state.CommitMessage.Length>0?state.CommitMessage:"未读取")}   ·   本次提交变更 {state.LastCommitFileCount?.ToString()??"未读取"} 个文件",12,true));}
                 source.Children.Add(ProjectText(state.SyncSummary,12,true));
+                source.Children.Add(ProjectText("GitHub 核实时间："+ProjectTimeRules.Time(state.RemoteCheckedAt),11,true));
                 source.Children.Add(ProjectText(state.Remote,11,true));
                 foreach(var change in state.Changes.Take(6))source.Children.Add(ProjectText(change.Label,12,true));
                 if(state.Changes.Count>6)source.Children.Add(ProjectText($"还有 {state.Changes.Count-6} 个文件，可在提交窗口查看。",11,true));
@@ -130,7 +137,8 @@ public partial class MainWindow
         foreach(var button in sourceActions.Children.OfType<Button>()){button.Width=126;button.SetResourceReference(StyleProperty,typeof(Button));}
         var versions=ProjectSection("版本与安装包");var releaseConfig=projectAutomation.GetValueOrDefault(p.FullName);
         versions.Children.Add(ProjectText(releaseConfig==null?"尚未关联本地发行目录。":"本地发行目录："+releaseConfig.ReleaseFolder+(Directory.Exists(releaseConfig.ReleaseFolder)?"":"（目录不存在，请重新关联）"),12,true));
-        if(projectVersions.ContainsKey(p.FullName))versions.Children.Add(ProjectText("上次同步结果 · 点击“同步版本”核实 GitHub 上的当前版本。",11,true));
+        if(releaseDirectoryStates.TryGetValue(p.FullName,out var directoryState))versions.Children.Add(ProjectText(directoryState.Message.Length>0?"本地发行包核对："+directoryState.Message+"   ·   检查时间："+ProjectTimeRules.Time(directoryState.CheckedAt):$"本地版本：{directoryState.Tag}   ·   本地附件：{directoryState.LocalCount}   ·   待上传 / 替换：{directoryState.PendingCount?.ToString()??"未核对"}   ·   待校验：{directoryState.UnverifiedCount}\n附件检查时间：{ProjectTimeRules.Time(directoryState.CheckedAt)}",12,true));
+        else versions.Children.Add(ProjectText("本地待上传附件尚未核对，点击“同步版本”读取当前状态。",11,true));
         var versionActions=new WrapPanel();versions.Children.Add(versionActions);
         ProjectAction(versionActions,"更新",()=>ProjectDialog(()=>PublishDialog(p)),true,writable);
         ProjectAction(versionActions,"同步版本",()=>SyncProjectVersions(p),enabled:api.Token.Length>0);
@@ -141,7 +149,7 @@ public partial class MainWindow
         if(!projectVersions.TryGetValue(p.FullName,out var history))versions.Children.Add(ProjectText("同步后查看最近 30 个正式版、测试版及草稿。",12,true));
         else if(history.Count==0)versions.Children.Add(ProjectText("此项目还没有发布版本。",12,true));
         else foreach(var version in history){
-            var row=new Grid{Margin=new(0,12,0,0)};row.ColumnDefinitions.Add(new());row.ColumnDefinitions.Add(new(){Width=GridLength.Auto});var labels=new StackPanel();labels.Children.Add(ProjectText(version.DisplayVersion+"   ·   "+version.Channel,14));labels.Children.Add(ProjectText($"{version.AssetCount} 个安装包 / 附件   ·   {version.Updated.ToLocalTime():yyyy-MM-dd HH:mm}",11,true));row.Children.Add(labels);var actions=new WrapPanel();Grid.SetColumn(actions,1);row.Children.Add(actions);
+            var row=new Grid{Margin=new(0,12,0,0)};row.ColumnDefinitions.Add(new());row.ColumnDefinitions.Add(new(){Width=GridLength.Auto});var labels=new StackPanel();labels.Children.Add(ProjectText(version.DisplayVersion+"   ·   "+version.Channel,14));labels.Children.Add(ProjectText($"已上传附件：{version.AssetCount}   ·   核实时间：{ProjectTimeRules.Time(version.CheckedAt)}",11,true));labels.Children.Add(ProjectText((version.Draft?"创建时间："+ProjectTimeRules.Time(version.Created):"发布时间："+ProjectTimeRules.Time(version.Published))+"\n最近更新："+ProjectTimeRules.Time(version.LatestActivity),11,true));if(version.LastUploadedAt!=null)labels.Children.Add(ProjectText($"{version.LastAction}完成：{ProjectTimeRules.Time(version.LastUploadedAt)}   ·   上传 {version.LastUploadedCount??0} 个，复用 {version.LastReusedCount??0} 个附件",11,true));row.Children.Add(labels);var actions=new WrapPanel();Grid.SetColumn(actions,1);row.Children.Add(actions);
             ProjectAction(actions,"日志",()=>ProjectDialog(()=>Form.Notes(this,p.Name+" · "+version.Tag,version.Body)));
             ProjectAction(actions,"管理发布包",()=>OpenReleaseManager(p,version),enabled:api.Token.Length>0);
             if(version.Draft){ProjectAction(actions,"核实状态",async()=>{await VerifyProjectVersion(p,version);},enabled:api.Token.Length>0);ProjectAction(actions,"编辑草稿",()=>OpenDraftAction(p,version,true),enabled:writable);ProjectAction(actions,"继续发布",()=>OpenDraftAction(p,version,false),enabled:writable);}
@@ -154,7 +162,7 @@ public partial class MainWindow
     private async Task SyncProjects()
     {
         if(api.Token.Length==0){Login_Click(this,new());return;}
-        await Execute("项目同步","同步我的项目",async ct=>{var data=await api.MyProjects(ct);InvalidateProjectCaches(ProjectRules.InvalidatedProjects(myProjects,data));var names=data.Select(p=>p.FullName).ToHashSet(StringComparer.OrdinalIgnoreCase);InvalidateProjectCaches(projectVersions.Keys.Where(name=>!names.Contains(name)).ToArray());myProjects=data;projectsSynced=DateTimeOffset.Now;SaveProjects();RenderProjects();var selected=myProjects.FirstOrDefault(p=>p.FullName.Equals(selectedProject,StringComparison.OrdinalIgnoreCase));if(selected!=null){projectVersions[selected.FullName]=await api.ProjectVersions(selected.FullName,ct);SaveProjects();if(selectedProject==selected.FullName)RenderProjectDetails(selected);}model.Status=$"已同步 {data.Count} 个项目及当前项目的版本。";},resources:["projects:"+settings.Account]);
+        await Execute("项目同步","同步我的项目",async ct=>{var data=await api.MyProjects(ct);InvalidateProjectCaches(ProjectRules.InvalidatedProjects(myProjects,data));var names=data.Select(p=>p.FullName).ToHashSet(StringComparer.OrdinalIgnoreCase);InvalidateProjectCaches(projectVersions.Keys.Where(name=>!names.Contains(name)).ToArray());myProjects=data;projectsSynced=DateTimeOffset.Now;SaveProjects();RenderProjects();var selected=myProjects.FirstOrDefault(p=>p.FullName.Equals(selectedProject,StringComparison.OrdinalIgnoreCase));if(selected!=null){ReplaceProjectVersions(selected.FullName,await api.ProjectVersions(selected.FullName,ct));await RefreshReleaseDirectoryStatus(selected.FullName,ct);SaveProjects();if(selectedProject==selected.FullName)RenderProjectDetails(selected);}model.Status=$"已同步 {data.Count} 个项目及当前项目的版本。";},resources:["projects:"+settings.Account]);
     }
     private async Task InspectProject(ManagedProject p)
     {
@@ -162,15 +170,16 @@ public partial class MainWindow
     }
     private async Task<GitProjectState> VerifySourceRemote(GitProjectState state,string repo,CancellationToken ct)
     {
+        state=state with{RemoteCommit=null,RemoteCheckedAt=null};
         if(api.Token.Length==0||state.Branch=="分离 HEAD")return state;
-        try{await api.EnsureFreshToken(ct);return state with{RemoteCommit=await api.BranchCommit(repo,state.Branch,ct)};}
+        try{await api.EnsureFreshToken(ct);return state with{RemoteCommit=await api.BranchCommit(repo,state.Branch,ct),RemoteCheckedAt=DateTimeOffset.UtcNow};}
         catch(GitHubNotFoundException){return state with{RemoteCommit=""};}
         catch(IOException){return state;}
         catch(System.Net.Http.HttpRequestException){return state;}
     }
     private async Task SyncProjectVersions(ManagedProject p)
     {
-        await Execute("版本同步",p.FullName,async ct=>{ManagedProject current;try{current=await api.Project(p.FullName,ct);}catch(GitHubNotFoundException){InvalidateProjectCaches([p.FullName]);SaveProjects();if(selectedProject==p.FullName)RenderProjectDetails(p);throw;}if(!ProjectRules.SameRepository(p,current))InvalidateProjectCaches([p.FullName]);myProjects.RemoveAll(item=>item.FullName.Equals(p.FullName,StringComparison.OrdinalIgnoreCase));myProjects.Add(current);SaveProjects();if(selectedProject==p.FullName)RenderProjectDetails(current);projectVersions[p.FullName]=await api.ProjectVersions(p.FullName,ct);SaveProjects();if(selectedProject==p.FullName)RenderProjectDetails(current);model.Status="版本与草稿已同步。";},resources:["repo:"+p.FullName]);
+        await Execute("版本同步",p.FullName,async ct=>{ManagedProject current;try{current=await api.Project(p.FullName,ct);}catch(GitHubNotFoundException){InvalidateProjectCaches([p.FullName]);SaveProjects();if(selectedProject==p.FullName)RenderProjectDetails(p);throw;}if(!ProjectRules.SameRepository(p,current))InvalidateProjectCaches([p.FullName]);myProjects.RemoveAll(item=>item.FullName.Equals(p.FullName,StringComparison.OrdinalIgnoreCase));myProjects.Add(current);SaveProjects();if(selectedProject==p.FullName)RenderProjectDetails(current);ReplaceProjectVersions(p.FullName,await api.ProjectVersions(p.FullName,ct));await RefreshReleaseDirectoryStatus(p.FullName,ct);SaveProjects();if(selectedProject==p.FullName)RenderProjectDetails(current);model.Status="版本与草稿已同步。";},resources:["repo:"+p.FullName]);
     }
     private void CreateProject_Click(object sender,RoutedEventArgs e)=>CreateProjectDialog();
     private void CreateProjectDialog(string? previewPath=null)

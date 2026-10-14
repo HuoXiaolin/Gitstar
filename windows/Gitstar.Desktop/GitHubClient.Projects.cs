@@ -4,7 +4,7 @@ public sealed partial class GitHubClient
 {
     public async Task<string> BranchCommit(string repo,string branch,CancellationToken ct)
     {
-        Validate(repo);var data=await Request($"repos/{repo}/branches/{Uri.EscapeDataString(branch)}",ct:ct);var sha=S(data.GetProperty("commit"),"sha");
+        Validate(repo);var data=await Request($"repos/{repo}/branches/{Uri.EscapeDataString(branch)}",ct:ct,fresh:true);var sha=S(data.GetProperty("commit"),"sha");
         if(!System.Text.RegularExpressions.Regex.IsMatch(sha,"^[a-fA-F0-9]{40}$"))throw new IOException("无法确认分支的最新提交。");return sha;
     }
     public async Task<(string Name,string Email)> CommitIdentity(CancellationToken ct)
@@ -64,7 +64,13 @@ public sealed partial class GitHubClient
         }));
         return reconciled.OfType<ProjectVersion>().OrderByDescending(version=>version.Updated).ToList();
     }
-    internal static ProjectVersion ParseProjectVersion(JsonElement e)=>new(e.GetProperty("id").GetInt64(),S(e,"tag_name"),S(e,"name"),S(e,"body"),e.GetProperty("draft").GetBoolean(),e.GetProperty("prerelease").GetBoolean(),e.GetProperty("assets").GetArrayLength(),DateTimeOffset.TryParse(S(e,"published_at"),out var date)||DateTimeOffset.TryParse(S(e,"created_at"),out date)?date:DateTimeOffset.MinValue,S(e,"html_url"));
+    internal static ProjectVersion ParseProjectVersion(JsonElement e)
+    {
+        DateTimeOffset? Date(JsonElement value,string key)=>DateTimeOffset.TryParse(S(value,key),out var time)?time:null;
+        var published=Date(e,"published_at");var created=Date(e,"created_at");var assets=e.GetProperty("assets").EnumerateArray().ToArray();
+        var updated=assets.Select(a=>Date(a,"updated_at")).Append(Date(e,"updated_at")).Append(published).Append(created).OfType<DateTimeOffset>().DefaultIfEmpty(DateTimeOffset.MinValue).Max();
+        return new(e.GetProperty("id").GetInt64(),S(e,"tag_name"),S(e,"name"),S(e,"body"),e.GetProperty("draft").GetBoolean(),e.GetProperty("prerelease").GetBoolean(),assets.Length,updated,S(e,"html_url")){Published=published,Created=created,CheckedAt=DateTimeOffset.UtcNow,Assets=assets.Select(a=>new Asset(a.TryGetProperty("id",out var id)?id.GetInt64():0,S(a,"name"),a.TryGetProperty("size",out var size)?size.GetInt64():0,S(a,"browser_download_url"),S(a,"digest"))).ToList()};
+    }
     public async Task<ProjectVersion> ProjectVersionDetails(string repo,long id,CancellationToken ct)
     {
         var version=ParseProjectVersion(await ReleaseDetails(repo,id,ct));if(version.Id!=id)throw new IOException("GitHub 返回的版本 ID 不一致，请重新同步版本。");return version;

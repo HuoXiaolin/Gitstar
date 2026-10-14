@@ -12,7 +12,7 @@ public static class CacheRules
         return module switch{
             CacheModule.RecentUpdates=>new([root+"/repos",root+"/groups",root+"/releases"],[root+"/http-releases/"]),
             CacheModule.InstalledApps=>new([root+"/installed",root+"/matched-releases"],[]),
-            CacheModule.MyProjects=>new([root+"/my-projects",root+"/my-projects/versions",root+"/my-projects/synced"],[]),
+            CacheModule.MyProjects=>new([root+"/my-projects",root+"/my-projects/versions",root+"/my-projects/release-status",root+"/my-projects/synced"],[]),
             _=>new([],[])
         };
     }

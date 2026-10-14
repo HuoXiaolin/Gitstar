@@ -38,7 +38,7 @@ public sealed partial class GitHubClient
     public async Task DeleteProjectRelease(ReleaseInventory expected,CancellationToken ct)
     {
         var repo=expected.Project.FullName;var current=await ReleaseInventory(repo,expected.Version.Id,ct);CheckReleaseTarget(expected,current);
-        if(expected.Version!=current.Version||expected.Updated!=current.Updated||!expected.Assets.OrderBy(asset=>asset.Id).SequenceEqual(current.Assets.OrderBy(asset=>asset.Id)))throw new IOException("版本内容或附件已改变，请刷新后重新确认删除。");
+        if(!ProjectTimeRules.SameRemoteVersion(expected.Version,current.Version)||expected.Updated!=current.Updated||!expected.Assets.OrderBy(asset=>asset.Id).SequenceEqual(current.Assets.OrderBy(asset=>asset.Id)))throw new IOException("版本内容或附件已改变，请刷新后重新确认删除。");
         await Request($"repos/{repo}/releases/{current.Version.Id}",HttpMethod.Delete,ct:ct);
         var project=await Project(repo,ct);if(!ProjectRules.SameRepository(current.Project,project)||!project.CanPush)throw new IOException("删除后仓库权限发生变化，结果待核实。");
         try{await ReleaseDetails(repo,current.Version.Id,ct);}catch(GitHubNotFoundException){return;}

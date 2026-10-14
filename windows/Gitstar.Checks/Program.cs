@@ -204,6 +204,7 @@ await SelfUpdateChecks.Run(Check);
 await UpdateSortingChecks.Run(Check);
 await ReleaseSelectionChecks.Run(Check);
 await NewFeatureChecks.Run(Check,root);
+await ProjectStatusChecks.Run(Check);
 await ProjectDeletionChecks.Run(Check);
 await ReleaseManagementChecks.Run(Check);
 await CacheCleanupChecks.Run(Check,root);

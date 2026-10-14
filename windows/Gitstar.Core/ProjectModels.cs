@@ -10,6 +10,15 @@ public record ManagedProject(string FullName,string Description,bool Private,str
 public record ProjectWorkspace(string Repository,string Folder,string Branch="");
 public record ProjectVersion(long Id,string Tag,string Name,string Body,bool Draft,bool Prerelease,int AssetCount,DateTimeOffset Updated,string Url)
 {
+    public DateTimeOffset? Published {get;init;}
+    public DateTimeOffset? Created {get;init;}
+    public DateTimeOffset? CheckedAt {get;init;}
+    public DateTimeOffset? LastUploadedAt {get;init;}
+    public int? LastUploadedCount {get;init;}
+    public int? LastReusedCount {get;init;}
+    public string LastAction {get;init;}="";
+    public List<Asset>? Assets {get;init;}
+    public DateTimeOffset LatestActivity=>LastUploadedAt is {} local&&local>Updated?local:Updated;
     public string Channel=>Draft?"草稿":Prerelease?"测试版":"正式版";
     public string DisplayVersion=>Draft&&ReleaseRules.TemporaryTag(Tag)?(Rules.CompareVersions(Name,Name)!=null?Name+" · 未绑定标签":"未设置版本号"):Tag;
 }
@@ -21,10 +30,18 @@ public record GitChange(string Status,string Path,string Original="")
 }
 public record GitProjectState(string Folder,string Branch,string Remote,string Commit,List<GitChange> Changes,string Summary)
 {
+    public DateTimeOffset? CheckedAt {get;init;}
+    public DateTimeOffset? CommittedAt {get;init;}
+    public DateTimeOffset? RemoteCheckedAt {get;init;}
+    public long? CommitCount {get;init;}
+    public int? CommittedFileCount {get;init;}
+    public int? LastCommitFileCount {get;init;}
+    public string CommitMessage {get;init;}="";
     public string? RemoteCommit {get;init;}
     public bool SourceSynced=>Commit.Length>0 && Commit.Equals(RemoteCommit,StringComparison.OrdinalIgnoreCase);
-    public string SyncSummary=>Changes.Count>0?$"{Changes.Count} 个未提交变更，可上传更新。":Commit.Length==0?"尚无提交，请先添加源码。":SourceSynced?"源码已与 GitHub 同步；安装包更新请使用“同步并发布最新”。":RemoteCommit==null?"没有未提交变更；GitHub 提交状态尚未核实，可推送已有提交。":"没有未提交变更；本地提交与 GitHub 不同，可推送已有提交。";
+    public string SyncSummary=>Changes.Count>0?$"{Changes.Count} 个未提交变更，可上传更新。":Commit.Length==0?"尚无提交，请先添加源码。":SourceSynced?"当前提交已与 GitHub 一致；安装包更新需单独发布。":RemoteCommit==null?"没有未提交变更；GitHub 提交状态尚未核实，可推送已有提交。":"没有未提交变更；本地提交与 GitHub 不同，可推送已有提交。";
 }
+public record ReleaseDirectoryStatus(string Tag,int LocalCount,int? PendingCount,int UnverifiedCount,DateTimeOffset CheckedAt,string Message="");
 public record WorkspaceDiagnosis(string Folder,string Root,string Remote)
 {
     public bool HasRepository=>Root.Length>0;

@@ -58,7 +58,15 @@ public sealed partial class GitWorkspace
         var remotes=await Run(path,ct,"remote");if(remotes.Split('\n').Select(s=>s.Trim()).Contains("origin"))remote=await Run(path,ct,"remote","get-url","origin");
         try{commit=await Run(path,ct,"rev-parse","--verify","HEAD");}catch(IOException){}
         var changes=ProjectRules.ParseStatus(await Run(path,ct,"status","--porcelain=v1","-z","--untracked-files=all"));
-        return new(path,branch,remote,commit,changes,await Run(path,ct,"diff","--stat"));
+        var state=new GitProjectState(path,branch,remote,commit,changes,await Run(path,ct,"diff","--stat"));
+        if(commit.Length>0){
+            var metadata=(await Run(path,ct,"log","-1","--format=%cI%x00%s")).Split('\0',2);
+            var total=await Run(path,ct,"rev-list","--count","HEAD");
+            var files=await Run(path,ct,"ls-tree","-r","-z","--name-only","HEAD");
+            var last=await Run(path,ct,"diff-tree","--root","--no-commit-id","--name-only","-r","-z","-m","--first-parent","HEAD");
+            state=state with{CommittedAt=DateTimeOffset.TryParse(metadata[0],out var time)?time:null,CommitMessage=metadata.Length>1?metadata[1]:"",CommitCount=long.TryParse(total,out var count)?count:null,CommittedFileCount=files.Split('\0',StringSplitOptions.RemoveEmptyEntries).Length,LastCommitFileCount=last.Split('\0',StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.Ordinal).Count()};
+        }else state=state with{CommitCount=0,CommittedFileCount=0,LastCommitFileCount=0};
+        return state with{CheckedAt=DateTimeOffset.UtcNow};
     }
     public async Task Initialize(string folder,string repo,string branch,CancellationToken ct)
     {

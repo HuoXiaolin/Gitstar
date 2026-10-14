@@ -7,12 +7,14 @@ public partial class MainWindow
 {
     private void ForgetProjectVersion(string repo,long id)
     {
+        releaseDirectoryStates.Remove(repo);
         if(projectVersions.TryGetValue(repo,out var history))history.RemoveAll(version=>version.Id==id);
         releases.RemoveAll(release=>release.Id==id&&release.Repository.Equals(repo,StringComparison.OrdinalIgnoreCase));SaveProjects();SaveCache();PlanUpdates();
         if(projectsPage&&selectedProject==repo)RenderProjectDetails(myProjects.FirstOrDefault(project=>project.FullName.Equals(repo,StringComparison.OrdinalIgnoreCase)));else if(!projectsPage)Display();
     }
     private void RememberReleaseInventory(ReleaseInventory inventory)
     {
+        releaseDirectoryStates.Remove(inventory.Project.FullName);
         var repo=inventory.Project.FullName;RememberProjectVersion(repo,inventory.Version);
         for(var index=0;index<releases.Count;index++)if(releases[index].Id==inventory.Version.Id&&releases[index].Repository.Equals(repo,StringComparison.OrdinalIgnoreCase))releases[index]=releases[index] with{Assets=inventory.Assets.Select(asset=>new Asset(asset.Id,asset.Name,asset.Size,asset.Url,asset.Digest)).ToList()};
         SaveCache();PlanUpdates();if(!projectsPage)Display();

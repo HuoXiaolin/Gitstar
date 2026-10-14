@@ -15,7 +15,7 @@ public partial class MainWindow
     {
         if(module==CacheModule.RecentUpdates){recentCacheCleared=true;repositories.Clear();groups.Clear();releases=store.Get(CacheKey+"/matched-releases",new List<Release>());RebuildGroups();}
         if(module==CacheModule.InstalledApps){installed.Clear();installedFresh=false;installedScan=null;}
-        if(module==CacheModule.MyProjects){myProjects.Clear();projectVersions.Clear();projectStates.Clear();projectsSynced=null;selectedProject=null;}
+        if(module==CacheModule.MyProjects){myProjects.Clear();projectVersions.Clear();releaseDirectoryStates.Clear();projectStates.Clear();projectsSynced=null;selectedProject=null;}
         if(module==CacheModule.FinishedTasks)operations.RemoveAll(operation=>CacheRules.Finished(operation));
         PlanUpdates();Display();
     }

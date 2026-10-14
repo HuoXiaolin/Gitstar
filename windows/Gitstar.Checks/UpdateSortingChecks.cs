@@ -25,8 +25,8 @@ static class UpdateSortingChecks
         var updatedActive=new Card{Release=active.Release,RepositoryUpdated=active.RepositoryUpdated,ShowRepositoryUpdated=true};
         check(Card.Order([updatedRecent,updatedActive]).First()==updatedActive,"Updated sorting differs when repository activity and release publication differ");
         var unknown=new Card{Release=Release("owner/unknown",now.AddDays(1)),ShowRepositoryUpdated=true};
-        check(Card.Order([unknown,updatedRecent,updatedActive]).Last()==unknown&&unknown.Date=="Updated 待同步","unknown Updated sorts last without substituting release publication");
-        check(updatedActive.Date.StartsWith("Updated ")&&updatedActive.DateHint.Contains("发布时间：")&&updatedActive.DateHint.Contains("仓库 Updated："),"cards identify Updated and show both timestamp sources in tooltip");
+        check(Card.Order([unknown,updatedRecent,updatedActive]).Last()==unknown&&unknown.Date=="更新时间待同步","unknown Updated sorts last without substituting release publication");
+        check(updatedActive.Date.StartsWith("仓库更新 ")&&updatedActive.DateHint.Contains("发布时间：")&&updatedActive.DateHint.Contains("仓库更新时间："),"cards identify Updated and show both timestamp sources in tooltip");
         var tied=new Card{Release=Release("owner/tied",now.AddDays(-3)),RepositoryUpdated=now,ShowRepositoryUpdated=true};
         check(Card.Order([tied,updatedActive]).First()==updatedActive,"equal repository Updated timestamps use publication time as stable tie break");
     }

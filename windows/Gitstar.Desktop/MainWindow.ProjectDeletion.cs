@@ -7,7 +7,7 @@ public partial class MainWindow
     private void ForgetDeletedProject(string repo)
     {
         bool Matches(string value)=>value.Equals(repo,StringComparison.OrdinalIgnoreCase);
-        myProjects.RemoveAll(project=>Matches(project.FullName));projectWorkspaces.RemoveAll(workspace=>Matches(workspace.Repository));projectStates.Remove(repo);projectVersions.Remove(repo);projectAutomation.Remove(repo);
+        myProjects.RemoveAll(project=>Matches(project.FullName));projectWorkspaces.RemoveAll(workspace=>Matches(workspace.Repository));projectStates.Remove(repo);projectVersions.Remove(repo);releaseDirectoryStates.Remove(repo);projectAutomation.Remove(repo);
         repositories.RemoveAll(project=>Matches(project.FullName));releases.RemoveAll(release=>Matches(release.Repository));settings.ExtraRepositories.RemoveAll(Matches);
         foreach(var binding in settings.Bindings.Where(binding=>Matches(binding.Repository)))binding.Disabled=true;
         groups=groups.Select(group=>group with{Repositories=group.Repositories.Where(value=>!Matches(value)).ToList()}).ToList();settings.LocalGroups=settings.LocalGroups.Select(group=>group with{Repositories=group.Repositories.Where(value=>!Matches(value)).ToList()}).ToList();

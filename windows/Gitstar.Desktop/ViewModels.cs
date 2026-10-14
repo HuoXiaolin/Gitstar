@@ -27,8 +27,8 @@ public sealed class Card : Observable
     public DateTimeOffset? RepositoryUpdated {get;init;}
     public bool ShowRepositoryUpdated {get;init;}
     public DateTimeOffset SortTime=>ShowRepositoryUpdated?RepositoryUpdated??DateTimeOffset.MinValue:Release.Published;
-    public string Date => ShowRepositoryUpdated?RepositoryUpdated is {} updated?$"Updated {updated.ToLocalTime():yyyy-MM-dd HH:mm}":"Updated 待同步":Release.Date;
-    public string DateHint=>$"发布时间：{Release.Date}\n仓库 Updated：{(RepositoryUpdated is {} updated?updated.ToLocalTime().ToString("yyyy-MM-dd HH:mm"):"尚无缓存，点击检查更新后获取")}\nUpdated 使用 GitHub 仓库的 updated_at，与版本发布时间分别记录。";
+    public string Date => ShowRepositoryUpdated?RepositoryUpdated is {} updated?$"仓库更新 {updated.ToLocalTime():yyyy-MM-dd HH:mm}":"更新时间待同步":Release.Date;
+    public string DateHint=>$"发布时间：{Release.Date}\n仓库更新时间：{(RepositoryUpdated is {} updated?updated.ToLocalTime().ToString("yyyy-MM-dd HH:mm"):"尚无缓存，点击检查更新后获取")}\n更新时间使用 GitHub 仓库的 updated_at，与版本发布时间分别记录。";
     public static IOrderedEnumerable<Card> Order(IEnumerable<Card> cards)=>cards.OrderByDescending(c=>c.SortTime).ThenByDescending(c=>c.Release.Published).ThenBy(c=>c.Repository,StringComparer.OrdinalIgnoreCase);
     private string? summary;
     public string Summary => summary ??= ReleasePreview.Create(Release.Body,Release.Tag);

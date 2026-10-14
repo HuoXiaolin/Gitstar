@@ -32,6 +32,7 @@ public class Settings
     public int BulkDownloadDays {get;set;}=7;
     public List<string> BulkDownloadExtensions {get;set;}=[".exe",".msi",".zip"];
     public UpdateSort RecentSort {get;set;}
+    public UpdateSort ProjectsSort {get;set;}=UpdateSort.RepositoryUpdated;
     public int SameVersionDownload {get;set;}
     public bool KeepLatestPackages {get;set;}
     public bool DeleteInstalledPackages {get;set;}
