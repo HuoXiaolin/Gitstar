@@ -10,12 +10,19 @@ public partial class MainWindow
     private readonly Dictionary<string,TransferState> automaticPublishing=new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim automationSlots=new(4);
     private bool batchPublishing;
+    private void RememberReleaseFileSelection(ManagedProject project,string folder,IEnumerable<string> names)
+    {
+        var current=SuggestedAutomation(project);var selected=names.Select(PackageRules.OriginalFileName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();var target=Path.GetFullPath(folder);var version=current.VersionFile;
+        if(!Path.GetFullPath(current.ReleaseFolder).Equals(target,StringComparison.OrdinalIgnoreCase)&&Path.IsPathRooted(version)&&Path.GetFullPath(version).StartsWith(Path.GetFullPath(current.ReleaseFolder).TrimEnd('\\','/')+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))version="";
+        if(version.Length==0)version=AutomationRules.VersionFile(current.SourceFolder,target,project.Name);
+        projectAutomation[project.FullName]=current with{ReleaseFolder=target,VersionFile=version,SelectedAssets=selected};SaveProjects();
+    }
     private void RenderProjectAutomation(ManagedProject project)
     {
         var section=ProjectSection("同步与发布");var config=projectAutomation.GetValueOrDefault(project.FullName);
         if(section.Parent is System.Windows.Controls.Border surface){surface.SetResourceReference(BackgroundProperty,"AccentSoft");surface.BorderThickness=new Thickness(0);}
         section.Children.Add(ProjectText(config==null?"配置源码目录、发行目录和版本号来源后，一键提交全部源码变更并发布最新安装包。":"源码："+config.SourceFolder+"\n发行："+config.ReleaseFolder,12,true));
-        if(config!=null)section.Children.Add(ProjectText("版本来源："+(config.VersionFile.Length>0?config.VersionFile:"自动读取")+"   ·   "+(config.IncludeInBatch?"参与全部发布":"仅单独发布"),11,true));
+        if(config!=null){section.Children.Add(ProjectText("版本来源："+(config.VersionFile.Length>0?config.VersionFile:"自动读取")+"   ·   "+(config.IncludeInBatch?"参与全部发布":"仅单独发布"),11,true));if(config.SelectedAssets!=null)section.Children.Add(ProjectText("自动上传：按已保存的勾选结果，共 "+config.SelectedAssets.Count+" 个文件；可在“更新”中调整。",11,true));}
         var actions=new WrapPanel();section.Children.Add(actions);var running=automaticPublishing.TryGetValue(project.FullName,out var state);var button=ProjectAction(actions,"同步并发布最新",()=>AutoPublishProject(project),true,ProjectWritable(project)&&!running);
         if(running){button.Opacity=1;button.SetBinding(ContentControl.ContentProperty,new System.Windows.Data.Binding(nameof(TransferState.Label)){Source=state});}
         ProjectAction(actions,"自动发布配置",()=>ProjectDialog(()=>AutomationConfigDialog(project)),enabled:!running);
@@ -50,6 +57,7 @@ public partial class MainWindow
     private void AutomationConfigDialog(ManagedProject project,string? previewPath=null)
     {
         var config=SuggestedAutomation(project);var f=new Form(this,"自动发布配置",780,740);f.Label("项目："+project.FullName+"\n保存配置后，点击同步发布即可自动执行，不再要求核对文件或确认发布。");
+        if(config.SelectedAssets!=null)f.Label("当前按“更新发布版本”中保存的 "+config.SelectedAssets.Count+" 个文件选择上传，优先于附件匹配规则；修改其他配置会保留该选择。");
         var source=f.Text("源码目录",config.SourceFolder);var release=f.Text("发行目录",config.ReleaseFolder);var version=f.Text("版本号来源文件",config.VersionFile);f.Label("支持 Directory.Build.props / csproj、package.json、版本文本和 EXE。可填写相对源码目录的路径；留空自动识别。发行目录取当前版本文件，若有版本子目录则选择版本号最大的目录。");
         var participate=f.Check("参与“全部同步并发布最新”",config.IncludeInBatch);var advanced=f.Advanced("发布规则与更新日志");TextBox branch=null!,prefix=null!,patterns=null!,notes=null!;CheckBox replace=null!;ComboBox channel=null!;
         f.Into(advanced,()=>{branch=f.Text("提交分支（留空使用当前分支）",config.Branch);prefix=f.Text("版本标签前缀（可留空，例如 v）",config.TagPrefix);patterns=f.Text("附件匹配规则（用分号分隔）",config.AssetPatterns);notes=f.Text("更新日志文件（可选，相对源码目录或完整路径）",config.NotesFile);replace=f.Check("同版本自动更新附件与日志，保留版本标签",config.ReplaceSameVersion);channel=f.Select("版本类型",["根据版本号自动判断","正式版","测试版"],config.Prerelease==null?0:config.Prerelease==false?1:2);});
@@ -57,7 +65,7 @@ public partial class MainWindow
         f.Action("选择发行目录",()=>{var d=new OpenFolderDialog();if(d.ShowDialog(f)==true){release.Text=d.FolderName;if(version.Text.Length==0)version.Text=AutomationRules.VersionFile(source.Text,release.Text,project.Name);}return Task.CompletedTask;});
         f.Action("选择版本文件",()=>{var d=new OpenFileDialog{Filter="版本来源|*.props;*.csproj;*.json;*.txt;*.exe;*.dll|所有文件|*.*"};if(d.ShowDialog(f)==true)version.Text=d.FileName;return Task.CompletedTask;});
         async Task SaveConfig(bool publish){
-            var updated=new ProjectAutomation(project.FullName,Path.GetFullPath(source.Text.Trim()),Path.GetFullPath(release.Text.Trim()),version.Text.Trim(),branch.Text.Trim(),prefix.Text.Trim(),patterns.Text.Trim(),notes.Text.Trim(),participate.IsChecked==true,replace.IsChecked==true,channel.SelectedIndex==0?null:channel.SelectedIndex==2);
+            var updated=new ProjectAutomation(project.FullName,Path.GetFullPath(source.Text.Trim()),Path.GetFullPath(release.Text.Trim()),version.Text.Trim(),branch.Text.Trim(),prefix.Text.Trim(),patterns.Text.Trim(),notes.Text.Trim(),participate.IsChecked==true,replace.IsChecked==true,channel.SelectedIndex==0?null:channel.SelectedIndex==2){SelectedAssets=config.SelectedAssets};
             var diagnosis=await new GitWorkspace("").Diagnose(updated.SourceFolder,CancellationToken.None);if(!diagnosis.IsRoot||!ProjectRules.MatchesRemote(diagnosis.Remote,project.FullName))throw new IOException("源码目录需要先关联此项目的 Git 仓库，请在源码工作区使用“切换 / 关联目录”。");
             if(!Directory.Exists(updated.ReleaseFolder))throw new IOException("发行目录不存在，请选择构建后的目录。");projectAutomation[project.FullName]=updated;SaveProjects();RenderProjectDetails(project);f.Close();if(publish)await AutoPublishProject(project);
         }

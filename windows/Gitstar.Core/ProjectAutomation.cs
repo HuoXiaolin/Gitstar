@@ -5,11 +5,14 @@ using System.Xml;
 using System.Xml.Linq;
 namespace Gitstar.Core;
 
-public record ProjectAutomation(string Repository,string SourceFolder,string ReleaseFolder,string VersionFile="",string Branch="",string TagPrefix="",string AssetPatterns=AutomationRules.DefaultAssets,string NotesFile="",bool IncludeInBatch=true,bool ReplaceSameVersion=true,bool? Prerelease=null);
+public record ProjectAutomation(string Repository,string SourceFolder,string ReleaseFolder,string VersionFile="",string Branch="",string TagPrefix="",string AssetPatterns=AutomationRules.DefaultAssets,string NotesFile="",bool IncludeInBatch=true,bool ReplaceSameVersion=true,bool? Prerelease=null)
+{
+    public List<string>? SelectedAssets {get;init;}
+}
 public record AutomationPlan(string Version,string Tag,bool Prerelease,string VersionFile,string ReleaseFolder,string[] Assets);
 public static class AutomationRules
 {
-    public const string DefaultAssets="*.exe;*.msi;*.zip;*.7z;*.apk;*.aab;*.dmg;*.deb;*.rpm;*.AppImage;*.tar.gz;*.tar.xz;SHA256SUMS.txt;使用说明.md";
+    public const string DefaultAssets="*";
     public static string VersionFile(string source,string release,string name)
     {
         foreach(var relative in new[]{"Directory.Build.props","windows/Directory.Build.props","package.json","version.txt","VERSION"})if(File.Exists(Path.Combine(source,relative)))return relative;
@@ -40,11 +43,19 @@ public static class AutomationRules
         var path=ResolveFile(config.SourceFolder,versionFile);var version=ReadVersion(path);var root=Path.GetFullPath(config.ReleaseFolder);var versionFolders=Directory.GetDirectories(root).Select(folder=>(Folder:folder,Version:Path.GetFileName(folder))).Where(item=>Rules.CompareVersions(item.Version,item.Version)!=null && item.Version.Contains('.')).ToArray();
         if(versionFolders.Length>0){var latest=versionFolders.Aggregate((a,b)=>Rules.CompareVersions(a.Version,b.Version)>=0?a:b);if(Rules.CompareVersions(latest.Version,version)!=0)throw new IOException("源码版本与最新发行子目录版本不一致："+version+" / "+latest.Version);root=latest.Folder;}
         if(new DirectoryInfo(root).Attributes.HasFlag(FileAttributes.ReparsePoint))throw new IOException("发行目录不能是目录链接。");
-        var patterns=config.AssetPatterns.Split(';',StringSplitOptions.TrimEntries|StringSplitOptions.RemoveEmptyEntries);if(patterns.Length==0)throw new IOException("请至少配置一种安装包匹配规则。");
-        var candidates=Directory.GetFiles(root).Where(file=>patterns.Any(pattern=>System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(pattern,Path.GetFileName(file),true))).ToArray();
+        string[] candidates;
+        if(config.SelectedAssets!=null){
+            if(config.SelectedAssets.Count==0)throw new IOException("尚未勾选发布文件，请在“更新发布版本”中选择需要上传的文件。");
+            candidates=config.SelectedAssets.Select(name=>Path.Combine(root,PackageRules.OriginalFileName(name))).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            var missing=candidates.Where(file=>!File.Exists(file)).Select(Path.GetFileName).ToArray();if(missing.Length>0)throw new IOException("已勾选的发布文件不存在，请重新选择："+string.Join("、",missing));
+            if(candidates.Any(file=>FileVersion(Path.GetFileName(file)) is {} selectedVersion&&Rules.CompareVersions(selectedVersion,version)!=0))throw new IOException("已勾选文件与当前版本不一致，请在“更新发布版本”中重新选择。");
+        }else{
+            var patterns=config.AssetPatterns.Split(';',StringSplitOptions.TrimEntries|StringSplitOptions.RemoveEmptyEntries);if(patterns.Length==0)throw new IOException("请至少配置一种安装包匹配规则。");
+            candidates=Directory.GetFiles(root).Where(file=>patterns.Any(pattern=>System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(pattern,Path.GetFileName(file),true))).ToArray();
+        }
         if(candidates.Any(file=>FileVersion(Path.GetFileName(file)) is {} found && Rules.CompareVersions(found,version)>0))throw new IOException("发行目录中存在高于源码版本的安装包，请先完成构建后重试。");
         var assets=candidates.Where(file=>FileVersion(Path.GetFileName(file)) is not {} found || Rules.CompareVersions(found,version)==0).OrderBy(Path.GetFileName,StringComparer.OrdinalIgnoreCase).ToArray();
-        if(!assets.Any(file=>!Path.GetFileName(file).Equals("SHA256SUMS.txt",StringComparison.OrdinalIgnoreCase)&&Path.GetExtension(file)!=".md"))throw new IOException("未找到当前版本的安装包。");
+        if(assets.Length==0||config.SelectedAssets==null&&!assets.Any(file=>!Path.GetFileName(file).Equals("SHA256SUMS.txt",StringComparison.OrdinalIgnoreCase)&&Path.GetExtension(file)!=".md"))throw new IOException("未找到当前版本的发布文件。");
         foreach(var file in assets){var info=new FileInfo(file);if(info.Length==0||info.Attributes.HasFlag(FileAttributes.ReparsePoint))throw new IOException("安装包为空或是文件链接："+info.Name);if(info.Extension.Equals(".exe",StringComparison.OrdinalIgnoreCase)){var metadata=System.Diagnostics.FileVersionInfo.GetVersionInfo(file);var binary=metadata.ProductVersion?.Trim();if(binary?.Length>0&&Rules.CompareVersions(binary,binary)!=null&&Rules.CompareVersions(binary,version)!=0)throw new IOException("安装包版本不一致："+info.Name+" · "+binary+" / "+version);}}
         return new(version,config.TagPrefix+version,config.Prerelease??version.Contains('-'),path,root,assets);
     }

@@ -203,6 +203,7 @@ await ReleaseStateChecks.Run(Check,root);
 await SelfUpdateChecks.Run(Check);
 await UpdateSortingChecks.Run(Check);
 await ReleaseSelectionChecks.Run(Check);
+await ReleaseFileSelectionChecks.Run(Check,root);
 await DownloadVersionChecks.Run(Check);
 await NewFeatureChecks.Run(Check,root);
 await ProjectStatusChecks.Run(Check);

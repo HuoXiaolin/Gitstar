@@ -102,15 +102,25 @@ public partial class MainWindow
         button.Click+=async(_,_)=>{button.IsEnabled=false;try{await work();}catch(Exception ex){DialogMessage.Show(this,ex.Message,"操作未完成");}finally{button.IsEnabled=enabled;}};parent.Children.Add(button);return button;
     }
     private Task ProjectDialog(Action action){action();return Task.CompletedTask;}
+    private WrapPanel ProjectAddressRow(ManagedProject project)
+    {
+        var row=new WrapPanel{Margin=new Thickness(0,0,0,8)};var address=new TextBlock{Text=project.FullName,FontSize=12,VerticalAlignment=VerticalAlignment.Center};address.SetResourceReference(TextBlock.ForegroundProperty,"Muted");row.Children.Add(address);
+        var actions=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(4,0,0,0)};row.Children.Add(actions);
+        foreach(var copy in new[]{true,false}){
+            var title=copy?"复制项目地址":"打开项目主页";var button=new Button{Tag=project,ToolTip=title,Style=(Style)FindResource("ProjectAddressButton")};System.Windows.Automation.AutomationProperties.SetName(button,title);
+            var icon=new System.Windows.Shapes.Path{Data=Geometry.Parse(copy?"M 5,2 L 14,2 L 14,11 M 2,5 L 11,5 L 11,14 L 2,14 Z":"M 8,2 L 14,2 L 14,8 M 14,2 L 7,9 M 5,3 L 2,3 L 2,14 L 13,14 L 13,11"),StrokeThickness=1.5,StrokeLineJoin=PenLineJoin.Round,Stretch=Stretch.Uniform,Width=13,Height=13};icon.SetBinding(System.Windows.Shapes.Shape.StrokeProperty,new System.Windows.Data.Binding("Foreground"){Source=button});button.Content=icon;if(copy)button.Click+=CopyProjectAddress_Click;else button.Click+=ProjectHome_Click;actions.Children.Add(button);
+        }
+        var metadata=new TextBlock{Text=project.Visibility+"   ·   "+project.Access+"   ·   默认分支 "+project.DefaultBranch,FontSize=11,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(10,0,0,0)};metadata.SetResourceReference(TextBlock.ForegroundProperty,"Muted");row.Children.Add(metadata);return row;
+    }
     private bool ProjectWritable(ManagedProject p)=>api.Token.Length>0 && p.CanPush && !p.Archived;
     private void RenderProjectDetails(ManagedProject? project)
     {
         if(IsInBackground){QueueBackgroundMemoryReclaim();return;}
         if(ProjectDetails==null)return;ProjectDetails.Children.Clear();
         if(project==null){var empty=ProjectSection(api.Token.Length==0?"登录后管理你的项目":"创建你的下一个项目");empty.Children.Add(ProjectText(myProjects.Count>0?"没有符合当前筛选的项目。":"同步你的 GitHub 仓库，或创建公开 / 私有项目。关联源码目录后即可检查变更、提交上传和发布版本。",13,true));var actions=new WrapPanel();empty.Children.Add(actions);ProjectAction(actions,api.Token.Length==0?"登录 GitHub":"同步项目",()=>api.Token.Length==0?ProjectDialog(()=>Login_Click(this,new())):SyncProjects(),true);ProjectAction(actions,"创建项目",()=>ProjectDialog(()=>CreateProjectDialog()));return;}
-        var p=project;var writable=ProjectWritable(p);var info=ProjectSection(p.Name);info.Children.Add(ProjectText(p.FullName+"   ·   "+p.Visibility+"   ·   "+p.Access+"   ·   默认分支 "+p.DefaultBranch,12,true));info.Children.Add(ProjectText(p.Description.Length>0?p.Description:"还没有项目说明",13,p.Description.Length==0));
+        var p=project;var writable=ProjectWritable(p);var info=ProjectSection(p.Name);info.Children.Add(ProjectAddressRow(p));info.Children.Add(ProjectText(p.Description.Length>0?p.Description:"还没有项目说明",13,p.Description.Length==0));
         info.Children.Add(ProjectText("项目同步："+(projectsSynced?.ToLocalTime().ToString("MM-dd HH:mm")??"尚未同步"),11,true));var infoActions=new WrapPanel();info.Children.Add(infoActions);
-        ProjectAction(infoActions,"打开 GitHub",()=>ProjectDialog(()=>WindowsServices.Open("https://github.com/"+p.FullName)));ProjectAction(infoActions,"项目设置",()=>OpenProjectSettings(p),enabled:p.CanAdmin&&api.Token.Length>0);
+        ProjectAction(infoActions,"项目设置",()=>OpenProjectSettings(p),enabled:p.CanAdmin&&api.Token.Length>0);
         RenderProjectAutomation(p);
         var workspace=Workspace(p);var source=ProjectSection("源码工作区");
         if(workspace==null)source.Children.Add(ProjectText("关联现有 Git 仓库、初始化已有源码，或克隆远程项目到电脑。",13,true));

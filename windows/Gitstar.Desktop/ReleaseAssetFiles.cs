@@ -26,7 +26,7 @@ public static class ReleaseAssetFiles
                 if(!item.Sha.Equals(match.Groups[1].Value,StringComparison.OrdinalIgnoreCase))throw new IOException("发行文件与校验清单不一致，可能仍在构建："+item.OriginalName);verified++;
                 if(item.Name!=item.OriginalName){lines[index]=item.Sha+"  "+item.Name;renamed=true;}
             }
-            if(verified==0)throw new IOException("校验清单没有覆盖所选安装包，请完成构建后重试。");
+            if(verified==0&&files.Count>1)throw new IOException("校验清单没有覆盖所选安装包，请完成构建后重试。");
             if(renamed){await File.WriteAllTextAsync(manifest.Path,string.Join("\n",lines)+"\n",new UTF8Encoding(false),ct);using var input=File.OpenRead(manifest.Path);files[files.IndexOf(manifest)]=manifest with{Size=input.Length,Sha=Convert.ToHexString(await SHA256.HashDataAsync(input,ct))};}
         }
         return files;

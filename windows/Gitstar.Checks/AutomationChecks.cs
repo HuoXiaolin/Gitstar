@@ -22,14 +22,17 @@ static class AutomationChecks
         var versionFolders=Path.Combine(root,"versions");Directory.CreateDirectory(Path.Combine(versionFolders,"0.9.0"));Directory.CreateDirectory(Path.Combine(versionFolders,"1.0.0.0"));await File.WriteAllTextAsync(Path.Combine(versionFolders,"1.0.0.0","app.zip"),"current");Directory.SetLastWriteTimeUtc(Path.Combine(versionFolders,"0.9.0"),DateTime.UtcNow.AddDays(1));check(AutomationRules.Plan(config with{ReleaseFolder=versionFolders}).ReleaseFolder.EndsWith("1.0.0.0"),"latest release folder is selected by version number rather than modification time");
         var sourceCalls=0;Task<GitProjectState> Upload(CancellationToken ct){ct.ThrowIfCancellationRequested();sourceCalls++;return Task.FromResult(new GitProjectState(source,"main","https://github.com/owner/repo.git",Sha,[],""));}
         var progress=new List<string>();void Progress(string text,long? id)=>progress.Add(text);
+        var uncheckedFile=Path.Combine(release,"do-not-upload.txt");await File.WriteAllTextAsync(uncheckedFile,"unchecked fixture");
         using(var server=new AutomationServer())using(var api=new GitHubClient(new(),server.Handler)){
-            var result=await ProjectAutomationService.Run(config,api,Path.Combine(root,"stage"),Upload,Progress,CancellationToken.None,ct=>Task.FromResult("- fixture commit"));
+            var result=await ProjectAutomationService.Run(config with{AssetPatterns="*",SelectedAssets=["app.zip"]},api,Path.Combine(root,"stage"),Upload,Progress,CancellationToken.None,ct=>Task.FromResult("- fixture commit"));
             check(result.Uploaded==1&&!server.Draft&&sourceCalls==1&&server.Creates==1,"one-click flow pushes source before draft creation then uploads verifies and publishes");
+            check(server.Assets.Values.Single().Name=="app.zip"&&!server.Notes.Contains("do-not-upload.txt"),"automatic publication uploads only remembered checked files even with an all-files pattern");
             check(result.Release is {Draft:false,Prerelease:false,AssetCount:1}&&result.Release.Id==result.ReleaseId&&result.Release.Body==server.Notes,"automation returns authoritative published state for immediate persistent UI update");
             check(server.Notes.Contains("fixture commit")&&server.Notes.Contains(Sha)&&server.Notes.Contains("SHA-256"),"automatic release notes contain commit information and package digests");
             var repeat=await ProjectAutomationService.Run(config,api,Path.Combine(root,"stage"),Upload,Progress,CancellationToken.None);
             check(repeat.Unchanged==1&&server.Uploads==1&&server.Creates==1,"repeated click reuses verified same-version assets and avoids duplicate release creation");
         }
+        File.Delete(uncheckedFile);
         using(var server=new AutomationServer{Exists=true,Tag="v1.0.0.0",Draft=false})using(var api=new GitHubClient(new(),server.Handler)){
             server.Add("app.zip",Encoding.UTF8.GetBytes("old"));var result=await ProjectAutomationService.Run(config,api,Path.Combine(root,"stage"),Upload,Progress,CancellationToken.None);
             check(server.Tag=="v1.0.0.0"&&result.Tag==server.Tag&&server.Creates==0,"same numeric version reuses existing tag spelling without moving or recreating the tag");
