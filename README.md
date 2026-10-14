@@ -69,4 +69,4 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File windows/build.ps1 -Dotne
 
 生成安装版时，再通过 `-Inno` 参数指定 Inno Setup 编译器路径。
 
-构建完成后，EXE、ZIP、安装版和说明直接输出到 `D:\Agant\Github_Releases\Gitstar`，不创建发行子文件夹，最新精简源码自动同步到 `D:\Agant\Github_Source\Gitstar`。可通过 `-OutputRoot` 和 `-SourceRoot` 参数自定义路径。
+构建完成后，单文件 EXE、安装版、使用说明和校验清单直接输出到 `D:\Agant\Github_Releases\Gitstar`，不创建发行子文件夹，也不生成 ZIP；最新精简源码自动同步到 `D:\Agant\Github_Source\Gitstar`。可通过 `-OutputRoot` 和 `-SourceRoot` 参数自定义路径。

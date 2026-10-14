@@ -18,12 +18,18 @@ public sealed class Card : Observable
     public UpdateCandidate? Update { get; init; }
     public string Title => Update?.App.Name ?? Release.Repository.Split('/').Last();
     public string Repository => Release.Repository;
+    public string FollowSource {get;init;}="";
     public string Version => Update==null ? Release.Tag : $"{Update.App.Version}  →  {Release.Tag}";
     public string VersionEvidence=>Update==null?"":$"版本来源：{Update.App.VersionSource}\n程序：{Update.App.ExecutablePath}\n登记版本：{Update.App.RegisteredVersion}";
     public string Channel => Release.Channel;
     public string BadgeColor => Release.Prerelease ? "#FFF1D6" : "#E9F7F1";
     public string BadgeInk => Release.Prerelease ? "#9D650B" : "#17845E";
-    public string Date => Release.Date;
+    public DateTimeOffset? RepositoryUpdated {get;init;}
+    public bool ShowRepositoryUpdated {get;init;}
+    public DateTimeOffset SortTime=>ShowRepositoryUpdated?RepositoryUpdated??DateTimeOffset.MinValue:Release.Published;
+    public string Date => ShowRepositoryUpdated?RepositoryUpdated is {} updated?$"Updated {updated.ToLocalTime():yyyy-MM-dd HH:mm}":"Updated 待同步":Release.Date;
+    public string DateHint=>$"发布时间：{Release.Date}\n仓库 Updated：{(RepositoryUpdated is {} updated?updated.ToLocalTime().ToString("yyyy-MM-dd HH:mm"):"尚无缓存，点击检查更新后获取")}\nUpdated 使用 GitHub 仓库的 updated_at，与版本发布时间分别记录。";
+    public static IOrderedEnumerable<Card> Order(IEnumerable<Card> cards)=>cards.OrderByDescending(c=>c.SortTime).ThenByDescending(c=>c.Release.Published).ThenBy(c=>c.Repository,StringComparer.OrdinalIgnoreCase);
     private string? summary;
     public string Summary => summary ??= ReleasePreview.Create(Release.Body,Release.Tag);
     public string Action => Update==null ? "保存安装包" : Update.Asset?.Name.EndsWith(".zip",StringComparison.OrdinalIgnoreCase)==true ? "获取便携新版" : "下载并安装";

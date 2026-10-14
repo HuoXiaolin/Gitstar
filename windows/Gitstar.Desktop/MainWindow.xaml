@@ -139,6 +139,7 @@
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
       <Grid Margin="0,0,12,0">
         <TextBox x:Name="Search" TextChanged="Filter_Changed" ToolTip="搜索仓库、软件、版本" />
@@ -161,7 +162,12 @@
         <ComboBoxItem Content="正式 + 测试" />
         <ComboBoxItem Content="仅测试版" />
       </ComboBox>
-      <StackPanel Grid.Column="3" Orientation="Horizontal">
+      <ComboBox x:Name="SortFilter" Grid.Column="3" SelectionChanged="Sort_Changed" SelectedIndex="0" Margin="0,0,12,0" ToolTip="发布时间：Release 发布的时间；Updated 时间：GitHub 仓库的 updated_at。按时间从新到旧排列，切换时不扫描。">
+        <ComboBoxItem Content="按发布时间" />
+        <ComboBoxItem Content="按 Updated 时间" />
+      </ComboBox>
+      <StackPanel Grid.Column="4" Orientation="Horizontal">
+        <Button x:Name="BulkDownloadButton" Content="批量下载" Click="BulkDownload_Click" />
         <Button x:Name="BatchButton" Content="批量管理" Click="BatchManage_Click" />
         <Button x:Name="AddButton" Content="添加项目" Click="Add_Click" />
         <Button Content="检查更新" Click="Refresh_Click" Margin="0" />
@@ -294,7 +300,10 @@
                       <local:OwnerAvatar Repository="{Binding Repository}" VerticalAlignment="Top" />
                       <StackPanel Grid.Column="1" Margin="0,0,20,0">
                         <TextBlock Text="{Binding Title}" FontSize="18" FontWeight="SemiBold" />
-                        <TextBlock Text="{Binding Repository}" Foreground="{DynamicResource Muted}" FontSize="12" Margin="0,4,0,9" />
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,9">
+                          <TextBlock Text="{Binding Repository}" Foreground="{DynamicResource Muted}" FontSize="12" />
+                          <TextBlock Text="{Binding FollowSource}" Foreground="{DynamicResource Muted}" FontSize="11" Margin="10,1,0,0" />
+                        </StackPanel>
                         <StackPanel Orientation="Horizontal">
                           <Border CornerRadius="4" Padding="7,3">
                             <Border.Style>
@@ -321,7 +330,7 @@
                             </TextBlock>
                           </Border>
                           <TextBlock Text="{Binding Version}" ToolTip="{Binding VersionEvidence}" FontWeight="SemiBold" Margin="10,3,14,0" Typography.NumeralAlignment="Tabular" />
-                          <TextBlock Text="{Binding Date}" Foreground="{DynamicResource Muted}" FontSize="11" Margin="0,1,0,0" />
+                            <TextBlock Text="{Binding Date}" ToolTip="{Binding DateHint}" Foreground="{DynamicResource Muted}" FontSize="11" Margin="0,1,0,0" />
                         </StackPanel>
                         <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" FontSize="12" LineHeight="18" LineStackingStrategy="BlockLineHeight" Foreground="{DynamicResource Muted}" Margin="0,10,0,0" MaxHeight="54">
                           <TextBlock.Style>

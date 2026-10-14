@@ -171,7 +171,7 @@ public partial class MainWindow
     private void AddProjectDialog(string? previewPath=null)
     {
         if(!ManageReady())return;var f=new Form(this,"添加项目",640,640);var address=f.Text("GitHub 仓库名称或链接（owner/repo）");
-        var mode=f.Select("关注方式",["添加 GitHub Star","仅本地关注"],api.Token.Length>0?0:1);f.Section("同时加入分组（可多选）");
+        var mode=f.Select("关注方式",["添加 GitHub Star","仅本地关注"],api.Token.Length>0&&(GroupSidebar.SelectedItem as GroupEntry)?.Id!="local-following"?0:1);f.Section("同时加入分组（可多选）");
         var entries=groups.Concat(settings.LocalGroups).Select(g=>(Group:g,Check:f.Check(g.Name+" · "+g.Source))).ToList();
         f.Label("GitHub 分组需要项目已 Star；本地关注独立保存。新建分组请使用左侧 ＋。这里也可恢复已停止本地关注的项目。");
         f.Action("取消",()=>{f.Close();return Task.CompletedTask;});f.Action("添加",async()=>{

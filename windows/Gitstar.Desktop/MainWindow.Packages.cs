@@ -15,15 +15,15 @@ public partial class MainWindow
     {
         if(!settings.KeepLatestPackages&&!replaceSameVersion)return false;
         if(installed.Any(a=>a.ExecutablePath.Equals(path,StringComparison.OrdinalIgnoreCase)))return false;
-        var old=packages.FirstOrDefault(p=>p.Path.Equals(path,StringComparison.OrdinalIgnoreCase) && p.Repository.Equals(release.Repository,StringComparison.OrdinalIgnoreCase) && p.Prerelease==release.Prerelease && (p.Published<=release.Published||PackageRules.SameVersion(p,release,asset)));
+        var old=packages.FirstOrDefault(p=>p.Path.Equals(path,StringComparison.OrdinalIgnoreCase) && p.Repository.Equals(release.Repository,StringComparison.OrdinalIgnoreCase) && p.Prerelease==release.Prerelease && (PackageRules.NewerVersion(release.Tag,release.Published,p.Tag,p.Published)||PackageRules.SameVersion(p,release,asset)));
         return old!=null && (settings.KeepLatestPackages||PackageRules.SameVersion(old,release,asset))&&await PackageFiles.Matches(old,ct);
     }
-    private async Task RecordPackage(Release release,Asset asset,string path,string root,CancellationToken ct)
+    private async Task RecordPackage(Release release,Asset asset,string path,string root,CancellationToken ct,bool retainForBatch=false)
     {
         string digest;if(asset.Digest?.StartsWith("sha256:",StringComparison.OrdinalIgnoreCase)==true)digest=asset.Digest[7..];else{await using var stream=File.OpenRead(path);digest=Convert.ToHexString(await SHA256.HashDataAsync(stream,ct));}
         var family=PackageRules.Family(asset.Name);
         if(path.EndsWith(".msi",StringComparison.OrdinalIgnoreCase)){try{var platform=WindowsServices.MsiPlatform(path).Split(';')[0].Trim().ToLowerInvariant();family="windows/"+(platform=="intel"?"x86":platform);}catch(IOException){}}
-        packages.RemoveAll(p=>p.Path.Equals(path,StringComparison.OrdinalIgnoreCase));packages.Add(new(release.Repository,release.Id,release.Tag,release.Prerelease,release.Published,asset.Name,Path.GetFullPath(path),Path.GetFullPath(root),asset.Size,digest,family));SavePackages();
+        packages.RemoveAll(p=>p.Path.Equals(path,StringComparison.OrdinalIgnoreCase));packages.Add(new(release.Repository,release.Id,release.Tag,release.Prerelease,release.Published,asset.Name,Path.GetFullPath(path),Path.GetFullPath(root),asset.Size,digest,family){RetainForBatch=retainForBatch});SavePackages();
     }
     private async Task<bool> DeleteRecordedPackage(DownloadedPackage package,bool allowCurrent=false)
     {
@@ -40,7 +40,7 @@ public partial class MainWindow
     private async Task CleanupOldPackages()
     {
         if(!settings.KeepLatestPackages || exit||quitting)return;
-        foreach(var package in PackageRules.Outdated(packages)){if(!settings.KeepLatestPackages)return;await DeleteRecordedPackage(package);}
+        foreach(var package in PackageRules.Outdated(packages,settings.Bindings)){if(!settings.KeepLatestPackages)return;await DeleteRecordedPackage(package);}
     }
     private async Task CleanupInstalledPackages(string? currentPath=null)
     {

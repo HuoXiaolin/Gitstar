@@ -20,6 +20,12 @@ if(args.FirstOrDefault()=="--inspect-release"){
     Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new{Id=release.GetProperty("id").GetInt64(),Tag=release.GetProperty("tag_name").GetString(),Name=release.GetProperty("name").GetString(),Draft=release.GetProperty("draft").GetBoolean(),Assets=release.GetProperty("assets").EnumerateArray().Select(asset=>new{Id=asset.GetProperty("id").GetInt64(),Name=asset.GetProperty("name").GetString(),Size=asset.GetProperty("size").GetInt64()})}));return;
 }
 if(args.FirstOrDefault()=="--inspect-msi"){Console.WriteLine(WindowsServices.MsiPlatform(args[1]));return;}
+if(args.FirstOrDefault()=="--inspect-feed"){
+    var repository=args[1];GitHubClient.Validate(repository);using var db=new LocalStore();using var client=new GitHubClient(db.Get("settings",new Settings()));client.Token=CredentialStorage.Load(db).AccessToken;
+    var pages=new Dictionary<string,GitHubClient.ReleasePage>();client.ReadReleasePage=key=>pages.GetValueOrDefault(key);client.SaveReleasePage=(key,page)=>pages[key]=page;
+    using var timeout=new CancellationTokenSource(TimeSpan.FromMinutes(3));var releases=await client.Releases(repository,timeout.Token);
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new{Repository=repository,Stable=Rules.SelectRelease(releases,new Binding())?.Tag,Combined=Rules.SelectRelease(releases,new Binding{IncludePrerelease=true})?.Tag,PageCount=pages.Count,RetainedCandidates=releases.Select(r=>new{r.Tag,r.Prerelease,r.IsLatest,r.Published})}));return;
+}
 if(args.Contains("--scan-installed")){var scanned=WindowsServices.Scan();foreach(var entry in scanned.Where(a=>a.Name.Equals("Lertaro",StringComparison.OrdinalIgnoreCase)))Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(entry));return;}
 var count=0;
 void Check(bool value,string label){if(!value)throw new Exception("FAIL: "+label);Console.WriteLine("PASS: "+label);count++;}
@@ -135,7 +141,7 @@ Check(!Rules.IsWindowsX64(A("app.exe")),"unknown architecture requires manual sa
 Check(!Rules.IsWindowsX64(A("app-x64-symbols.zip")),"debug package excluded");
 Check(Rules.IsWindowsInstallCandidate(A("CC-Switch-v4.0.9-Windows.msi")),"architecture-neutral Windows MSI allowed for content inspection");
 Check(!Rules.IsWindowsInstallCandidate(A("CC-Switch-v4.0.9-Windows-arm64.msi")),"explicit ARM64 MSI not selected for x64 host");
-Check(!Rules.IsWindowsInstallCandidate(A("app.exe")),"unmarked EXE still requires explicit platform evidence");
+Check(Rules.IsWindowsInstallCandidate(A("app.exe")),"unmarked EXE is allowed for architecture detection after download");
 Check(Rules.IsX64MsiTemplate("x64;1033") && !Rules.IsX64MsiTemplate("Intel64;1033"),"x64 MSI template distinct from Itanium");
 Check(!Rules.IsX64MsiTemplate("Arm64;1033") && !Rules.IsX64MsiTemplate(";1033"),"ARM64 or blank template not misclassified as x64");
 Check(Rules.IsWindowsInstallCandidate(A("app-win-x86.exe"),true) && Rules.IsWindowsInstallCandidate(A("app-win-x64.exe"),true),"64-bit Windows accepts x86 and x64 installers");
@@ -156,18 +162,20 @@ Check(!PackageRules.Installed(androidPackage,[packageBinding],[installedTool]),"
 Check(!PackageRules.Installed(latestPackage,[packageBinding],[installedTool with{ExecutablePath=latestPackage.Path}]),"portable main program cannot be cleaned as an installer package");
 Check(!new Settings().KeepLatestPackages && !new Settings().DeleteInstalledPackages && new Settings().PromptInstalledPackageCleanup,"package deletion is opt-in and cleanup prompt defaults on");
 var now=DateTimeOffset.UtcNow;Release R(string tag,bool beta,params Asset[] assets)=>new(1,"owner/app",tag,tag,"log",beta,now,"https://github.com/owner/app",assets.ToList());
-var history=Enumerable.Range(0,10000).Select(i=>R((i%3==0?"desktop-":"mobile-")+i,i%2==0) with{Id=i+1,Published=now.AddMinutes(-i),Body=new string('x',4096)}).ToArray();var line=new Binding{Repository="owner/app",TagPrefix="desktop-"};var compact=ReleaseRetention.Compact(history,[line]);
+var history=Enumerable.Range(0,10000).Select(i=>R((i%3==0?"desktop-":"mobile-")+(10000-i),i%2==0) with{Id=i+1,Published=now.AddMinutes(-i),Body=new string('x',4096)}).ToArray();var line=new Binding{Repository="owner/app",TagPrefix="desktop-"};var compact=ReleaseRetention.Compact(history,[line]);
 Check(compact.Count<=4 && compact.Sum(r=>r.Body.Length)<20000,"ten thousand releases compact to feed and subscribed-line candidates");
 Check(Rules.SelectRelease(history,line)?.Id==Rules.SelectRelease(compact,line)?.Id,"compaction preserves subscribed stable release");
 var betaLine=new Binding{Repository="owner/app",TagPrefix="desktop-",IncludePrerelease=true};Check(Rules.SelectRelease(history,betaLine)?.Id==Rules.SelectRelease(compact,betaLine)?.Id,"compaction preserves subscribed beta release");
 Check(new[]{false,true}.All(beta=>history.First(r=>r.Prerelease==beta).Id==compact.Where(r=>r.Prerelease==beta).OrderByDescending(r=>r.Published).First().Id),"compaction preserves both feed channels and full release content");
 var releasePageCalls=0;using(var pagedClient=new GitHubClient(new(),new FakeHttp((req,ct)=>{
+ if(req.RequestUri!.AbsolutePath.EndsWith("/latest"))return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
  var page=Interlocked.Increment(ref releasePageCalls);if(!req.RequestUri!.Query.Contains("per_page=30"))throw new Exception("Unbounded release page");
  var payload=Enumerable.Range(0,page==1?30:1).Select(i=>new{id=(page-1)*30+i+1,tag_name=page==2?"desktop-v1":"mobile-v"+i,name="fixture",body="完整日志",draft=false,prerelease=false,published_at=now.AddMinutes(-((page-1)*30+i)),html_url="",assets=Array.Empty<object>()});
  return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent(System.Text.Json.JsonSerializer.Serialize(payload))});
  }))){var candidates=await pagedClient.Releases("owner/app",CancellationToken.None,[line]);Check(releasePageCalls==2 && candidates.Count==2 && candidates.Any(r=>r.Tag=="desktop-v1" && r.Body=="完整日志"),"streamed paged scan retains older subscribed line without all historical records");}
 var cachedPages=new Dictionary<string,GitHubClient.ReleasePage>();var cachePhase=0;var cacheRequests=0;var cacheBodies=0;var conditionalRequests=0;
 HttpMessageHandler CachedTransport()=>new FakeHttp((req,ct)=>{
+ if(req.RequestUri!.AbsolutePath.EndsWith("/latest"))return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
  cacheRequests++;var page=int.Parse(req.RequestUri!.Query.Split("page=").Last());var etag=$"\"fixture-{page}\"";
  if(req.Headers.IfNoneMatch.Count>0)conditionalRequests++;
  if(cachePhase==1){if(req.Headers.IfNoneMatch.Single().Tag!=etag)throw new Exception("Missing validator");return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotModified));}
@@ -193,6 +201,9 @@ await WorkspaceChecks.Run(Check,root);
 await WorkflowChecks.Run(Check,root);
 await ReleaseStateChecks.Run(Check,root);
 await SelfUpdateChecks.Run(Check);
+await UpdateSortingChecks.Run(Check);
+await ReleaseSelectionChecks.Run(Check);
+await NewFeatureChecks.Run(Check,root);
 await ProjectDeletionChecks.Run(Check);
 await ReleaseManagementChecks.Run(Check);
 await CacheCleanupChecks.Run(Check,root);
@@ -256,7 +267,7 @@ var goodZip=Path.Combine(root,"portable.zip");using(var a=ZipFile.Open(goodZip,Z
 var destination=WindowsServices.ExtractPortable(goodZip);Check(File.ReadAllText(Path.Combine(destination,"bin","app.txt"))=="ok","portable extraction into new folder");
 Console.WriteLine($"All {count} checks passed. Fixtures: {root}");
 if(args.Contains("--avatar-live")){AvatarCache.Configure(new());var avatar=await AvatarCache.Load("x6nux");Check(avatar!=null && avatar.PixelWidth>0,"live author avatar downloaded and decoded");Check(ReferenceEquals(avatar,await AvatarCache.Load("x6nux")),"author avatar reused without a second download");}
-if(args.Contains("--live-public")){using var real=new GitHubClient(new());var repository=await real.Repo("komi-store/komi-store");var realReleases=await real.Releases(repository.FullName,CancellationToken.None);Check(realReleases.Count>0,"live public GitHub release query");Console.WriteLine($"Live: {repository.FullName}, {realReleases.Count} releases, latest {realReleases.OrderByDescending(r=>r.Published).First().Tag}");}
+if(args.Contains("--live-public")){using var real=new GitHubClient(new());var repository=await real.Repo("komi-store/komi-store");var realReleases=await real.Releases(repository.FullName,CancellationToken.None);Check(realReleases.Count>0,"live public GitHub release query");Console.WriteLine($"Live: {repository.FullName}, {realReleases.Count} candidates, selected {Rules.SelectRelease(realReleases,new Binding())?.Tag}");}
 } catch(Exception e){Console.Error.WriteLine(e.ToString());Environment.ExitCode=1;}
 
 sealed class FakeHttp(Func<HttpRequestMessage,CancellationToken,Task<HttpResponseMessage>> action):HttpMessageHandler

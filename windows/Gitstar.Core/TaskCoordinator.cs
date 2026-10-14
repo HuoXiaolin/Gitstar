@@ -9,6 +9,7 @@ public sealed class TaskCoordinator
     private readonly Dictionary<string,Run> runs=[];
     public int Count {get{lock(sync)return runs.Count;}}
     public bool Contains(string id){lock(sync)return runs.ContainsKey(id);}
+    public string? StopReason(string id){lock(sync)return runs.TryGetValue(id,out var run)?run.StopReason:null;}
     public bool Uses(string resource){lock(sync)return gates.TryGetValue(resource,out var gate)&&gate.References>0;}
     public Run Start(string id,IEnumerable<string> resources)
     {

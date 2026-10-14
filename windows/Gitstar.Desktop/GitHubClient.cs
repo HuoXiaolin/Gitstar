@@ -59,17 +59,19 @@ public sealed partial class GitHubClient : IDisposable
     {
         List<Repository> list=[];
         for (var page=1;;page++) { var data=await Request($"user/starred?per_page=100&page={page}",ct:ct); var items=data.EnumerateArray().ToArray();
-            list.AddRange(items.Select(e=>new Repository(S(e,"full_name"),S(e,"description"),e.GetProperty("private").GetBoolean(),true,S(e,"node_id")))); if(items.Length<100) return list;
+            list.AddRange(items.Select(e=>ParseRepository(e,true))); if(items.Length<100) return list;
         }
     }
     public async Task<Repository> Repo(string repo,CancellationToken ct=default)
     {
-        Validate(repo); var e=await Request("repos/"+repo,ct:ct); return new(S(e,"full_name"),S(e,"description"),e.GetProperty("private").GetBoolean(),false,S(e,"node_id"));
+        Validate(repo); var e=await Request("repos/"+repo,ct:ct); return ParseRepository(e,false);
     }
+    private static Repository ParseRepository(JsonElement e,bool starred)=>new(S(e,"full_name"),S(e,"description"),e.GetProperty("private").GetBoolean(),starred,S(e,"node_id")) {Updated=DateTimeOffset.TryParse(S(e,"updated_at"),out var updated)?updated:null};
     public async Task<List<Release>> Releases(string repo,CancellationToken ct,IEnumerable<Binding>? bindings=null)
     {
         Validate(repo);var subscriptions=bindings?.ToArray()??[];var selected=new ReleaseCandidates(repo,subscriptions);
-        var signature=string.Join("\n",subscriptions.Where(b=>b.Repository.Equals(repo,StringComparison.OrdinalIgnoreCase)).Select(b=>b.TagPrefix).Append("").Distinct().Order(StringComparer.Ordinal));
+        var signature="version-selection-v2\n"+string.Join("\n",subscriptions.Where(b=>b.Repository.Equals(repo,StringComparison.OrdinalIgnoreCase)).Select(b=>b.TagPrefix).Append("").Distinct().Order(StringComparer.Ordinal));
+        var latest=await LatestStableRelease(repo,signature,ct);if(latest!=null)selected.Add(latest);
         // Each page is verified remotely, including historical deletion/editing, without retaining raw JSON.
         for(var page=1;;page++) {
             var key=$"{repo.ToLowerInvariant()}/{page}";var cached=ReadReleasePage?.Invoke(key);if(cached?.Signature!=signature)cached=null;

@@ -62,8 +62,8 @@ public static partial class Rules
         var x64=name.Contains("x64") || name.Contains("amd64") || name.Contains("win64") || name.Contains("64bit") || name.Contains("64-bit");
         if(x64)return host64Bit;
         if(new[]{"x86","i386","i586","i686","win32","ia32","x32","32bit","32-bit"}.Any(name.Contains))return true;
-        // MSI summary information provides the platform after downloading.
-        return name.EndsWith(".msi");
+        // EXE PE headers and MSI summary information provide architecture after downloading.
+        return name.EndsWith(".msi")||name.EndsWith(".exe");
     }
     public static bool IsX64MsiTemplate(string template)=>template.Split(';')[0].Trim().Equals("x64",StringComparison.OrdinalIgnoreCase);
     public static bool IsCompatibleMsiTemplate(string template,bool host64Bit)
@@ -71,8 +71,6 @@ public static partial class Rules
         var platform=template.Split(';')[0].Trim();
         return platform.Equals("Intel",StringComparison.OrdinalIgnoreCase) || (host64Bit && platform.Equals("x64",StringComparison.OrdinalIgnoreCase));
     }
-    public static Release? SelectRelease(IEnumerable<Release> releases, Binding binding) => releases
-        .Where(x => (binding.IncludePrerelease || !x.Prerelease) && x.Tag.StartsWith(binding.TagPrefix, StringComparison.Ordinal))
-        .OrderByDescending(x => x.Published).FirstOrDefault();
+    public static Release? SelectRelease(IEnumerable<Release> releases, Binding binding) => ReleaseSelection.Select(releases,binding);
     public static string VersionTag(Release r, Binding b) => b.TagPrefix.Length > 0 ? r.Tag[b.TagPrefix.Length..] : r.Tag;
 }

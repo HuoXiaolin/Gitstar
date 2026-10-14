@@ -3,10 +3,15 @@ namespace Gitstar.Core;
 public record Asset(long Id, string Name, long Size, string Url, string? Digest);
 public record Release(long Id, string Repository, string Tag, string Name, string Body, bool Prerelease, DateTimeOffset Published, string Url, List<Asset> Assets)
 {
+    public bool IsLatest {get;init;}
     public string Channel => Prerelease ? "测试版" : "正式版";
     public string Date => Published.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
 }
-public record Repository(string FullName, string Description, bool Private, bool Starred=false, string NodeId="");
+public record Repository(string FullName, string Description, bool Private, bool Starred=false, string NodeId="")
+{
+    public DateTimeOffset? Updated {get;init;}
+}
+public enum UpdateSort { Published, RepositoryUpdated }
 public record StarGroup(string Id, string Name, string Source, List<string> Repositories, string Description="", bool IsPrivate=false);
 public record InstalledApp(string Id, string Name, string Version, string Location, bool Portable = false, string RepositoryHint = "",string ExecutablePath="",string VersionSource="注册表",string RegisteredVersion="",string[]? AliasIds=null);
 public class Binding
@@ -24,6 +29,9 @@ public class Binding
 }
 public class Settings
 {
+    public int BulkDownloadDays {get;set;}=7;
+    public List<string> BulkDownloadExtensions {get;set;}=[".exe",".msi",".zip"];
+    public UpdateSort RecentSort {get;set;}
     public int SameVersionDownload {get;set;}
     public bool KeepLatestPackages {get;set;}
     public bool DeleteInstalledPackages {get;set;}
@@ -45,7 +53,10 @@ public class Settings
     public List<string> Notified { get; set; } = [];
     public string SelfRepository { get; set; } = AppInfo.Repository;
 }
-public record DownloadedPackage(string Repository,long ReleaseId,string Tag,bool Prerelease,DateTimeOffset Published,string AssetName,string Path,string Root,long Size,string Sha256,string Family,bool Prompted=false);
+public record DownloadedPackage(string Repository,long ReleaseId,string Tag,bool Prerelease,DateTimeOffset Published,string AssetName,string Path,string Root,long Size,string Sha256,string Family,bool Prompted=false)
+{
+    public bool RetainForBatch {get;init;}
+}
 public record UpdateCandidate(InstalledApp App, Binding Binding, Release Release, Asset? Asset);
 public class Operation
 {

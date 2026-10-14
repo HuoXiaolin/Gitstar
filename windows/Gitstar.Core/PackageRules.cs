@@ -16,10 +16,23 @@ public static class PackageRules
         var arch=n.Contains("arm64")||n.Contains("aarch64")?"arm64":n.Contains("x86_64")||n.Contains("x64")||n.Contains("amd64")||n.Contains("win64")?"x64":n.Contains("x86")||n.Contains("win32")?"x86":"unknown";
         return platform+"/"+arch;
     }
-    public static DownloadedPackage[] Outdated(IEnumerable<DownloadedPackage> packages)=>packages.GroupBy(p=>(p.Repository.ToLowerInvariant(),p.Family,p.Prerelease)).SelectMany(g=>g.Where(p=>p.Published<g.Max(x=>x.Published))).ToArray();
+    public static bool NewerVersion(string tag,DateTimeOffset published,string previousTag,DateTimeOffset previousPublished,string prefix="")
+    {
+        var version=tag[prefix.Length..];var previous=previousTag[prefix.Length..];var comparison=Rules.CompareVersions(version,previous);
+        if(comparison!=null)return comparison>0;
+        // Ambiguous labels cannot authorize deleting a recognized version.
+        if(Rules.CompareVersions(version,version)!=null||Rules.CompareVersions(previous,previous)!=null)return false;
+        return !tag.Equals(previousTag,StringComparison.OrdinalIgnoreCase)&&published>previousPublished;
+    }
+    public static DownloadedPackage[] Outdated(IEnumerable<DownloadedPackage> packages,IEnumerable<Binding>? bindings=null)
+    {
+        var lines=(bindings??[]).Where(b=>b.TagPrefix.Length>0).ToArray();
+        string Line(DownloadedPackage p)=>lines.Where(b=>b.Repository.Equals(p.Repository,StringComparison.OrdinalIgnoreCase)&&p.Tag.StartsWith(b.TagPrefix,StringComparison.Ordinal)).OrderByDescending(b=>b.TagPrefix.Length).Select(b=>b.TagPrefix).FirstOrDefault()??"";
+        return packages.GroupBy(p=>(Repository:p.Repository.ToLowerInvariant(),p.Family,p.Prerelease,Prefix:Line(p))).SelectMany(g=>g.Where(p=>!p.RetainForBatch&&g.Any(other=>NewerVersion(other.Tag,other.Published,p.Tag,p.Published,g.Key.Prefix)))).ToArray();
+    }
     public static bool Installed(DownloadedPackage package,IEnumerable<Binding> bindings,IEnumerable<InstalledApp> apps)
     {
-        if(package.Family is not ("windows/x64" or "windows/x86"))return false;
+        if(package.RetainForBatch||package.Family is not ("windows/x64" or "windows/x86"))return false;
         foreach(var binding in bindings.Where(b=>b.Repository.Equals(package.Repository,StringComparison.OrdinalIgnoreCase))){
             var app=InstalledVersion.Find(apps,binding.AppId);if(app==null || app.VersionSource is not ("程序产品版本" or "程序文件版本") || !package.Tag.StartsWith(binding.TagPrefix,StringComparison.Ordinal))continue;
             if(app.ExecutablePath.Length>0 && System.IO.Path.GetFullPath(app.ExecutablePath).Equals(System.IO.Path.GetFullPath(package.Path),StringComparison.OrdinalIgnoreCase))continue;

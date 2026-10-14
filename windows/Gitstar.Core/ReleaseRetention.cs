@@ -18,7 +18,7 @@ public sealed class ReleaseCandidates
     private readonly string[] prefixes;
     private readonly Dictionary<(string,bool),Release> candidates=[];
     public ReleaseCandidates(string repo,IEnumerable<Binding> bindings)=>prefixes=bindings.Where(b=>b.Repository.Equals(repo,StringComparison.OrdinalIgnoreCase)).Select(b=>b.TagPrefix).Append("").Distinct(StringComparer.Ordinal).ToArray();
-    public bool Needs(string tag,bool beta,DateTimeOffset published)=>prefixes.Any(prefix=>tag.StartsWith(prefix,StringComparison.Ordinal) && (!candidates.TryGetValue((prefix,beta),out var old)||published>old.Published));
-    public void Add(Release release){foreach(var prefix in prefixes)if(release.Tag.StartsWith(prefix,StringComparison.Ordinal) && (!candidates.TryGetValue((prefix,release.Prerelease),out var old)||release.Published>old.Published))candidates[(prefix,release.Prerelease)]=release;}
+    public bool Needs(string tag,bool beta,DateTimeOffset published)=>prefixes.Any(prefix=>tag.StartsWith(prefix,StringComparison.Ordinal) && (!candidates.TryGetValue((prefix,beta),out var old)||ReleaseSelection.Preferred(tag,beta,published,false,old,prefix)));
+    public void Add(Release release){foreach(var prefix in prefixes)if(release.Tag.StartsWith(prefix,StringComparison.Ordinal) && (!candidates.TryGetValue((prefix,release.Prerelease),out var old)||ReleaseSelection.Preferred(release.Tag,release.Prerelease,release.Published,release.IsLatest,old,prefix)))candidates[(prefix,release.Prerelease)]=release;}
     public List<Release> Values=>candidates.Values.DistinctBy(r=>r.Id).ToList();
 }
