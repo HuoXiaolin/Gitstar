@@ -265,6 +265,11 @@ public partial class MainWindow : Window
         };f.ShowDialog();
     }
     private void Notes_Click(object sender,RoutedEventArgs e) {if((sender as Button)?.Tag is Card c)Form.Notes(this,c.Repository+" · "+c.Release.Tag,c.Release.Body);}
+    private void ProjectHome_Click(object sender,RoutedEventArgs e)
+    {
+        if((sender as Button)?.Tag is not Card card)return;
+        GitHubClient.Validate(card.Repository);WindowsServices.Open("https://github.com/"+card.Repository);
+    }
     private async void Download_Click(object sender,RoutedEventArgs e)
     {
         if((sender as Button)?.Tag is not Card card)return;
