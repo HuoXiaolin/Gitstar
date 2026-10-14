@@ -272,34 +272,22 @@ public partial class MainWindow : Window
         if(quitting)return;
         if(card.Update!=null && !installedFresh){await ScanMatchedAsync();PlanUpdates();Display();if(!updates.Any(u=>u.App.Id==card.Update.App.Id && u.Release.Id==card.Release.Id)){model.Status="已复检当前版本，此软件已不需要该更新。";return;}}
         if(card.Transfer.NeedsDetection){SetInstalled(WindowsServices.Scan(settings.PortableApps,settings.Bindings));PlanUpdates();card.Transfer.Finish("");Display();model.Status="已重新检测实际版本；未完成的更新仍保留在列表。";return;}
-        var assets=card.Release.Assets.Where(a=>a.Size>0).ToList();if(assets.Count==0){DialogMessage.Show(this,"此版本没有作者上传的安装包。","Gitstar");return;}
-        var f=new Form(this,card.Action,700,520);f.Label(card.Repository+" · "+card.Release.Tag);
-        var choices=f.Select("选择安装包",assets.Select(a=>$"{a.Name}  ·  {a.Size/1024.0/1024:F1} MB"));
-        if(card.Update?.Asset!=null)choices.SelectedIndex=assets.IndexOf(card.Update.Asset);
-        var folder=f.Text("保存目录",settings.DownloadFolder);var install=card.Update!=null;
-        f.Label(install?"EXE/MSI：下载后询问是否打开安装器。ZIP：解压到新目录后打开文件夹，迁移完成后重新关联。":"只保存安装包，不启动安装器。可选择 Windows 或 Android 文件。");
-        f.Action("选择目录",()=>{var d=new OpenFolderDialog {Title="选择安装包保存目录"};if(d.ShowDialog(f)==true)folder.Text=d.FolderName;return Task.CompletedTask;});
-        f.Action("开始下载",()=>{
-            var asset=assets[choices.SelectedIndex];var root=Path.GetFullPath(folder.Text);
-            if(install&&!Rules.IsWindowsInstallCandidate(asset)){DialogMessage.Show(f,"此安装包与当前电脑不兼容，请选择 Windows 安装包。","Gitstar");return Task.CompletedTask;}
-            if(string.IsNullOrEmpty(asset.Digest)&&DialogMessage.Show(f,"作者未提供 SHA-256 摘要，本次只能核对文件大小。仍要下载吗？","Gitstar",MessageBoxButton.YesNo,MessageBoxImage.Warning)!=MessageBoxResult.Yes)return Task.CompletedTask;
-            settings.DownloadFolder=root;Save();f.Tag=(asset,root);f.Close();return Task.CompletedTask;
-        },true);f.ShowDialog();if(f.Tag is not ValueTuple<Asset,string> selection)return;
-        var downloadTarget=PackageTarget(card.Release,selection.Item1,selection.Item2);card.Transfer.Stage("等待下载任务");
-        await Execute("下载",card.Repository+" · "+selection.Item1.Name,async ct=>{
-            var state=card.Transfer;var operation=currentOperation.Value!;operation.Repository=card.Repository;operation.Tag=card.Release.Tag;operation.File=downloadTarget+".partial";state.Percentage=0;state.Detail=selection.Item1.Name;state.Stage("下载中 0%",false);
+        var selection=await ChoosePackage(card);if(selection==null)return;var release=selection.Release;var install=card.Update!=null;
+        var downloadTarget=PackageTarget(release,selection.Asset,selection.Root);card.Transfer.Stage("等待下载任务");
+        await Execute("下载",card.Repository+" · "+selection.Asset.Name,async ct=>{
+            var state=card.Transfer;var operation=currentOperation.Value!;operation.Repository=card.Repository;operation.Tag=release.Tag;operation.File=downloadTarget+".partial";state.Percentage=0;state.Detail=selection.Asset.Name;state.Stage("下载中 0%",false);
             try{
                 var progressAt=DateTime.MinValue;
-                var replaceSame=false;var previousPackage=packages.FirstOrDefault(p=>p.Path.Equals(downloadTarget,StringComparison.OrdinalIgnoreCase)&&PackageRules.SameVersion(p,card.Release,selection.Item1));
+                var replaceSame=false;var previousPackage=packages.FirstOrDefault(p=>p.Path.Equals(downloadTarget,StringComparison.OrdinalIgnoreCase)&&PackageRules.SameVersion(p,release,selection.Asset));
                 if(previousPackage!=null&&await PackageFiles.Matches(previousPackage,ct)){
                     state.Stage("处理同版本安装包");var decision=settings.SameVersionDownload;
-                    if(decision==0){var duplicate=new Form(this,"同版本安装包已存在",640,420);duplicate.Label(card.Repository+" · "+card.Release.Tag+"\n\n"+downloadTarget+"\n\n选择重新下载并替换，或跳过本次下载和安装。旧文件会保留到新文件校验成功。");duplicate.Action("跳过",()=>{decision=2;duplicate.Close();return Task.CompletedTask;}).IsCancel=true;duplicate.Action("重新下载并替换",()=>{decision=1;duplicate.Close();return Task.CompletedTask;},true);duplicate.ShowDialog();if(decision==0)decision=2;}
-                    if(decision==2){state.Finish("已跳过下载");state.Detail=downloadTarget;operation.Results.Add("已存在同版本安装包，跳过下载和安装。");model.Status="已跳过同版本安装包："+selection.Item1.Name;return;}replaceSame=true;
+                    if(decision==0){var duplicate=new Form(this,"同版本安装包已存在",640,420);duplicate.Label(card.Repository+" · "+release.Tag+"\n\n"+downloadTarget+"\n\n选择重新下载并替换，或跳过本次下载和安装。旧文件会保留到新文件校验成功。");duplicate.Action("跳过",()=>{decision=2;duplicate.Close();return Task.CompletedTask;}).IsCancel=true;duplicate.Action("重新下载并替换",()=>{decision=1;duplicate.Close();return Task.CompletedTask;},true);duplicate.ShowDialog();if(decision==0)decision=2;}
+                    if(decision==2){state.Finish("已跳过下载");state.Detail=downloadTarget;operation.Results.Add("已存在同版本安装包，跳过下载和安装。");model.Status="已跳过同版本安装包："+selection.Asset.Name;return;}replaceSame=true;
                 }
                 // Download continuations run on the UI context; report directly to avoid queued percentages overwriting later stages.
-                var path=await WindowsServices.Download(api,card.Release,selection.Item1,selection.Item2,(a,b)=>{if(a<b && DateTime.UtcNow-progressAt<TimeSpan.FromMilliseconds(100))return;progressAt=DateTime.UtcNow;state.Downloaded(a,b);model.Status=$"正在下载 {selection.Item1.Name} · {state.Detail}";},ct,()=>{state.Stage("校验中");model.Status="正在校验安装包："+selection.Item1.Name;},token=>CanReplacePackage(card.Release,selection.Item1,downloadTarget,token,replaceSame),forceDownload:replaceSame,targetPath:downloadTarget);
+                var path=await WindowsServices.Download(api,release,selection.Asset,selection.Root,(a,b)=>{if(a<b && DateTime.UtcNow-progressAt<TimeSpan.FromMilliseconds(100))return;progressAt=DateTime.UtcNow;state.Downloaded(a,b);model.Status=$"正在下载 {selection.Asset.Name} · {state.Detail}";},ct,()=>{state.Stage("校验中");model.Status="正在校验安装包："+selection.Asset.Name;},token=>CanReplacePackage(release,selection.Asset,downloadTarget,token,replaceSame),forceDownload:replaceSame,targetPath:downloadTarget);
                 model.Status="安装包已保存："+path;
-                await RecordPackage(card.Release,selection.Item1,path,selection.Item2,ct);
+                await RecordPackage(release,selection.Asset,path,selection.Root,ct,retainForBatch:selection.Historical);
                 if(!install){state.Finish("已保存安装包");state.Detail=path;return;}
                 if(path.EndsWith(".exe",StringComparison.OrdinalIgnoreCase)){state.Stage("检测安装包架构");var platform=await Task.Run(()=>InstallerCompatibility.InspectExe(path,Environment.Is64BitOperatingSystem),ct);if(!platform.Compatible){state.Finish("安装包架构不兼容");state.Detail=platform.Name+" 与当前 Windows 不兼容；安装包已保存，未启动安装器。";throw new IOException(state.Detail);}state.Detail=platform.Name+" · 与当前 Windows 兼容";}
                 if(path.EndsWith(".msi",StringComparison.OrdinalIgnoreCase)){state.Stage("检测安装包架构");var platform=await Task.Run(()=>WindowsServices.MsiPlatform(path),ct);if(!Rules.IsCompatibleMsiTemplate(platform,Environment.Is64BitOperatingSystem)){state.Finish("安装包架构不兼容");state.Detail="MSI 平台："+platform+"；安装包已保存，未启动安装器。";throw new IOException(state.Detail);}}
@@ -563,6 +551,7 @@ public partial class MainWindow : Window
         if(Environment.GetCommandLineArgs().Contains("--version-selection"))VersionSelectionSmoke(path);
         if(Environment.GetCommandLineArgs().Contains("--follow-lists"))FollowListSmoke(path);
         if(Environment.GetCommandLineArgs().Contains("--bulk-transfer"))await BulkTransferSmoke(path);
+        if(Environment.GetCommandLineArgs().Contains("--download-versions")){await DownloadVersionsSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--bulk-download")){await BulkDownloadDialog(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--tray-dot"))TrayDotSmoke(path);
         if(Environment.GetCommandLineArgs().Contains("--startup-completion")){

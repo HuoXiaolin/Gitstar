@@ -87,7 +87,7 @@ public sealed partial class GitHubClient : IDisposable
             if(count<30)return selected.Values;
         }
     }
-    private static Release ParseRelease(string repo,JsonElement e) => new(e.GetProperty("id").GetInt64(),repo,S(e,"tag_name"),S(e,"name"),S(e,"body"),e.GetProperty("prerelease").GetBoolean(),DateTimeOffset.TryParse(S(e,"published_at"),out var date)?date:DateTimeOffset.MinValue,S(e,"html_url"),e.GetProperty("assets").EnumerateArray().Select(a=>new Asset(a.GetProperty("id").GetInt64(),S(a,"name"),a.GetProperty("size").GetInt64(),S(a,"browser_download_url"),S(a,"digest"))).ToList());
+    private static Release ParseRelease(string repo,JsonElement e,bool includeBody=true) => new(e.GetProperty("id").GetInt64(),repo,S(e,"tag_name"),S(e,"name"),includeBody?S(e,"body"):"",e.GetProperty("prerelease").GetBoolean(),DateTimeOffset.TryParse(S(e,"published_at"),out var date)?date:DateTimeOffset.MinValue,S(e,"html_url"),e.GetProperty("assets").EnumerateArray().Select(a=>new Asset(a.GetProperty("id").GetInt64(),S(a,"name"),a.GetProperty("size").GetInt64(),S(a,"browser_download_url"),S(a,"digest"))).ToList());
     public async Task<List<StarGroup>> Lists(CancellationToken ct)
     {
         List<StarGroup> groups=[]; string? cursor=null;
