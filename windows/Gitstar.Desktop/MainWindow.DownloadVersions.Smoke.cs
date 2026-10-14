@@ -29,9 +29,9 @@ public partial class MainWindow
         await RecordPackage(selection.Release,selection.Asset,saved,selection.Root,CancellationToken.None,retainForBatch:selection.Historical);
         var recorded=packages.Single(package=>package.Path==saved);var rightVersion=selection.Release.Id==previous.Id&&recorded.Tag==previous.Tag&&recorded.ReleaseId==previous.Id&&File.ReadAllBytes(saved).SequenceEqual(bytes);
         var newer=new DownloadedPackage(current.Repository,current.Id,current.Tag,false,current.Published,current.Assets[0].Name,"fixture","fixture",bytes.Length,digest,"windows/x64");
-        var protectedHistory=recorded.RetainForBatch&&!PackageRules.Outdated([recorded,newer]).Contains(recorded);var flat=!Directory.EnumerateDirectories(selection.Root).Any();
-        var report=new{LatestDefault=defaults,VersionChangesPackages=linked,LoadMorePreservesSelection=kept,Pages=pages,SelectedVersionRecordedAndVerified=rightVersion,HistoricalPackageProtected=protectedHistory,FlatDirectory=flat,DownloadSelections=requests};
+        var protectedHistory=recorded.RetainForBatch&&!PackageRules.Outdated([recorded,newer]).Contains(recorded);var flat=!Directory.EnumerateDirectories(selection.Root).Any();var originalName=Path.GetFileName(saved)==selection.Asset.Name;
+        var report=new{LatestDefault=defaults,VersionChangesPackages=linked,LoadMorePreservesSelection=kept,Pages=pages,SelectedVersionRecordedAndVerified=rightVersion,HistoricalPackageProtected=protectedHistory,FlatDirectory=flat,OriginalAttachmentName=originalName,DownloadSelections=requests};
         File.WriteAllText(Path.ChangeExtension(path,".download-versions.json"),JsonSerializer.Serialize(report));
-        if(!defaults||!linked||!kept||!rightVersion||!protectedHistory||!flat||!pages.SequenceEqual(new[]{1,2}))throw new IOException("Download version selection regression");
+        if(!defaults||!linked||!kept||!rightVersion||!protectedHistory||!flat||!originalName||!pages.SequenceEqual(new[]{1,2}))throw new IOException("Download version selection regression");
     }
 }

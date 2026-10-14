@@ -64,7 +64,8 @@ public partial class MainWindow
         f.Action("选择目录",()=>{var dialog=new OpenFolderDialog{Title="选择下载目录"};if(dialog.ShowDialog(f)==true)folder.Text=dialog.FolderName;return Task.CompletedTask;});
         start=f.Action("下载所选",()=>{
             var selected=rows.Where(r=>r.Selected).Select(r=>r.Item).ToArray();if(selected.Length==0)return Task.CompletedTask;var root=Path.GetFullPath(folder.Text);
-            // Equivalent version spellings share the existing flat download name; fetch that file once.
+            var conflicts=PackageRules.OriginalNameConflicts(selected);if(conflicts.Length>0){DialogMessage.Show(f,"所选附件包含不同项目或版本的同名文件：\n\n"+string.Join("\n",conflicts.Take(10))+"\n\n保留 Release 原名时无法同时放在同一目录，请取消部分勾选，或分批保存到不同目录。","同名安装包");return Task.CompletedTask;}
+            // Only equivalent versions of the same attachment can share one download.
             selected=selected.GroupBy(item=>PackageTarget(item.Release,item.Asset,root),StringComparer.OrdinalIgnoreCase).Select(g=>g.OrderByDescending(i=>i.Release.Published).First()).ToArray();
             var decision=duplicate.SelectedIndex;var existing=selected.Count(item=>packages.Any(p=>p.Path.Equals(PackageTarget(item.Release,item.Asset,root),StringComparison.OrdinalIgnoreCase)&&PackageRules.SameVersion(p,item.Release,item.Asset)&&File.Exists(p.Path)));
             if(decision==0&&existing>0){var confirm=new Form(f,"已有同版本文件",640,400);confirm.Label($"清单中有 {existing} 个同版本文件。请选择本批任务的统一处理方式，新文件仍会在校验成功后替换。");confirm.Action("返回",()=>{confirm.Close();return Task.CompletedTask;}).IsCancel=true;confirm.Action("跳过已有",()=>{decision=2;confirm.Close();return Task.CompletedTask;});confirm.Action("全部替换",()=>{decision=1;confirm.Close();return Task.CompletedTask;},true);confirm.ShowDialog();if(decision==0)return Task.CompletedTask;}
@@ -78,6 +79,7 @@ public partial class MainWindow
     private async Task DownloadBatch(ReleaseDownload[] items,string root,int duplicatePolicy)
     {
         await Execute("批量下载",$"{items.Length} 个发行包",async batchToken=>{
+            var conflicts=PackageRules.OriginalNameConflicts(items);if(conflicts.Length>0)throw new IOException("原名相同的不同附件不能保存到同一目录："+string.Join("、",conflicts));
             var parent=currentOperation.Value!;var succeeded=0;var skipped=0;var failed=0;
             await RepositoryChecks.Run(Enumerable.Range(0,items.Length).Select(i=>i.ToString()).ToArray(),async(index,token)=>{
                 var item=items[int.Parse(index)];var target=PackageTarget(item.Release,item.Asset,root);var state=new TransferState();var result="待处理";

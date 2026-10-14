@@ -2,12 +2,20 @@ namespace Gitstar.Core;
 
 public static class PackageRules
 {
-    public static string FlatFileName(string repository,string assetName,string? tag=null)
+    public static string OriginalFileName(string assetName)
+    {
+        if(string.IsNullOrWhiteSpace(assetName)||assetName.Length>255||assetName.EndsWith(' ')||assetName.EndsWith('.')||assetName.Any(c=>c<32||"<>:\"/\\|?*".Contains(c))||System.Text.RegularExpressions.Regex.IsMatch(assetName,@"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)",System.Text.RegularExpressions.RegexOptions.IgnoreCase))throw new ArgumentException("Release 附件原名不能用于 Windows 文件名："+assetName+"。请使用作者提供的其他附件。");
+        return assetName;
+    }
+    // Previous releases added repository/version/hash components; retain recognition for existing records.
+    public static string LegacyFlatFileName(string repository,string assetName,string? tag=null)
     {
         var project=Rules.SafeSegment(repository.Replace('/','_'));project=project[..Math.Min(60,project.Length)];var id=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(repository.ToLowerInvariant())))[..6].ToLowerInvariant();var extension=new string(Path.GetExtension(assetName).Where(c=>char.IsAsciiLetterOrDigit(c)||c=='.').Take(20).ToArray());var name=Rules.SafeSegment(Path.GetFileNameWithoutExtension(assetName));
         if(tag!=null&&Rules.CompareVersions(tag,tag)!=null){var raw=tag.Trim().TrimStart('v','V').Split('+')[0];var parts=raw.Split('-',2);var numbers=parts[0].Split('.').Select(long.Parse).ToList();while(numbers.Count<4)numbers.Add(0);tag=string.Join('.',numbers)+(parts.Length==2?"-"+parts[1]:"");}
         var assetId=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(assetName.ToLowerInvariant())))[..6].ToLowerInvariant();return Rules.SafeSegment(project+"_"+id+"_"+(tag!=null?Rules.SafeSegment(tag)+"_":"")+name)+"_"+assetId+extension;
     }
+    public static string[] OriginalNameConflicts(IEnumerable<ReleaseDownload> items)=>items.GroupBy(item=>OriginalFileName(item.Asset.Name),StringComparer.OrdinalIgnoreCase).Where(group=>group.Skip(1).Any(item=>!SameDownload(group.First(),item))).Select(group=>group.Key).ToArray();
+    public static bool SameDownload(ReleaseDownload a,ReleaseDownload b)=>a.Release.Repository.Equals(b.Release.Repository,StringComparison.OrdinalIgnoreCase)&&(Rules.CompareVersions(a.Release.Tag,b.Release.Tag)==0||a.Release.Tag.Equals(b.Release.Tag,StringComparison.OrdinalIgnoreCase))&&a.Release.Prerelease==b.Release.Prerelease&&a.Asset.Name.Equals(b.Asset.Name,StringComparison.OrdinalIgnoreCase)&&a.Asset.Size==b.Asset.Size&&a.Asset.Digest==b.Asset.Digest;
     public static bool SameVersion(DownloadedPackage package,Release release,Asset asset)=>package.Repository.Equals(release.Repository,StringComparison.OrdinalIgnoreCase)&&package.AssetName.Equals(asset.Name,StringComparison.OrdinalIgnoreCase)&&package.Prerelease==release.Prerelease&&(Rules.CompareVersions(package.Tag,release.Tag)==0||package.Tag.Equals(release.Tag,StringComparison.OrdinalIgnoreCase));
     public static string Family(string name)
     {
