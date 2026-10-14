@@ -10,6 +10,9 @@ static class ReleaseManagementChecks
     {
         using(var server=new Server())using(var api=new GitHubClient(new(),server.Handler)){
             var before=await api.ReleaseInventory("owner/repo",9,CancellationToken.None);var selected=before.Assets.Single(asset=>asset.Id==10);var after=await api.DeleteReleaseAsset(before,selected,CancellationToken.None);
+            check(selected.CreatedAt==DateTimeOffset.Parse("2026-10-12T20:25:30Z")&&selected.CreatedAt!=DateTimeOffset.Parse(selected.Updated),"asset upload time uses its own created_at rather than release publication or asset update time");
+            check(before.Assets.Select(asset=>asset.CreatedAt).Distinct().Count()==before.Assets.Count,"every release attachment retains its individual upload time");
+            var legacy=JsonSerializer.Deserialize<ManagedReleaseAsset>("{\"Id\":1,\"Name\":\"old.exe\",\"Size\":1,\"Digest\":\"\",\"Updated\":\"2026-10-13T00:00:00Z\",\"Url\":\"\"}")!;check(legacy.CreatedAt==null&&Gitstar.Core.ProjectTimeRules.Time(legacy.CreatedAt)=="尚未获取","missing upload metadata remains unknown instead of borrowing updated_at");
             check(after.Version.AssetCount==1&&after.Assets.Single().Id==20&&after.Version.Tag==before.Version.Tag&&server.Exists,"individual asset deletion preserves release tag and unselected installer");
             check(server.Writes.SequenceEqual(new[]{"/repos/owner/repo/releases/assets/10"}),"asset deletion sends only selected asset ID to remote delete endpoint");
         }
@@ -50,7 +53,7 @@ static class ReleaseManagementChecks
         public readonly Dictionary<long,string> Names=new(){{10,"Gitstar.exe"},{20,"Gitstar-setup.exe"}};public readonly List<string> Writes=[];public readonly HttpMessageHandler Handler;public bool Exists=true,Push=true,Immutable,IgnoreDelete;public long ProjectId=100;public int AssetPages;
         public Server()=>Handler=new FakeHttp(Respond);
         private static HttpResponseMessage Json(object value)=>new(HttpStatusCode.OK){Content=new StringContent(JsonSerializer.Serialize(value))};
-        private object[] Assets()=>Names.Select(item=>(object)new{id=item.Key,name=item.Value,size=100L,digest="sha256:fixture",updated_at="2026-10-13T00:00:00Z",browser_download_url="https://github.com/owner/repo/releases/download/1.0.0.0/"+item.Value}).ToArray();
+        private object[] Assets()=>Names.Select(item=>(object)new{id=item.Key,name=item.Value,size=100L,digest="sha256:fixture",created_at=DateTimeOffset.Parse("2026-10-12T20:15:30Z").AddMinutes(item.Key).ToString("O"),updated_at="2026-10-13T00:00:00Z",browser_download_url="https://github.com/owner/repo/releases/download/1.0.0.0/"+item.Value}).ToArray();
         private Task<HttpResponseMessage> Respond(HttpRequestMessage request,CancellationToken ct)
         {
             ct.ThrowIfCancellationRequested();var path=request.RequestUri!.AbsolutePath;

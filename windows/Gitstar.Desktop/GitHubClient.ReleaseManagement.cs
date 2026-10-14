@@ -1,6 +1,9 @@
 namespace Gitstar.Desktop;
 
-public record ManagedReleaseAsset(long Id,string Name,long Size,string Digest,string Updated,string Url);
+public record ManagedReleaseAsset(long Id,string Name,long Size,string Digest,string Updated,string Url)
+{
+    public DateTimeOffset? CreatedAt {get;init;}
+}
 public record ReleaseInventory(ManagedProject Project,ProjectVersion Version,bool Immutable,string Updated,List<ManagedReleaseAsset> Assets)
 {
     public bool Writable=>Project.CanPush&&!Project.Archived;
@@ -15,7 +18,7 @@ public sealed partial class GitHubClient
         var assets=new List<ManagedReleaseAsset>();
         for(var page=1;;page++){
             var data=await Request($"repos/{repo}/releases/{id}/assets?per_page=100&page={page}",ct:ct,fresh:true);
-            assets.AddRange(data.EnumerateArray().Select(asset=>new ManagedReleaseAsset(asset.GetProperty("id").GetInt64(),S(asset,"name"),asset.GetProperty("size").GetInt64(),S(asset,"digest"),S(asset,"updated_at"),S(asset,"browser_download_url"))));
+            assets.AddRange(data.EnumerateArray().Select(asset=>new ManagedReleaseAsset(asset.GetProperty("id").GetInt64(),S(asset,"name"),asset.GetProperty("size").GetInt64(),S(asset,"digest"),S(asset,"updated_at"),S(asset,"browser_download_url")){CreatedAt=DateTimeOffset.TryParse(S(asset,"created_at"),out var created)?created:null}));
             if(data.GetArrayLength()<100)break;
         }
         return new(project,version with{AssetCount=assets.Count},detail.TryGetProperty("immutable",out var locked)&&locked.GetBoolean(),S(detail,"updated_at"),assets);

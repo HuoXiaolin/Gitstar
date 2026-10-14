@@ -38,7 +38,7 @@ public partial class MainWindow
             f.Section("安装包与附件");if(current.Assets.Count==0)f.Label("此版本没有安装包附件。");
             foreach(var asset in current.Assets){
                 var selected=asset;var expected=current;var row=new Grid();row.ColumnDefinitions.Add(new());row.ColumnDefinitions.Add(new(){Width=GridLength.Auto});
-                var text=new StackPanel();text.Children.Add(new TextBlock{Text=asset.Name,FontSize=14,FontWeight=FontWeights.SemiBold,TextWrapping=TextWrapping.Wrap});var meta=new TextBlock{Text=CacheBytes(asset.Size)+(asset.Digest.Length>0?"   ·   SHA-256 已提供":""),FontSize=12,Margin=new Thickness(0,6,0,0)};meta.SetResourceReference(TextBlock.ForegroundProperty,"Muted");text.Children.Add(meta);row.Children.Add(text);
+                var text=new StackPanel{Margin=new Thickness(0,0,8,0)};text.Children.Add(new TextBlock{Text=asset.Name,FontSize=14,FontWeight=FontWeights.SemiBold,TextWrapping=TextWrapping.Wrap});var meta=new TextBlock{Text=CacheBytes(asset.Size)+(asset.Digest.Length>0?"   ·   SHA-256 已提供":"")+"   ·   上传时间："+ProjectTimeRules.Time(asset.CreatedAt),FontSize=12,Margin=new Thickness(0,6,0,0),TextWrapping=TextWrapping.Wrap};meta.SetResourceReference(TextBlock.ForegroundProperty,"Muted");text.Children.Add(meta);row.Children.Add(text);
                 var actions=new StackPanel{VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(actions,1);row.Children.Add(actions);
                 var delete=Inline(actions,"删除附件",async()=>{
                     EnsureAccount();if(modifying)return;
