@@ -29,6 +29,7 @@ public class Binding
 }
 public class Settings
 {
+    public List<FollowHistoryEntry> FollowHistory {get;set;}=[];
     public int BulkDownloadDays {get;set;}=7;
     public List<string> BulkDownloadExtensions {get;set;}=[".exe",".msi",".zip"];
     public UpdateSort RecentSort {get;set;}

@@ -8,7 +8,12 @@ namespace Gitstar.Desktop;
 
 public static partial class WindowsServices
 {
-    public static void FitWindow(System.Windows.Window window,bool exactHeight)
+    internal static (double Width,double Height) MainWindowSize(double width,double height,double availableWidth,double availableHeight)
+    {
+        var scale=Math.Min(1,Math.Min(availableWidth*0.9/width,availableHeight*0.86/height));
+        return(width*scale,height*scale);
+    }
+    public static void FitWindow(System.Windows.Window window,bool mainWindow)
     {
         var source=System.Windows.PresentationSource.FromVisual(window);
         var transform=source?.CompositionTarget?.TransformFromDevice??System.Windows.Media.Matrix.Identity;
@@ -17,8 +22,8 @@ public static partial class WindowsServices
         var topLeft=transform.Transform(new System.Windows.Point(area.Left,area.Top));
         var bottomRight=transform.Transform(new System.Windows.Point(area.Right,area.Bottom));
         var availableWidth=bottomRight.X-topLeft.X;var availableHeight=bottomRight.Y-topLeft.Y;
-        var height=exactHeight?availableHeight:Math.Min(window.Height,availableHeight*0.8);
-        var width=Math.Min(window.Width,availableWidth*0.9);
+        var size=mainWindow?MainWindowSize(window.Width,window.Height,availableWidth,availableHeight):(Width:Math.Min(window.Width,availableWidth*0.9),Height:Math.Min(window.Height,availableHeight*0.8));
+        var height=size.Height;var width=size.Width;
         window.MinHeight=Math.Min(window.MinHeight,height);window.MinWidth=Math.Min(window.MinWidth,width);
         window.Height=height;window.Width=width;window.WindowState=System.Windows.WindowState.Normal;
         window.Left=topLeft.X+(availableWidth-width)/2;window.Top=topLeft.Y+(availableHeight-height)/2;
@@ -41,8 +46,7 @@ public static partial class WindowsServices
     }
     public static void Startup(bool enabled)
     {
-        using var run=Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
-        if(enabled)run.SetValue("Gitstar",$"\"{Environment.ProcessPath}\" --tray"); else run.DeleteValue("Gitstar",false);
+        SetStartupEntry(Registry.CurrentUser,StartupKey,enabled,Environment.ProcessPath??throw new IOException("无法确定当前程序位置。"));
     }
     public static void Open(string path)=>Process.Start(new ProcessStartInfo(path) {UseShellExecute=true});
     public static string ExtractPortable(string zip)

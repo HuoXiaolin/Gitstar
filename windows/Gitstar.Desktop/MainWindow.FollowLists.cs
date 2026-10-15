@@ -18,6 +18,7 @@ public partial class MainWindow
         form.Section("关注列表");form.Label("导出时可选择 GitHub 账号关注、本地关注，统一生成本地关注清单。导入只保存在本机；与账号收藏重复时优先显示为 GitHub 关注，不会重复列出。");
         var actions=new WrapPanel();form.Fields.Children.Add(actions);
         foreach(var button in new[]{form.Action("导入关注列表",()=>{ImportFollowDialog(form);return Task.CompletedTask;}),form.Action("导出关注列表",()=>{ExportFollowDialog(form);return Task.CompletedTask;})}){form.Buttons.Children.Remove(button);button.Margin=new Thickness(0,0,8,8);actions.Children.Add(button);}
+        var history=form.Action("取消关注历史",()=>{FollowHistoryDialog(form);return Task.CompletedTask;});form.Buttons.Children.Remove(history);history.Margin=new Thickness(0,0,8,8);actions.Children.Add(history);
     }
     private void ExportFollowDialog(Window owner,string? previewPath=null)
     {

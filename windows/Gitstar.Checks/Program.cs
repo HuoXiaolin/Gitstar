@@ -29,6 +29,9 @@ if(args.FirstOrDefault()=="--inspect-feed"){
 if(args.Contains("--scan-installed")){var scanned=WindowsServices.Scan();foreach(var entry in scanned.Where(a=>a.Name.Equals("Lertaro",StringComparison.OrdinalIgnoreCase)))Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(entry));return;}
 var count=0;
 void Check(bool value,string label){if(!value)throw new Exception("FAIL: "+label);Console.WriteLine("PASS: "+label);count++;}
+StartupAndReminderChecks.Run(Check);
+BindingManagementChecks.Run(Check);
+FollowHistoryChecks.Run(Check);
 ProgramVersion Executable(string name,string product,string version,string fileVersion="")=>new(Path.Combine("C:\\Apps\\Example",name),product,product,version,fileVersion);
 var mainExe=Executable("Example.App.exe","Example.App","5.9.2+buildhash","5.9.2.0");var oldUninstaller=Executable("unins000.exe","Example","5.9.1","51.1055.0.0");var serviceExe=Executable("Example.Service.exe","Example.Service","1.2.0");
 var actualEvidence=InstalledVersion.Resolve("Example","5.9.1",[oldUninstaller,serviceExe,mainExe]);Check(actualEvidence.Version=="5.9.2" && actualEvidence.Path==mainExe.Path,"actual main program product version supersedes stale registry and uninstaller versions");

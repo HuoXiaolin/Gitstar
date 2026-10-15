@@ -43,10 +43,12 @@ public partial class MainWindow : Window
     private bool syncingGroups;
     private string? automaticCheckId;
     private DateTimeOffset? lastAttempt;
+    private readonly bool smokeMode;
     private string CacheKey=>"cache/"+(settings.Account.Length>0?settings.Account:"guest");
     private string OperationsKey=>"operations/"+(settings.Account.Length>0?settings.Account:"guest");
     public MainWindow(bool smoke=false)
     {
+        smokeMode=smoke;
         InitializeComponent();DataContext=model;
         store=new(smoke?Path.Combine(Path.GetTempPath(),"Gitstar-render-"+Guid.NewGuid().ToString("N")):null);
         settings=store.Get("settings",new Settings());settings.SelfRepository=AppInfo.Repository;SortFilter.SelectedIndex=settings.RecentSort==UpdateSort.RepositoryUpdated?1:0;ProjectSort.SelectedIndex=settings.ProjectsSort==UpdateSort.RepositoryUpdated?1:0;api=new(settings);AvatarCache.Configure(settings,smoke);LoadToken();
@@ -64,16 +66,19 @@ public partial class MainWindow : Window
         Closing+=OnClosing;
         ConfigureBackgroundMemory();
         timer.Tick+=async(_,_)=>{if(RefreshSchedule.CanStartAutomatic(refreshing,busy,batchPublishing,quitting,clearingCache) && RefreshSchedule.IsDue(settings.RefreshIntervalHours,settings.LastCheck,lastAttempt,DateTimeOffset.UtcNow))await RefreshAsync(true);};
-        Loaded+=async(_,_)=>{
+        Loaded+=async(_,_)=>await InitializeSessionAsync();
+    }
+    internal async Task InitializeSessionAsync()
+    {
+            if(ready||exit)return;
             ready=true;PlanUpdates();Display();
-            if(smoke)return;
+            QueueBackgroundMemoryReclaim();
+            if(smokeMode)return;
             if(exit)return;
             if(settings.Startup)WindowsServices.Startup(true);
-            if(Environment.GetCommandLineArgs().Contains("--tray"))Hide();
             timer.Start();if(RefreshSchedule.IsDue(settings.RefreshIntervalHours,settings.LastCheck,lastAttempt,DateTimeOffset.UtcNow))await RefreshAsync(true);
             else if(settings.Bindings.Count>0)await Execute("检测","启动时复检已关联软件",async ct=>{model.Status=$"正在复检 {settings.Bindings.Count} 个已关联软件…";await ScanMatchedAsync();ct.ThrowIfCancellationRequested();PlanUpdates();Display();StartupCheckCompleted();},true,resources:["cache"]);
             else model.Status="已加载上次检查结果，可手动检查更新。";
-        };
     }
     private void StartupCheckCompleted()=>model.Status=$"启动复检完成 · {settings.Bindings.Count} 个已关联软件 · {updates.Count} 个可更新";
     private void LoadToken() {ConfigureApiCache();api.CredentialsChanged=auth=>CredentialStorage.Save(store,auth);try{api.SetCredentials(CredentialStorage.Load(store));}catch{model.Status="凭据不可读取，请重新登录。";}}
@@ -145,6 +150,7 @@ public partial class MainWindow : Window
         if(projectsPage){RenderProjects();return;}
         SortFilter.Visibility=localPage?Visibility.Collapsed:Visibility.Visible;
         BulkDownloadButton.Visibility=localPage?Visibility.Collapsed:Visibility.Visible;
+        RemindersButton.Visibility=localPage?Visibility.Visible:Visibility.Collapsed;
         var search=Search.Text.Trim();var channel=ChannelFilter.SelectedIndex;
         var selectedGroup=(GroupSidebar.SelectedItem as GroupEntry)?.Id??"all";var allGroups=groups.Concat(settings.LocalGroups).ToList();
         var repositoryTimes=repositories.ToDictionary(r=>r.FullName,r=>r.Updated,StringComparer.OrdinalIgnoreCase);
@@ -334,18 +340,8 @@ public partial class MainWindow : Window
     }
     private void Options_Click(object sender,RoutedEventArgs e)
     {
-        if((sender as Button)?.Tag is not Card c)return;
-        var f=new Form(this,"项目更新选项",620,530);f.Label(c.Repository);
-        f.Action("修改分组",()=>{f.Close();MembershipDialog([c.Repository]);return Task.CompletedTask;});
-        f.Action("管理 Star",()=>{f.Close();StarDialog(c.Repository);return Task.CompletedTask;});
-        f.Action("停止本地关注",()=>{settings.ExtraRepositories.RemoveAll(r=>r.Equals(c.Repository,StringComparison.OrdinalIgnoreCase));if(!settings.HiddenRepositories.Contains(c.Repository,StringComparer.OrdinalIgnoreCase))settings.HiddenRepositories.Add(c.Repository);Save();RebuildGroups();f.Close();model.Status="已停止最近更新页的本地关注；GitHub Star 和本机软件关联保留。可通过添加项目恢复。";return Task.CompletedTask;});
-        if(c.Update==null) {f.Label("版本通道筛选只改变浏览结果。自动更新订阅请在关联本机软件时设置。");f.Action("打开仓库",()=>{WindowsServices.Open("https://github.com/"+c.Repository);return Task.CompletedTask;});}
-        else {
-            var b=c.Update.Binding;var beta=f.Check("检查此软件的测试版",b.IncludePrerelease);var stop=f.Check("停止自动检查",b.Disabled);var pause=f.Text("暂停至日期（yyyy-MM-dd，留空恢复）",b.PauseUntil?.AddDays(-1).ToLocalTime().ToString("yyyy-MM-dd")??"");
-            f.Action("忽略此版本",()=>{b.IgnoredTag=c.Release.Tag;Save();PlanUpdates();Display();f.Close();return Task.CompletedTask;});
-            f.Action("保存",()=>{b.IncludePrerelease=beta.IsChecked==true;b.Disabled=stop.IsChecked==true;b.PauseUntil=pause.Text.Trim().Length==0?null:DateTimeOffset.Parse(pause.Text).AddDays(1);Save();PlanUpdates();Display();f.Close();return Task.CompletedTask;},true);
-        }
-        f.Action("关闭",()=>{f.Close();return Task.CompletedTask;});f.ShowDialog();
+        if((sender as Button)?.Tag is not Card card)return;
+        if(card.Update!=null)SoftwareManagementDialog(focus:card.Update.Binding);else FollowManagementDialog(card.Repository);
     }
     private void Add_Click(object sender,RoutedEventArgs e)
     {
@@ -431,7 +427,7 @@ public partial class MainWindow : Window
         var cleanCache=f.Action("按模块清理缓存",()=>{CacheCleanupDialog(f);return Task.CompletedTask;});f.Buttons.Children.Remove(cleanCache);cleanCache.Margin=new Thickness(0,0,8,0);dataActions.Children.Add(cleanCache);
         var compactDb=f.Action("整理数据库空间",()=>CompactDatabase(f));f.Buttons.Children.Remove(compactDb);compactDb.Margin=new Thickness(0,0,8,0);dataActions.Children.Add(compactDb);var storageUsage=store.StorageUsage();f.Label("数据库文件："+CacheBytes(storageUsage.Database)+"；有效内容："+CacheBytes(storageUsage.Content)+"；可回收空闲页："+CacheBytes(storageUsage.Free)+"。整理空间保留全部数据，按模块清理仅删除所选缓存。");f.Label("此目录保存登录凭据、设置、分组、软件与源码目录关联、缓存及任务记录。数据库运行时可能同时存在 gitstar.db-wal 和 gitstar.db-shm 文件。");f.Label("清理方法：从系统托盘选择“彻底退出”，再删除上面的应用数据目录。关闭窗口只会收起到托盘；删除数据后应用将恢复初始状态。下载目录中的安装包需单独整理。");
         f.Section("安装包管理");var keepLatest=f.Check("只保留各项目、平台和正式/测试通道的最新安装包",settings.KeepLatestPackages);var autoDelete=f.Check("确认安装成功后自动删除安装包",settings.DeleteInstalledPackages);var promptDelete=f.Check("更新检查完成后，询问是否删除已安装的安装包",settings.PromptInstalledPackageCleanup);promptDelete.IsEnabled=!autoDelete.IsChecked.GetValueOrDefault();autoDelete.Checked+=(_,_)=>promptDelete.IsEnabled=false;autoDelete.Unchecked+=(_,_)=>promptDelete.IsEnabled=true;f.Label("清理 Gitstar 记录的下载文件。自动删除默认关闭；确认主程序已达到目标版本后处理。同版本的其他安装包保留。选择保留后不重复询问。旧下载文件可手动整理。");
-        f.Section("下载与更新");var folder=f.Text("默认下载目录",settings.DownloadFolder);var sameVersion=f.Select("同版本安装包已存在时",["每次询问：替换或跳过","重新下载并替换","跳过下载和安装"],settings.SameVersionDownload);f.Label("安装包直接保存在此目录，不创建项目或版本子文件夹。文件名包含项目和版本，区分不同项目的同名安装包。替换前会核对旧下载记录，新文件校验成功后才覆盖。");f.Section("网络与启动");var proxy=f.Text("应用代理地址（http/https/socks5，无用户名密码；留空使用系统代理）",settings.Proxy);var direct=f.Check("直连（不使用系统代理）",settings.DirectConnection);var startup=f.Check("登录 Windows 后启动，并收起到托盘",settings.Startup);f.Section("外观");var dark=f.Check("深色模式",settings.Dark);
+        f.Section("下载与更新");var folder=f.Text("默认下载目录",settings.DownloadFolder);var sameVersion=f.Select("同版本安装包已存在时",["每次询问：替换或跳过","重新下载并替换","跳过下载和安装"],settings.SameVersionDownload);f.Label("安装包直接保存在此目录，不创建项目或版本子文件夹。文件名包含项目和版本，区分不同项目的同名安装包。替换前会核对旧下载记录，新文件校验成功后才覆盖。");f.Section("网络与启动");var proxy=f.Text("应用代理地址（http/https/socks5，无用户名密码；留空使用系统代理）",settings.Proxy);var direct=f.Check("直连（不使用系统代理）",settings.DirectConnection);f.Section("开机静默启动");var startup=f.Check("登录 Windows 后静默启动到托盘",settings.Startup);RenderStartupSettings(f,startup,previewPath);f.Section("外观");var dark=f.Check("深色模式",settings.Dark);
         f.Section("自动检查");var frequency=f.Select("后台刷新频率",RefreshSchedule.Labels,Array.IndexOf(RefreshSchedule.Hours,RefreshSchedule.Normalize(settings.RefreshIntervalHours)));
         f.Label("默认每天刷新一次，也可设为仅手动。切换页面只显示缓存；点击「检查更新」或托盘「立即检查更新」可强制刷新，不受周期限制。后台不下载；关闭窗口收起托盘。");
         RenderAbout(f);
@@ -442,7 +438,7 @@ public partial class MainWindow : Window
             if(proxy.Text.Trim().Length>0 && (!Uri.TryCreate(proxy.Text.Trim(),UriKind.Absolute,out var u)||u.Scheme is not ("http" or "https" or "socks5")||u.UserInfo.Length>0))throw new ArgumentException("代理请输入 http、https 或 socks5 地址，不能包含密码。");
             settings.SelfRepository=AppInfo.Repository;settings.ClientId=client.Text.Trim();settings.DownloadFolder=Path.GetFullPath(folder.Text);settings.Proxy=proxy.Text.Trim();settings.DirectConnection=direct.IsChecked==true;settings.Startup=startup.IsChecked==true;settings.Dark=dark.IsChecked==true;
             settings.SameVersionDownload=sameVersion.SelectedIndex;settings.KeepLatestPackages=keepLatest.IsChecked==true;settings.DeleteInstalledPackages=autoDelete.IsChecked==true;settings.PromptInstalledPackageCleanup=promptDelete.IsChecked==true;settings.RefreshIntervalHours=RefreshSchedule.Hours[frequency.SelectedIndex];WindowsServices.Startup(settings.Startup);Save();var authorization=api.Credentials;api.Dispose();api=new(settings);ConfigureApiCache();api.CredentialsChanged=auth=>CredentialStorage.Save(store,auth);api.SetCredentials(authorization);AvatarCache.Configure(settings);ApplyTheme();Display();f.Close();return Task.CompletedTask;
-        },true);f.SectionNavigation(previewPath!=null?(Environment.GetCommandLineArgs().Contains("--settings-follow")?"关注列表":Environment.GetCommandLineArgs().Contains("--settings-about")?"关于":Environment.GetCommandLineArgs().Contains("--settings-appearance")?"外观":Environment.GetCommandLineArgs().Contains("--settings-auto")?"自动检查":"下载与更新"):null);if(previewPath!=null)f.RenderPreview(previewPath);f.ShowDialog();
+        },true);f.SectionNavigation(previewPath!=null?(Environment.GetCommandLineArgs().Contains("--settings-follow")?"关注列表":Environment.GetCommandLineArgs().Contains("--settings-about")?"关于":Environment.GetCommandLineArgs().Contains("--settings-appearance")?"外观":Environment.GetCommandLineArgs().Contains("--settings-auto")?"自动检查":Environment.GetCommandLineArgs().Contains("--settings-startup")?"开机静默启动":"下载与更新"):null);if(previewPath!=null)f.RenderPreview(previewPath);f.ShowDialog();
     }
     private void Tasks_Click(object sender,RoutedEventArgs e)=>TasksDialog();
     private void TasksDialog(string? previewPath=null)
@@ -541,7 +537,7 @@ public partial class MainWindow : Window
         if(previewPath!=null&&Environment.GetCommandLineArgs().Contains("--release-selection"))ReleaseFileSelectionSmoke(project!,assets,previewPath);
         publishButton=f.Action("更新",()=>Publish(true),true);publishButton.IsEnabled=!reading&&assets.SelectedPaths.Length>0;var saveDraft=f.Action("保存为草稿",()=>Publish(false));f.Buttons.Children.Remove(saveDraft);advanced.Children.Add(saveDraft);if(previewPath!=null){notes.Text="优化发布流程，支持同版本安装包覆盖更新。";versionHint.Text="应用文件版本：1.0.0.0";File.WriteAllText(Path.ChangeExtension(previewPath,".version.json"),JsonSerializer.Serialize(new{Tag=tag.Text,Directory=releaseFolder.Text,Editable=!tag.IsReadOnly,DraftId=id.Text}));f.RenderPreview(previewPath);}f.ShowDialog();
     }
-    public void Reopen(){Show();WindowState=WindowState.Normal;ResumeBackgroundViews();Activate();}
+    public void Reopen(){ShowInTaskbar=true;Show();WindowState=WindowState.Normal;ResumeBackgroundViews();Activate();}
     private void OnClosing(object? sender,CancelEventArgs e) {if(exit)return;e.Cancel=true;Hide();model.Status="Gitstar 已收起到托盘，后台任务继续运行。";}
     public async void RequestExit()
     {
@@ -551,6 +547,8 @@ public partial class MainWindow : Window
     public async void RenderSmoke(string path,bool cards=false,bool local=false,bool dark=false,bool firstGroup=false,bool matching=false,bool settingsPreview=false,bool avatars=false,bool progressPreview=false,bool groupPreview=false,bool addPreview=false,bool batchPreview=false,bool tasksPreview=false,bool projectsPreview=false,bool sourcePreview=false,bool createPreview=false,bool projectSettingsPreview=false,bool workspacePreview=false,bool publishPreview=false,bool automationPreview=false)
     {
         settings.Dark=dark;ApplyTheme();
+        if(Environment.GetCommandLineArgs().Contains("--follow-management")){await FollowManagementSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
+        if(Environment.GetCommandLineArgs().Contains("--reminders")){ReminderSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         var workArea=Forms.Screen.FromHandle(new System.Windows.Interop.WindowInteropHelper(this).Handle).WorkingArea;
         var dpi=VisualTreeHelper.GetDpi(this);
         File.WriteAllText(Path.ChangeExtension(path,".layout.json"),JsonSerializer.Serialize(new {Height=ActualHeight,Width=ActualWidth,WorkAreaHeight=workArea.Height,DpiScale=dpi.DpiScaleY,HeightRatio=ActualHeight*dpi.DpiScaleY/workArea.Height,State=WindowState.ToString()},new JsonSerializerOptions {WriteIndented=true}));
