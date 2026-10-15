@@ -547,8 +547,14 @@
         </ScrollViewer>
       </Grid>
     </Grid>
-    <Border Grid.Row="4" BorderBrush="{DynamicResource Edge}" BorderThickness="0,1,0,0" Padding="0,12,0,0" Margin="0,10,0,0">
-      <TextBlock Text="{Binding Status}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource Muted}" FontSize="12" ToolTip="{Binding Status}" />
+    <Border Grid.Row="4" BorderBrush="{DynamicResource Edge}" BorderThickness="0,1,0,0" Padding="0,6,0,0" Margin="0,8,0,0">
+      <Button x:Name="StatusButton" Click="StatusDetails_Click" HorizontalContentAlignment="Stretch" Padding="0,3" Margin="0" Height="26" MinHeight="26" ToolTip="点击查看完整消息" AutomationProperties.Name="查看消息详情" Style="{StaticResource TertiaryButton}">
+        <Button.Template><ControlTemplate TargetType="Button"><Border x:Name="StatusFrame" Background="Transparent" CornerRadius="5" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center" /></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="StatusFrame" Property="Background" Value="{DynamicResource AccentSoft}" /></Trigger><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="StatusFrame" Property="BorderBrush" Value="{DynamicResource Accent}" /><Setter TargetName="StatusFrame" Property="BorderThickness" Value="1" /></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template>
+        <Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+          <TextBlock Text="{Binding StatusSummary}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource Muted}" FontSize="12" VerticalAlignment="Center" />
+          <TextBlock Grid.Column="1" Text="详情 ›" Foreground="{DynamicResource Muted}" FontSize="11" Margin="10,0,0,0" VerticalAlignment="Center" />
+        </Grid>
+      </Button>
     </Border>
   </Grid>
 </Window>

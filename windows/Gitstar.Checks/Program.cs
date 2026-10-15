@@ -202,6 +202,8 @@ await ProjectChecks.Run(Check,root);
 await RepositorySettingsChecks.Run(Check);
 await WorkspaceChecks.Run(Check,root);
 await WorkflowChecks.Run(Check,root);
+await SourceSyncChecks.Run(Check,root);
+ReleaseNotesChecks.Run(Check,root);
 await ReleaseStateChecks.Run(Check,root);
 await SelfUpdateChecks.Run(Check);
 await UpdateSortingChecks.Run(Check);

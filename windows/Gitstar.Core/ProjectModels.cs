@@ -38,8 +38,9 @@ public record GitProjectState(string Folder,string Branch,string Remote,string C
     public int? LastCommitFileCount {get;init;}
     public string CommitMessage {get;init;}="";
     public string? RemoteCommit {get;init;}
+    public string SyncIssue {get;init;}="";
     public bool SourceSynced=>Commit.Length>0 && Commit.Equals(RemoteCommit,StringComparison.OrdinalIgnoreCase);
-    public string SyncSummary=>Changes.Count>0?$"{Changes.Count} 个未提交变更，可上传更新。":Commit.Length==0?"尚无提交，请先添加源码。":SourceSynced?"当前提交已与 GitHub 一致；安装包更新需单独发布。":RemoteCommit==null?"没有未提交变更；GitHub 提交状态尚未核实，可推送已有提交。":"没有未提交变更；本地提交与 GitHub 不同，可推送已有提交。";
+    public string SyncSummary=>SyncIssue.Length>0?SyncIssue:Changes.Count>0?$"{Changes.Count} 个未提交变更，可上传更新。":Commit.Length==0?"尚无提交，请先添加源码。":SourceSynced?"当前提交已与 GitHub 一致；安装包更新需单独发布。":RemoteCommit==null?"没有未提交变更；GitHub 提交状态尚未核实，可推送已有提交。":"没有未提交变更；本地提交与 GitHub 不同，可推送已有提交。";
 }
 public record ReleaseDirectoryStatus(string Tag,int LocalCount,int? PendingCount,int UnverifiedCount,DateTimeOffset CheckedAt,string Message="");
 public record WorkspaceDiagnosis(string Folder,string Root,string Remote)

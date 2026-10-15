@@ -8,6 +8,7 @@ namespace Gitstar.Core;
 public record ProjectAutomation(string Repository,string SourceFolder,string ReleaseFolder,string VersionFile="",string Branch="",string TagPrefix="",string AssetPatterns=AutomationRules.DefaultAssets,string NotesFile="",bool IncludeInBatch=true,bool ReplaceSameVersion=true,bool? Prerelease=null)
 {
     public List<string>? SelectedAssets {get;init;}
+    public string? ManualNotes {get;init;}
 }
 public record AutomationPlan(string Version,string Tag,bool Prerelease,string VersionFile,string ReleaseFolder,string[] Assets);
 public static class AutomationRules

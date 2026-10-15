@@ -5,6 +5,7 @@ namespace Gitstar.Desktop;
 public class Observable : INotifyPropertyChanged
 {
     public event PropertyChangedEventHandler? PropertyChanged;
+    protected void Changed(string name)=>PropertyChanged?.Invoke(this,new(name));
     protected void Set<T>(ref T field,T value,[CallerMemberName]string? name=null) { if(EqualityComparer<T>.Default.Equals(field,value))return; field=value; PropertyChanged?.Invoke(this,new(name)); }
 }
 public sealed class Card : Observable
@@ -59,7 +60,8 @@ public sealed class MainModel : Observable
     public string CountCaption {get=>countCaption;set=>Set(ref countCaption,value);}
     private string title="关注项目的新版本",subtitle="按收藏分组查看更新内容，将所需安装包保存到指定文件夹。",status="登录 GitHub 后同步收藏，或添加公开仓库开始使用。",account="登录 GitHub",count="0 个版本",empty="还没有版本记录",hint="点击「登录 GitHub」同步收藏，也可以添加公开仓库。";
     public string Title {get=>title;set=>Set(ref title,value);} public string Subtitle {get=>subtitle;set=>Set(ref subtitle,value);}
-    public string Status {get=>status;set=>Set(ref status,value);} public string Account {get=>account;set=>Set(ref account,value);}
+    public string Status {get=>status;set{if(status==value)return;Set(ref status,value);Changed(nameof(StatusSummary));}} public string StatusSummary=>StatusText.Summary(status);
+    public string Account {get=>account;set=>Set(ref account,value);}
     public string Count {get=>count;set=>Set(ref count,value);} public string Empty {get=>empty;set=>Set(ref empty,value);}
     public string Hint {get=>hint;set=>Set(ref hint,value);}
     public ObservableCollection<Card> Cards {get;}=[];

@@ -110,7 +110,7 @@ public sealed partial class GitWorkspace
         var stdout=process.StandardOutput.ReadToEndAsync(ct); var stderr=process.StandardError.ReadToEndAsync(ct);
         try {await process.WaitForExitAsync(ct);} catch {try{process.Kill(true);}catch{}throw;}
         var output=await stdout; var error=await stderr;
-        if(process.ExitCode!=0){var safe=error.Replace(token.Length>0?token:"\0","[已隐藏]");var auth=safe.Contains("unable to get password from user",StringComparison.OrdinalIgnoreCase)||safe.Contains("Authentication failed",StringComparison.OrdinalIgnoreCase)||safe.Contains("terminal prompts disabled",StringComparison.OrdinalIgnoreCase)||safe.Contains("could not read Username",StringComparison.OrdinalIgnoreCase);throw new IOException((auth?"此操作需要有效的 GitHub 授权，请在 Gitstar 设置中重新登录或核对仓库权限。\n":"Git 操作失败：")+safe[..Math.Min(safe.Length,1200)]);}
+        if(process.ExitCode!=0){var safe=error.Replace(token.Length>0?token:"\0","[已隐藏]");var auth=safe.Contains("unable to get password from user",StringComparison.OrdinalIgnoreCase)||safe.Contains("Authentication failed",StringComparison.OrdinalIgnoreCase)||safe.Contains("terminal prompts disabled",StringComparison.OrdinalIgnoreCase)||safe.Contains("could not read Username",StringComparison.OrdinalIgnoreCase);var sync=safe.Contains("fetch first",StringComparison.OrdinalIgnoreCase)||safe.Contains("non-fast-forward",StringComparison.OrdinalIgnoreCase)||safe.Contains("stale info",StringComparison.OrdinalIgnoreCase);throw new GitCommandException(process.ExitCode,(auth?"此操作需要有效的 GitHub 授权，请在 Gitstar 设置中重新登录或核对仓库权限。\n":sync?"推送已停止：远端提交与本地不一致，请点击源码工作区的“核对同步”。\n\nGit 原始信息：\n":"Git 操作失败：")+safe[..Math.Min(safe.Length,1200)]);}
         return output.TrimEnd();
     }
     public async Task<string> Review(string folder,CancellationToken ct)
@@ -135,7 +135,7 @@ public sealed partial class GitWorkspace
         }
         await Run(folder,ct,["add","--",..selected]); await Run(folder,ct,"commit","-m",message);
         // Fixed HTTPS destination scopes the transient OAuth credential to GitHub, without changing origin.
-        await Run(folder,ct,"-c","credential.helper=","push",$"https://github.com/{repo}.git",$"HEAD:refs/heads/{branch}");
+        await Push(folder,repo,branch,ct);
     }
 }
 

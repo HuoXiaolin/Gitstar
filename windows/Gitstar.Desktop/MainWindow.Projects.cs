@@ -142,6 +142,7 @@ public partial class MainWindow
         var sourceActions=new WrapPanel();source.Children.Add(sourceActions);
         ProjectAction(sourceActions,"更新",()=>ProjectDialog(()=>SourceDialog(p)),true,writable);
         ProjectAction(sourceActions,"检查变更",()=>InspectProject(p),enabled:workspace!=null);
+        ProjectAction(sourceActions,"核对同步",()=>CheckProjectSync(p),enabled:workspace!=null);
         ProjectAction(sourceActions,"切换 / 关联目录",()=>ProjectDialog(()=>LinkProjectDialog(p)));
         ProjectAction(sourceActions,"克隆项目",()=>ProjectDialog(()=>CloneProjectDialog(p)),enabled:api.Token.Length>0);
         if(workspace!=null){ProjectAction(sourceActions,"打开目录",()=>ProjectDialog(()=>{if(!Directory.Exists(workspace.Folder))throw new IOException("关联目录已不存在。");WindowsServices.Open(workspace.Folder);}));ProjectAction(sourceActions,"解除关联",()=>ProjectDialog(()=>{projectWorkspaces.RemoveAll(w=>w.Repository==p.FullName);projectStates.Remove(p.FullName);SaveProjects();RenderProjectDetails(p);}));}

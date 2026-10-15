@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Windows;
@@ -490,7 +490,7 @@ public partial class MainWindow : Window
     private void PublishDialog(ManagedProject? project=null,ProjectVersion? version=null,string? previewPath=null)
     {
         var f=new Form(this,"更新发布版本",850,840);f.Label("目标项目："+(project?.FullName??"在高级操作中填写"));var config=project==null?null:SuggestedAutomation(project);var account=ProjectsKey;Button? publishButton=null;var reading=previewPath==null&&project!=null&&version?.Draft!=true;
-        var releaseFolder=f.Text("本地发行目录",config?.ReleaseFolder??"");releaseFolder.IsReadOnly=true;var tag=f.Text("版本号","");f.Label("留空读取应用文件的版本号；相同版本默认跳过；确认强制覆盖后更新附件，填写新版本号则发布新版本。");var beta=f.Check("测试版",version?.Prerelease??false);var notePanel=f.Advanced("更新日志（可选）");TextBox notes=null!;f.Into(notePanel,()=>notes=f.Text("更新日志（Markdown）",version?.Body??"",true));notes.MinHeight=60;notes.Height=60;
+        var releaseFolder=f.Text("本地发行目录",config?.ReleaseFolder??"");releaseFolder.IsReadOnly=true;var tag=f.Text("版本号","");f.Label("留空读取应用文件的版本号；相同版本默认跳过；确认强制覆盖后更新附件，填写新版本号则发布新版本。");var beta=f.Check("测试版",version?.Prerelease??false);var readNotes=ReleaseNotesEditor(f,project,config,version?.Body??"",previewPath!=null);
         f.Section("选择上传文件");var assets=new ReleaseFilePicker();assets.Load(releaseFolder.Text,config?.SelectedAssets);f.Fields.Children.Add(assets);f.Label("默认全选。手工调整后按项目记住选择，后续自动更新也只上传勾选文件；新增文件不会自动加入已保存的选择。");
         var versionHint=new TextBlock{TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,10),FontSize=12};versionHint.SetResourceReference(TextBlock.ForegroundProperty,"Muted");f.Fields.Children.Insert(f.Fields.Children.IndexOf(beta),versionHint);
         var fileHeading=f.Fields.Children[f.Fields.Children.IndexOf(assets)-1];var fileHelp=f.Fields.Children[f.Fields.Children.IndexOf(assets)+1];foreach(var child in new UIElement[]{versionHint,fileHeading,assets,fileHelp})f.Fields.Children.Remove(child);var fileIndex=f.Fields.Children.IndexOf(releaseFolder)+1;foreach(var child in new UIElement[]{versionHint,fileHeading,assets,fileHelp})f.Fields.Children.Insert(fileIndex++,child);
@@ -512,7 +512,7 @@ public partial class MainWindow : Window
             if(paths.Count==0)throw new IOException("请选择需要上传的安装包。");
             var resolvedTag=ManualReleaseRules.Version(tag.Text,paths,releaseFolder.Text,project?.Name??r.Split('/').Last());
             var resume=long.TryParse(id.Text,out var existing);
-            var t=resolvedTag;var sha=commit.Text.Trim();var body=notes.Text;var pre=beta.IsChecked==true;await api.EnsureFreshToken(CancellationToken.None);var found=await api.AutomationRelease(r,t,"",pre,CancellationToken.None);var overwrite=false;
+            var t=resolvedTag;var sha=commit.Text.Trim();var body=readNotes();var pre=beta.IsChecked==true;await api.EnsureFreshToken(CancellationToken.None);var found=await api.AutomationRelease(r,t,"",pre,CancellationToken.None);var overwrite=false;
             if(found.Release is {} prior){
                 var confirmation=new Form(f,"版本已存在",650,530);confirmation.Label(r+" · "+prior.GetProperty("tag_name").GetString()+" 已存在。默认跳过上传；强制覆盖会更新所选附件和日志，保留版本标签。");var files=confirmation.Text("将上传的附件",string.Join(Environment.NewLine,paths.Select(p=>Path.GetFileName(p)+" · "+new FileInfo(p).Length.ToString("N0")+" 字节")),true);files.IsReadOnly=true;
                 confirmation.Action("强制覆盖",()=>{overwrite=true;confirmation.Close();return Task.CompletedTask;},true);confirmation.Action("跳过",()=>{confirmation.Close();return Task.CompletedTask;});confirmation.ShowDialog();if(!overwrite){readiness.Text="同版本已存在，已跳过上传。";return;}
@@ -535,7 +535,7 @@ public partial class MainWindow : Window
             },resources:["repo:"+r]);
         }
         if(previewPath!=null&&Environment.GetCommandLineArgs().Contains("--release-selection"))ReleaseFileSelectionSmoke(project!,assets,previewPath);
-        publishButton=f.Action("更新",()=>Publish(true),true);publishButton.IsEnabled=!reading&&assets.SelectedPaths.Length>0;var saveDraft=f.Action("保存为草稿",()=>Publish(false));f.Buttons.Children.Remove(saveDraft);advanced.Children.Add(saveDraft);if(previewPath!=null){notes.Text="优化发布流程，支持同版本安装包覆盖更新。";versionHint.Text="应用文件版本：1.0.0.0";File.WriteAllText(Path.ChangeExtension(previewPath,".version.json"),JsonSerializer.Serialize(new{Tag=tag.Text,Directory=releaseFolder.Text,Editable=!tag.IsReadOnly,DraftId=id.Text}));f.RenderPreview(previewPath);}f.ShowDialog();
+        publishButton=f.Action("更新",()=>Publish(true),true);publishButton.IsEnabled=!reading&&assets.SelectedPaths.Length>0;var saveDraft=f.Action("保存为草稿",()=>Publish(false));f.Buttons.Children.Remove(saveDraft);advanced.Children.Add(saveDraft);if(previewPath!=null){versionHint.Text="应用文件版本：1.0.0.0";File.WriteAllText(Path.ChangeExtension(previewPath,".version.json"),JsonSerializer.Serialize(new{Tag=tag.Text,Directory=releaseFolder.Text,Editable=!tag.IsReadOnly,DraftId=id.Text}));f.RenderPreview(previewPath);}f.ShowDialog();
     }
     public void Reopen(){ShowInTaskbar=true;Show();WindowState=WindowState.Normal;ResumeBackgroundViews();Activate();}
     private void OnClosing(object? sender,CancelEventArgs e) {if(exit)return;e.Cancel=true;Hide();model.Status="Gitstar 已收起到托盘，后台任务继续运行。";}
@@ -547,6 +547,7 @@ public partial class MainWindow : Window
     public async void RenderSmoke(string path,bool cards=false,bool local=false,bool dark=false,bool firstGroup=false,bool matching=false,bool settingsPreview=false,bool avatars=false,bool progressPreview=false,bool groupPreview=false,bool addPreview=false,bool batchPreview=false,bool tasksPreview=false,bool projectsPreview=false,bool sourcePreview=false,bool createPreview=false,bool projectSettingsPreview=false,bool workspacePreview=false,bool publishPreview=false,bool automationPreview=false)
     {
         settings.Dark=dark;ApplyTheme();
+        if(Environment.GetCommandLineArgs().Contains("--source-sync")){SourceSyncSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--follow-management")){await FollowManagementSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--reminders")){ReminderSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         var workArea=Forms.Screen.FromHandle(new System.Windows.Interop.WindowInteropHelper(this).Handle).WorkingArea;
@@ -625,7 +626,8 @@ public partial class MainWindow : Window
         if(groupPreview || addPreview){if(groupPreview)GroupEditor(settings.LocalGroups.FirstOrDefault(),path);else AddProjectDialog(path);exit=true;tray.Icon?.Dispose();tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(matching){settings.Bindings.Clear();installed=[new("fixture1","示例编辑器","2.3.0","",RepositoryHint:"example/editor"),new("fixture2","Sync","1.8.0",""),new("fixture3","未识别的软件","1.0","")];repositories=[new("example/editor","",false),new("example/sync","",false)];AutoBindingDialog(path);exit=true;tray.Icon?.Dispose();tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--background-memory"))await BackgroundMemorySmoke(path);
-        if(!Environment.GetCommandLineArgs().Contains("--startup-completion"))model.Status=cards?"离线样例渲染 · 示例项目仅用于界面检查，不是已同步的 GitHub 数据":"离线界面渲染检查 · 未连接 GitHub";UpdateLayout();await Dispatcher.InvokeAsync(()=>{},DispatcherPriority.ApplicationIdle);var bitmap=new System.Windows.Media.Imaging.RenderTargetBitmap((int)ActualWidth,(int)ActualHeight,96,96,PixelFormats.Pbgra32);bitmap.Render(this);var root=(FrameworkElement)Content;var client=new System.Windows.Media.Imaging.CroppedBitmap(bitmap,new Int32Rect(0,0,Math.Min(bitmap.PixelWidth,(int)(root.ActualWidth+root.Margin.Left+root.Margin.Right)),Math.Min(bitmap.PixelHeight,(int)(root.ActualHeight+root.Margin.Top+root.Margin.Bottom))));var encoder=new System.Windows.Media.Imaging.PngBitmapEncoder();encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(client));using(var stream=File.Create(path))encoder.Save(stream);exit=true;tray.Icon?.Dispose();tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();
+        if(Environment.GetCommandLineArgs().Contains("--status-bar")){StatusSmoke(path);if(Environment.GetCommandLineArgs().Contains("--status-details")){StatusButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}}
+        if(!Environment.GetCommandLineArgs().Contains("--startup-completion")&&!Environment.GetCommandLineArgs().Contains("--status-bar"))model.Status=cards?"离线样例渲染 · 示例项目仅用于界面检查，不是已同步的 GitHub 数据":"离线界面渲染检查 · 未连接 GitHub";UpdateLayout();await Dispatcher.InvokeAsync(()=>{},DispatcherPriority.ApplicationIdle);var bitmap=new System.Windows.Media.Imaging.RenderTargetBitmap((int)ActualWidth,(int)ActualHeight,96,96,PixelFormats.Pbgra32);bitmap.Render(this);var root=(FrameworkElement)Content;var client=new System.Windows.Media.Imaging.CroppedBitmap(bitmap,new Int32Rect(0,0,Math.Min(bitmap.PixelWidth,(int)(root.ActualWidth+root.Margin.Left+root.Margin.Right)),Math.Min(bitmap.PixelHeight,(int)(root.ActualHeight+root.Margin.Top+root.Margin.Bottom))));var encoder=new System.Windows.Media.Imaging.PngBitmapEncoder();encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(client));using(var stream=File.Create(path))encoder.Save(stream);exit=true;tray.Icon?.Dispose();tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();
     }
 }
 

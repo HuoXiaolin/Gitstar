@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 namespace Gitstar.Desktop;
@@ -57,7 +57,7 @@ public sealed class Form : Window
         b.Click+=async(_,_)=>{b.IsEnabled=false;try{await action();}catch(OperationCanceledException){DialogMessage.Show(this,"操作已暂停，可从任务记录核实进度。","Gitstar");}catch(Exception e){DialogMessage.Show(this,e.Message,"操作未完成",MessageBoxButton.OK,MessageBoxImage.Warning);}finally{b.IsEnabled=true;}};
         Buttons.Children.Add(b);return b;
     }
-    public static void Notes(Window owner,string title,string text) {var f=new Form(owner,title,780,700);var t=f.Text("更新说明（原文）",text,true);t.IsReadOnly=true;t.MinHeight=500;f.Action("关闭",()=>{f.Close();return Task.CompletedTask;});f.ShowDialog();}
+    public static void Notes(Window owner,string title,string text) {var f=new Form(owner,title,780,700);var t=f.Text("更新说明（原文）",string.IsNullOrWhiteSpace(text)?"此版本尚未提供更新说明。":text,true);t.IsReadOnly=true;t.MinHeight=500;f.Action("关闭",()=>{f.Close();return Task.CompletedTask;});f.ShowDialog();}
     public void RenderPreview(string path)=>ContentRendered+=(_,_)=>Dispatcher.BeginInvoke(()=>{
         UpdateLayout();if(sections.Count>0)File.WriteAllText(Path.ChangeExtension(path,".navigation.json"),JsonSerializer.Serialize(new{Selected=selectedSection,Offset=scroll.VerticalOffset,Maximum=scroll.ScrollableHeight}));var root=(FrameworkElement)Content;var bitmap=new System.Windows.Media.Imaging.RenderTargetBitmap((int)root.ActualWidth,(int)root.ActualHeight,96,96,PixelFormats.Pbgra32);bitmap.Render(root);var encoder=new System.Windows.Media.Imaging.PngBitmapEncoder();encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));using(var stream=File.Create(path))encoder.Save(stream);Close();
     },System.Windows.Threading.DispatcherPriority.ApplicationIdle);
