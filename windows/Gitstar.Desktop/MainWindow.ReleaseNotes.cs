@@ -35,6 +35,7 @@ public partial class MainWindow
             var loaded=text.IsReadOnly&&Read().Contains("优化连接体验");mode.SelectedIndex=2;text.Text="手动填写的发布说明";var typed=Read()==text.Text;text.Clear();var blank=Read()==ReleaseNotes.DefaultText;
             mode.SelectedIndex=1;File.WriteAllText(path,"## 2.0.0\n\n- 上传前读取最新日志内容");var fresh=Read().Contains("最新日志");Load();mode.SelectedIndex=0;var defaults=Read()==ReleaseNotes.DefaultText;
             if(!loaded||!typed||!fresh||!blank||!defaults)throw new IOException("Release notes editor smoke failed");
+            file.Text=@"C:\Users\Demo\Projects\Gitstar\CHANGELOG.md";
             form.ContentRendered+=(_,_)=>text.BringIntoView();
             File.WriteAllText(Path.Combine(store.Root,"notes-smoke.json"),JsonSerializer.Serialize(new{FilePreview=loaded,ManualInput=typed,FreshRead=fresh,BlankUsesDefault=blank,DefaultWithoutSelection=defaults}));
         }

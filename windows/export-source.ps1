@@ -15,6 +15,13 @@ $excluded='(^|\\)(bin|obj|\.git|\.vs|node_modules|artifacts|outputs|dist|\.gradl
 $files=@('README.md','LICENSE','.gitignore','pantone-line.svg','docs\Gitstar使用说明.md')
 $windowsRoot=Join-Path $projectPath 'windows'
 $pending=[Collections.Generic.Stack[string]]::new();$pending.Push($windowsRoot)
+$screenshotsRoot=Join-Path $projectPath 'docs\screenshots'
+if(Test-Path -LiteralPath $screenshotsRoot){
+    foreach($folder in @((Join-Path $projectPath 'docs'),$screenshotsRoot)){
+        if((Get-Item -LiteralPath $folder -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){throw "Screenshot directory is a link: $folder"}
+    }
+    $pending.Push($screenshotsRoot)
+}
 while($pending.Count){
     foreach($item in Get-ChildItem -LiteralPath $pending.Pop() -Force){
         $relative=$item.FullName.Substring($projectPath.Length+1)

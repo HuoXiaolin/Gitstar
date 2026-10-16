@@ -1,79 +1,91 @@
-﻿# Gitstar
+# Gitstar
 
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 
-Gitstar 是一款 Windows 桌面工具，将 GitHub 收藏项目的版本动态、本机软件更新和自己的项目管理集中到一个应用中。
+**收藏好项目，跟进新版本，打理自己的发布。**
 
-当前版本 **2.0.0**，采用 WPF + .NET 10，提供顶部模块导航、彩色卡片界面、浅色与深色主题，以及免安装单文件 EXE 和安装版。设置与操作弹窗采用统一控件，设置支持左侧分区导航。
+Gitstar 是一款 Windows 桌面应用，把 GitHub 关注项目、本机软件更新和自己的项目发布放进同一个工作台。你可以按分组看看收藏的软件出了什么新版本，为电脑上的软件下载更新，也可以提交自己的源码、管理安装包与发布说明。
 
-## 最近更新
+当前版本：**2.0.0** · 作者：[HuoXiaolin](https://github.com/HuoXiaolin) · [下载发行版](https://github.com/HuoXiaolin/Gitstar/releases)
 
-- 汇总 Star 项目的正式版本与测试版本，显示最近 7 天有版本更新的项目数量。
-- 通过左侧 GitHub Star Lists 和本地分组快速切换，支持搜索与版本类型筛选。
-- 卡片显示仓库许可证和 Stars 数量，支持点击跳转；查看作者头像、版本信息和更新日志，将 Windows、Android 等平台的安装包保存到指定文件夹。
-- 添加或取消 Star，创建与调整分组，支持全选和批量管理。
+## Gitstar 能做什么
 
-## 本机可更新
+### 跟进收藏项目的新版本
 
-- 识别已安装的软件并推荐对应的 GitHub 仓库，支持批量确认关联和手动添加便携软件。
-- 保存上次扫描结果，再次打开即可查看；点击“检查更新”时只检查已匹配的软件。
-- 对比本机实际版本与仓库版本，下载后打开 EXE/MSI 安装器，或将便携 ZIP 解压到新目录。
-- 根据电脑架构判断安装包兼容性，64 位 Windows 可使用兼容的 64 位或 32 位安装包。
-- 支持忽略当前版本、暂停至指定日期和停止自动检查，之后可恢复。
+收藏之后，更新也能集中查看。在“最近更新”中浏览 GitHub Star 和本地关注的项目，翻阅更新日志，挑选需要的安装包。
 
-## 我的项目
+- 按 GitHub 收藏分组或本地分组浏览，支持搜索、正式版与测试版筛选，以及按发布时间或仓库更新时间排序。
+- 查看仓库许可证和 Stars，复制项目地址或打开主页；选择最新版本，也可下载历史版本的安装包。
+- 按最近一段时间和文件类型批量收集发行包，下载文件保留原名。
+- 统一管理 Star、本地关注和分组，支持关注列表导入导出，以及取消关注后的历史恢复。
 
-- 集中查看与管理自己的公开、私有仓库，创建项目并配置说明、主页、可见性等属性。
-- 关联、初始化或克隆本地源码目录；目录不合适时，提供更换根目录、独立复制及远程地址修正操作。
-- 自动检查源码变更，勾选需要上传的文件，编辑提交说明后提交并推送。
-- 创建正式或测试版本，编写更新日志、上传安装包，支持草稿保存与继续发布。
-- 在应用内管理发布包，删除指定附件或整个发布版本，保留 Git 标签与本地源码、安装包。
-- 单项目“同步并发布最新”及“全部同步并发布最新”：按配置目录自动提交源码、读取最新版本并发布安装包；同版本更新附件与日志，保留版本标签，支持并行执行及失败后继续。
-- 管理仓库功能、合并方式和归档状态；协作者与分支保护等设置可跳转到 GitHub 管理。
+### 看看这台电脑的软件能否更新
 
-## 任务与后台运行
+在“本机可更新”中，将已安装的软件或便携软件关联到 GitHub 项目，对比本机版本和远端版本，再决定什么时候更新。
 
-- 多任务并行下载与上传，每个任务都可暂停、继续或取消，操作按钮同步显示执行进度。失败或结果待核实的任务也可取消，取消后停止重试并保留已完成部分。
-- 关闭窗口后收起到系统托盘；可选择登录 Windows 后自动启动。
-- 默认每天检查一次，可在设置中调整频率或手动强制刷新，切换页面不会触发刷新。
-- 本机软件发现更新时发送系统通知，关注项目的新版本在应用内提示。
-- 安装包可设置只保留最新版本、确认安装成功后自动清理，或由提示确认清理。
-- 设置支持按模块清理最近更新、本机检测、我的项目和头像缓存，以及已结束任务记录；保留登录与关联配置。
+- 自动推荐仓库匹配，也可手动修正软件、仓库和主程序的关联。
+- 下载 EXE/MSI 安装包并按提示打开安装器；便携 ZIP 可解压到新目录，安装操作由你完成。
+- 在“软件管理”中多选或全选，统一忽略当前版本、暂停检查、停止检查、恢复提醒或解除关联。
 
-## 登录与数据
+### 管理自己的源码与发布版本
 
-通过浏览器完成 GitHub 授权，支持公开和私有仓库。登录凭据使用 Windows DPAPI 加密保存，配置与缓存保存在本机。
+“我的项目”把仓库、本地源码和发行目录关联起来，让日常提交与发布更顺手。
 
-首次使用需配置自己的 GitHub OAuth App 并启用 Device Flow，详细步骤见 [使用说明](docs/Gitstar使用说明.md)。
+- 管理公开、私有项目，配置项目说明、主页和仓库功能，关联或克隆本地源码目录。
+- 检查源码变更，选择提交文件并推送，核对本地与远端的同步状态。
+- 从已构建的发行目录选择上传文件，读取应用版本号，更新正式版、测试版或草稿，并管理发布版本与附件。
+- 更新说明可读取 `CHANGELOG.md`、指定其他文件或手动填写；未设置时自动使用简要说明。
+- 保存配置后，支持单项目或批量“同步并发布最新”，自动提交源码并上传选定的发行文件。
 
-## 使用要求
+### 适合日常使用的小功能
 
-- Windows x64，安装 .NET Desktop Runtime 10.x；发行包不附带运行时。
-- 源码提交与推送需要 Git for Windows。
-- 当前提供 Windows 应用；Android 应用和 Windows ARM64 支持后续开发。
+浅色与深色主题、托盘后台运行、开机静默启动、可调整频率的自动检查，以及可暂停、继续或取消的任务管理。设置中还能查看本地数据位置，按模块清理缓存和记录。
 
-应用负责下载并打开安装器，安装步骤由用户完成。
+## 功能截图
 
-## 开源许可
+以下截图由 **2.0.0 的隔离演示模式**生成，仓库、软件、版本及 Stars 等均为测试数据，仅用于展示功能。点击图片可查看原图。
 
-Copyright (C) 2026 HuoXiaolin。Gitstar 采用 [GNU GPL v3.0](LICENSE)（`GPL-3.0-only`）发布。
+| 最近更新 | 本机可更新 |
+| --- | --- |
+| [![最近更新：分组浏览关注项目、查看版本并保存安装包](docs/screenshots/recent-updates.png)](docs/screenshots/recent-updates.png) | [![本机可更新：对比本机与远端版本，下载新版安装包](docs/screenshots/local-updates.png)](docs/screenshots/local-updates.png) |
 
+| 我的项目 | 更新发布版本 |
+| --- | --- |
+| [![我的项目：管理源码工作区及同步发布配置](docs/screenshots/my-projects.png)](docs/screenshots/my-projects.png) | [![更新发布版本：默认简要说明，也可指定日志或手动填写](docs/screenshots/release-update.png)](docs/screenshots/release-update.png) |
+
+| 软件管理 | 深色模式 |
+| --- | --- |
+| [![软件管理：多选管理匹配关系、检查与提醒](docs/screenshots/software-management.png)](docs/screenshots/software-management.png) | [![深色模式：我的项目工作台](docs/screenshots/dark-mode.png)](docs/screenshots/dark-mode.png) |
+
+## 开始使用
+
+1. 准备 Windows x64 环境，并安装 **.NET Desktop Runtime 10.x**。
+2. 从 [Releases](https://github.com/HuoXiaolin/Gitstar/releases) 下载 `Gitstar-setup.exe` 安装，或直接运行单文件 `Gitstar.exe`。
+3. 登录 GitHub 同步收藏，或添加公开仓库作为本地关注；进入“本机可更新”关联软件，进入“我的项目”配置源码和发行目录。
+
+首次 GitHub 授权需要配置 OAuth App 并启用 Device Flow，步骤见 [使用说明](docs/Gitstar使用说明.md)。源码提交和推送需要安装 Git for Windows。
+
+配置与缓存保存在本机，GitHub 登录凭据使用 Windows DPAPI 加密保存。可在设置中查看数据目录和清理选项。
 
 ## 从源码构建
 
-安装 .NET SDK 10 后，在项目根目录执行：
+项目使用 **WPF + .NET 10**。安装 .NET SDK 10 后，在源码根目录执行：
 
 ```powershell
 dotnet build windows/Gitstar.slnx -c Release
 dotnet run --project windows/Gitstar.Checks -c Release
 ```
 
-构建免安装发行包：
+生成发行文件：
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File windows/build.ps1 -Dotnet "你的 dotnet.exe 路径"
 ```
 
-生成安装版时，再通过 `-Inno` 参数指定 Inno Setup 编译器路径。
+生成安装版需准备 Inno Setup，可通过 `-Inno` 指定编译器路径。发行目录直接保存 EXE、安装包、使用说明、许可证和校验清单。
 
-构建完成后，单文件 EXE、安装版、使用说明和校验清单直接输出到 `D:\Agant\Github_Releases\Gitstar`，不创建发行子文件夹，也不生成 ZIP；最新精简源码自动同步到 `D:\Agant\Github_Source\Gitstar`。可通过 `-OutputRoot` 和 `-SourceRoot` 参数自定义路径。
+本项目的开发目录为 `D:\Agant\github-update`；构建后，最新精简源码同步到 `D:\Agant\Github_Source\Gitstar`，发行文件输出到 `D:\Agant\Github_Releases\Gitstar`。可通过 `-SourceRoot` 和 `-OutputRoot` 自定义输出位置。
+
+## 开源许可
+
+Copyright (C) 2026 HuoXiaolin。Gitstar 采用 [GNU GPL v3.0](LICENSE)（`GPL-3.0-only`）发布。
