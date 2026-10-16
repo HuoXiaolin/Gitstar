@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using Microsoft.Win32;
@@ -102,15 +102,18 @@ public partial class MainWindow
         button.Click+=async(_,_)=>{button.IsEnabled=false;try{await work();}catch(Exception ex){DialogMessage.Show(this,ex.Message,"操作未完成");}finally{button.IsEnabled=enabled;}};parent.Children.Add(button);return button;
     }
     private Task ProjectDialog(Action action){action();return Task.CompletedTask;}
-    private WrapPanel ProjectAddressRow(ManagedProject project)
+    private Grid ProjectAddressRow(ManagedProject project)
     {
-        var row=new WrapPanel{Margin=new Thickness(0,0,0,8)};var address=new TextBlock{Text=project.FullName,FontSize=12,VerticalAlignment=VerticalAlignment.Center};address.SetResourceReference(TextBlock.ForegroundProperty,"Muted");row.Children.Add(address);
-        var actions=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(4,0,0,0)};row.Children.Add(actions);
+        var row=new Grid{Margin=new Thickness(0,0,0,8)};row.ColumnDefinitions.Add(new());row.ColumnDefinitions.Add(new(){Width=GridLength.Auto});
+        var left=new DockPanel{HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,12,0)};row.Children.Add(left);
+        var actions=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(4,0,0,0)};DockPanel.SetDock(actions,Dock.Right);left.Children.Add(actions);
         foreach(var copy in new[]{true,false}){
             var title=copy?"复制项目地址":"打开项目主页";var button=new Button{Tag=project,ToolTip=title,Style=(Style)FindResource("ProjectAddressButton")};System.Windows.Automation.AutomationProperties.SetName(button,title);
             var icon=new System.Windows.Shapes.Path{Data=Geometry.Parse(copy?"M 5,2 L 14,2 L 14,11 M 2,5 L 11,5 L 11,14 L 2,14 Z":"M 8,2 L 14,2 L 14,8 M 14,2 L 7,9 M 5,3 L 2,3 L 2,14 L 13,14 L 13,11"),StrokeThickness=1.5,StrokeLineJoin=PenLineJoin.Round,Stretch=Stretch.Uniform,Width=13,Height=13};icon.SetBinding(System.Windows.Shapes.Shape.StrokeProperty,new System.Windows.Data.Binding("Foreground"){Source=button});button.Content=icon;if(copy)button.Click+=CopyProjectAddress_Click;else button.Click+=ProjectHome_Click;actions.Children.Add(button);
         }
-        var metadata=new TextBlock{Text=project.Visibility+"   ·   "+project.Access+"   ·   默认分支 "+project.DefaultBranch,FontSize=11,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(10,0,0,0)};metadata.SetResourceReference(TextBlock.ForegroundProperty,"Muted");row.Children.Add(metadata);return row;
+        var metadata=new TextBlock{Text=project.Visibility+"   ·   "+project.Access+"   ·   默认分支 "+project.DefaultBranch,FontSize=11,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(10,0,0,0)};metadata.SetResourceReference(TextBlock.ForegroundProperty,"Muted");actions.Children.Add(metadata);
+        var address=new TextBlock{Text=project.FullName,ToolTip=project.FullName,TextTrimming=TextTrimming.CharacterEllipsis,FontSize=12,VerticalAlignment=VerticalAlignment.Center};address.SetResourceReference(TextBlock.ForegroundProperty,"Muted");left.Children.Add(address);
+        var facts=new RepositoryFacts{Repository=project.FullName,Metadata=project.Metadata,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(facts,1);row.Children.Add(facts);return row;
     }
     private bool ProjectWritable(ManagedProject p)=>api.Token.Length>0 && p.CanPush && !p.Archived;
     private void RenderProjectDetails(ManagedProject? project)

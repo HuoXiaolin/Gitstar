@@ -7,11 +7,11 @@ public partial class MainWindow
 {
     private void RenderAbout(Form f)
     {
-        f.Section("关于");var current=typeof(Program).Assembly.GetName().Version?.ToString()??"1.0.0.0";
+        f.Section("关于");var current=AppInfo.Version;
         var hero=new StackPanel();var title=new TextBlock{Text="Gitstar",FontSize=26,FontWeight=FontWeights.SemiBold,Margin=new Thickness(0,0,0,8)};title.SetResourceReference(TextBlock.ForegroundProperty,"Ink");hero.Children.Add(title);
         hero.Children.Add(ProjectText("版本 "+current+"   ·   作者 "+AppInfo.Author,13,true));hero.Children.Add(ProjectText(AppInfo.Description,13,true));
         var card=new Border{Child=hero,Padding=new Thickness(18),CornerRadius=new CornerRadius(12),Margin=new Thickness(0,8,0,14)};card.SetResourceReference(Border.BackgroundProperty,"AccentSoft");f.Fields.Children.Add(card);
-        f.Label("项目地址："+AppInfo.ProjectUrl);f.Label("更新来源：本项目的 GitHub Releases 正式版。发现更新后展示日志，由你选择下载并安装。");
+        f.Label("项目地址："+AppInfo.ProjectUrl);f.Label("开源许可：GNU GPL v3.0（GPL-3.0-only）");f.Label("更新来源：本项目的 GitHub Releases 正式版。发现更新后展示日志，由你选择下载并安装。");
         var status=new TextBlock{Text="点击检查更新，核对当前版本与最新正式版。",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,4,0,12),FontSize=13};status.SetResourceReference(TextBlock.ForegroundProperty,"Muted");f.Fields.Children.Add(status);
         var actions=new WrapPanel();f.Fields.Children.Add(actions);Release? latest=null;
         Button Inline(string text,Func<Task> work,bool primary=false){var button=f.Action(text,work,primary);f.Buttons.Children.Remove(button);button.Margin=new Thickness(0,4,8,4);actions.Children.Add(button);return button;}

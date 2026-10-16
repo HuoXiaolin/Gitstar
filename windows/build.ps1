@@ -12,8 +12,9 @@ if($LASTEXITCODE -ne 0){throw 'Build failed'}
 & $Dotnet publish (Join-Path $PSScriptRoot 'Gitstar.Desktop\Gitstar.Desktop.csproj') -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:EnableSingleFileAnalyzer=false -p:DebugType=None -p:DebugSymbols=false "-p:BaseOutputPath=$buildPath" -o $publishPath
 if($LASTEXITCODE -ne 0){throw 'Publish failed'}
 Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\Gitstar使用说明.md') -Destination (Join-Path $publishPath '使用说明.md')
+Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination (Join-Path $publishPath 'LICENSE')
 New-Item -ItemType Directory -Force -Path $releasePath | Out-Null
-$releaseNames=@('Gitstar.exe','使用说明.md')
+$releaseNames=@('Gitstar.exe','使用说明.md','LICENSE')
 foreach($releaseName in $releaseNames){
   $releaseFile=Join-Path $releasePath $releaseName
   try{Copy-Item -LiteralPath (Join-Path $publishPath $releaseName) -Destination $releaseFile -Force -ErrorAction Stop}
@@ -64,7 +65,7 @@ foreach($oldRelease in Get-ChildItem -LiteralPath $outputRoot){
     if($oldRelease.PSIsContainer){Remove-Item -LiteralPath $oldPath -Recurse -Force}else{Remove-Item -LiteralPath $oldPath -Force}
   }
 }
-$hashFiles=@((Join-Path $outputRoot 'Gitstar.exe'),(Join-Path $outputRoot '使用说明.md'))
+$hashFiles=@((Join-Path $outputRoot 'Gitstar.exe'),(Join-Path $outputRoot '使用说明.md'),(Join-Path $outputRoot 'LICENSE'))
 if($installerBuilt){$hashFiles+=(Join-Path $outputRoot 'Gitstar-setup.exe')}
 Get-Item -LiteralPath $hashFiles | ForEach-Object {$releaseHash=Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256; "$($releaseHash.Hash)  $($_.Name)"} | Set-Content (Join-Path $outputRoot 'SHA256SUMS.txt') -Encoding UTF8
 & (Join-Path $PSScriptRoot 'export-source.ps1') -ProjectRoot $projectRoot -SourceRoot $SourceRoot

@@ -10,6 +10,7 @@ public class Observable : INotifyPropertyChanged
 }
 public sealed class Card : Observable
 {
+    public RepositoryMetadata Metadata {get;init;}=new();
     private bool selected;
     public bool IsSelected {get=>selected;set=>Set(ref selected,value);}
     public bool CanManageStar=>Update==null;

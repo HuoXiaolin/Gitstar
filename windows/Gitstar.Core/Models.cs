@@ -9,6 +9,7 @@ public record Release(long Id, string Repository, string Tag, string Name, strin
 }
 public record Repository(string FullName, string Description, bool Private, bool Starred=false, string NodeId="")
 {
+    public RepositoryMetadata Metadata {get;init;}=new();
     public DateTimeOffset? Updated {get;init;}
 }
 public enum UpdateSort { Published, RepositoryUpdated }

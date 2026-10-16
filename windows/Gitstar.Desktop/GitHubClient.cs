@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 namespace Gitstar.Desktop;
@@ -20,7 +20,7 @@ public sealed partial class GitHubClient : IDisposable
         var handler = new HttpClientHandler { AllowAutoRedirect=false, UseProxy=!settings.DirectConnection };
         if (settings.Proxy.Length > 0) { var u = new Uri(settings.Proxy); if (u.UserInfo.Length > 0) throw new ArgumentException("代理地址中不要包含密码。"); handler.Proxy = new WebProxy(u); }
         http = new HttpClient(transport??handler) { Timeout=TimeSpan.FromMinutes(3) };
-        http.DefaultRequestHeaders.UserAgent.ParseAdd("Gitstar/"+(typeof(Program).Assembly.GetName().Version?.ToString()??"1.0.0.0"));
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("Gitstar/"+AppInfo.Version);
     }
     private async Task<JsonElement> Request(string url, HttpMethod? method=null, object? body=null, CancellationToken ct=default,Action<JsonElement>? consume=null,string? etag=null,Action<string,bool>? cacheResult=null,bool fresh=false)
     {
@@ -66,7 +66,7 @@ public sealed partial class GitHubClient : IDisposable
     {
         Validate(repo); var e=await Request("repos/"+repo,ct:ct); return ParseRepository(e,false);
     }
-    private static Repository ParseRepository(JsonElement e,bool starred)=>new(S(e,"full_name"),S(e,"description"),e.GetProperty("private").GetBoolean(),starred,S(e,"node_id")) {Updated=DateTimeOffset.TryParse(S(e,"updated_at"),out var updated)?updated:null};
+    private static Repository ParseRepository(JsonElement e,bool starred)=>new(S(e,"full_name"),S(e,"description"),e.GetProperty("private").GetBoolean(),starred,S(e,"node_id")) {Updated=DateTimeOffset.TryParse(S(e,"updated_at"),out var updated)?updated:null,Metadata=ParseMetadata(e)};
     public async Task<List<Release>> Releases(string repo,CancellationToken ct,IEnumerable<Binding>? bindings=null)
     {
         Validate(repo);var subscriptions=bindings?.ToArray()??[];var selected=new ReleaseCandidates(repo,subscriptions);

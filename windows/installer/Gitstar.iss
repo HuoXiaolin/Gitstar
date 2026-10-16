@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "1.0.0.0"
+  #define AppVersion "2.0.0"
 #endif
 #ifndef ReleaseRoot
   #define ReleaseRoot "D:\Agant\Github_Releases\Gitstar"
@@ -13,6 +13,7 @@ VersionInfoTextVersion={#AppVersion}
 VersionInfoProductVersion={#AppVersion}
 VersionInfoProductTextVersion={#AppVersion}
 AppPublisher=Gitstar
+LicenseFile=..\..\LICENSE
 DefaultDirName={localappdata}\Programs\Gitstar
 DefaultGroupName=Gitstar
 PrivilegesRequired=lowest
@@ -33,6 +34,7 @@ Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 [Files]
 Source: "{#ReleaseRoot}\Gitstar.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#ReleaseRoot}\使用说明.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#ReleaseRoot}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 [InstallDelete]
 Type: files; Name: "{app}\Gitstar.dll"
 Type: files; Name: "{app}\Gitstar.Core.dll"

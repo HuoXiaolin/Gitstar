@@ -2,6 +2,7 @@ namespace Gitstar.Core;
 
 public record ManagedProject(string FullName,string Description,bool Private,string DefaultBranch,bool CanPush,bool CanAdmin,bool Archived,DateTimeOffset Updated,string Homepage="",string RepoVisibility="",bool Fork=false,long Id=0)
 {
+    public RepositoryMetadata Metadata {get;init;}=new();
     public string Name=>FullName.Split('/').Last();
     public string Owner=>FullName.Split('/')[0];
     public string Visibility=>RepoVisibility=="internal"?"内部":Private?"私有":"公开";

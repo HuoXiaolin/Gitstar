@@ -1,4 +1,4 @@
-namespace Gitstar.Desktop;
+﻿namespace Gitstar.Desktop;
 
 public sealed partial class GitHubClient
 {
@@ -16,7 +16,7 @@ public sealed partial class GitHubClient
     {
         var push=false;var admin=false;
         if(e.TryGetProperty("permissions",out var p)){push=p.TryGetProperty("push",out var a)&&a.GetBoolean();admin=p.TryGetProperty("admin",out a)&&a.GetBoolean();}
-        return new(S(e,"full_name"),S(e,"description"),e.GetProperty("private").GetBoolean(),S(e,"default_branch"),push,admin,e.TryGetProperty("archived",out var archived)&&archived.GetBoolean(),DateTimeOffset.TryParse(S(e,"updated_at"),out var date)?date:DateTimeOffset.MinValue,S(e,"homepage"),S(e,"visibility"),e.TryGetProperty("fork",out var fork)&&fork.GetBoolean(),e.TryGetProperty("id",out var id)&&id.TryGetInt64(out var number)?number:0);
+        return new(S(e,"full_name"),S(e,"description"),e.GetProperty("private").GetBoolean(),S(e,"default_branch"),push,admin,e.TryGetProperty("archived",out var archived)&&archived.GetBoolean(),DateTimeOffset.TryParse(S(e,"updated_at"),out var date)?date:DateTimeOffset.MinValue,S(e,"homepage"),S(e,"visibility"),e.TryGetProperty("fork",out var fork)&&fork.GetBoolean(),e.TryGetProperty("id",out var id)&&id.TryGetInt64(out var number)?number:0){Metadata=ParseMetadata(e)};
     }
     public async Task<List<ManagedProject>> MyProjects(CancellationToken ct)
     {

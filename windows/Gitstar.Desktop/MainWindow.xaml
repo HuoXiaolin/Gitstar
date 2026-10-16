@@ -1,4 +1,4 @@
-<Window x:Class="Gitstar.Desktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:Gitstar.Desktop" Title="Gitstar" Width="1180" Height="760" MinWidth="940" MinHeight="520" WindowStartupLocation="Manual" Background="{DynamicResource Background}" Icon="Assets/Gitstar.ico" FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI" Foreground="{DynamicResource Ink}" UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display">
+﻿<Window x:Class="Gitstar.Desktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:Gitstar.Desktop" Title="Gitstar" Width="1180" Height="760" MinWidth="940" MinHeight="520" WindowStartupLocation="Manual" Background="{DynamicResource Background}" Icon="Assets/Gitstar.ico" FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI" Foreground="{DynamicResource Ink}" UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display">
   <Window.Resources>
     <ResourceDictionary>
       <ResourceDictionary.MergedDictionaries>
@@ -305,21 +305,33 @@
                         <ColumnDefinition />
                         <ColumnDefinition Width="Auto" />
                       </Grid.ColumnDefinitions>
-                      <local:OwnerAvatar Repository="{Binding Repository}" VerticalAlignment="Top" HorizontalAlignment="Left" />
-                      <StackPanel Grid.Column="1" Margin="0,0,20,0">
-                        <TextBlock Text="{Binding Title}" FontSize="18" FontWeight="SemiBold" />
-                        <WrapPanel Margin="0,2,0,6">
-                          <TextBlock Text="{Binding Repository}" Foreground="{DynamicResource Muted}" FontSize="12" VerticalAlignment="Center" />
-                          <StackPanel Orientation="Horizontal" Margin="4,0,0,0">
+                      <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                      </Grid.RowDefinitions>
+                      <local:OwnerAvatar Grid.RowSpan="3" Repository="{Binding Repository}" VerticalAlignment="Top" HorizontalAlignment="Left" />
+                      <TextBlock Grid.Column="1" Grid.ColumnSpan="2" Text="{Binding Title}" FontSize="18" FontWeight="SemiBold" />
+                      <Grid Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,2,0,6">
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition />
+                          <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <DockPanel HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0,0,12,0">
+                          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="4,0,0,0">
                             <Button Tag="{Binding}" Click="CopyProjectAddress_Click" ToolTip="复制项目地址" AutomationProperties.Name="复制项目地址" Style="{StaticResource ProjectAddressButton}">
                               <Path Data="M 5,2 L 14,2 L 14,11 M 2,5 L 11,5 L 11,14 L 2,14 Z" Stroke="{Binding Foreground,RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.5" StrokeLineJoin="Round" Stretch="Uniform" Width="13" Height="13" />
                             </Button>
                             <Button Tag="{Binding}" Click="ProjectHome_Click" ToolTip="打开项目主页" AutomationProperties.Name="打开项目主页" Style="{StaticResource ProjectAddressButton}">
                               <Path Data="M 8,2 L 14,2 L 14,8 M 14,2 L 7,9 M 5,3 L 2,3 L 2,14 L 13,14 L 13,11" Stroke="{Binding Foreground,RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Stretch="Uniform" Width="13" Height="13" />
                             </Button>
+                            <TextBlock Text="{Binding FollowSource}" Foreground="{DynamicResource Muted}" FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center" />
                           </StackPanel>
-                          <TextBlock Text="{Binding FollowSource}" Foreground="{DynamicResource Muted}" FontSize="11" Margin="10,0,0,0" VerticalAlignment="Center" />
-                        </WrapPanel>
+                          <TextBlock Text="{Binding Repository}" ToolTip="{Binding Repository}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource Muted}" FontSize="12" VerticalAlignment="Center" />
+                        </DockPanel>
+                        <local:RepositoryFacts Grid.Column="1" Repository="{Binding Repository}" Metadata="{Binding Metadata}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                      </Grid>
+                      <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,0,20,0">
                         <StackPanel Orientation="Horizontal">
                           <Border CornerRadius="4" Padding="7,3">
                             <Border.Style>
@@ -360,7 +372,7 @@
                           </TextBlock.Style>
                         </TextBlock>
                       </StackPanel>
-                      <StackPanel Grid.Column="2" VerticalAlignment="Center" Width="142">
+                      <StackPanel Grid.Row="2" Grid.Column="2" VerticalAlignment="Center" Width="142">
                         <Button Tag="{Binding}" Click="Download_Click" Background="{Binding Accent}" Foreground="White" BorderThickness="0" Margin="0,0,0,8" ToolTip="{Binding Transfer.Detail}" ToolTipService.ShowOnDisabled="True">
                           <Button.Style>
                             <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">

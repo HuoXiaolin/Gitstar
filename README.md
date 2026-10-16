@@ -1,14 +1,16 @@
-# Gitstar
+﻿# Gitstar
+
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 
 Gitstar 是一款 Windows 桌面工具，将 GitHub 收藏项目的版本动态、本机软件更新和自己的项目管理集中到一个应用中。
 
-当前版本 **1.0.0.0**，采用 WPF + .NET 10，提供顶部模块导航、彩色卡片界面、浅色与深色主题，以及免安装单文件 EXE 和安装版。设置与操作弹窗采用统一控件，设置支持左侧分区导航。
+当前版本 **2.0.0**，采用 WPF + .NET 10，提供顶部模块导航、彩色卡片界面、浅色与深色主题，以及免安装单文件 EXE 和安装版。设置与操作弹窗采用统一控件，设置支持左侧分区导航。
 
 ## 最近更新
 
 - 汇总 Star 项目的正式版本与测试版本，显示最近 7 天有版本更新的项目数量。
 - 通过左侧 GitHub Star Lists 和本地分组快速切换，支持搜索与版本类型筛选。
-- 查看作者头像、版本信息和更新日志，将 Windows、Android 等平台的安装包保存到指定文件夹。
+- 卡片显示仓库许可证和 Stars 数量，支持点击跳转；查看作者头像、版本信息和更新日志，将 Windows、Android 等平台的安装包保存到指定文件夹。
 - 添加或取消 Star，创建与调整分组，支持全选和批量管理。
 
 ## 本机可更新
@@ -51,6 +53,11 @@ Gitstar 是一款 Windows 桌面工具，将 GitHub 收藏项目的版本动态�
 - 当前提供 Windows 应用；Android 应用和 Windows ARM64 支持后续开发。
 
 应用负责下载并打开安装器，安装步骤由用户完成。
+
+## 开源许可
+
+Copyright (C) 2026 HuoXiaolin。Gitstar 采用 [GNU GPL v3.0](LICENSE)（`GPL-3.0-only`）发布。
+
 
 ## 从源码构建
 
