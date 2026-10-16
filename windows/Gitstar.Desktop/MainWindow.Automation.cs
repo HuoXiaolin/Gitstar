@@ -57,7 +57,7 @@ public partial class MainWindow
     private void AutomationConfigDialog(ManagedProject project,string? previewPath=null)
     {
         var config=SuggestedAutomation(project);var f=new Form(this,"自动发布配置",780,740);f.Label("项目："+project.FullName+"\n保存配置后，点击同步发布即可自动执行，不再要求核对文件或确认发布。");
-        if(config.ManualNotes!=null)f.Label("当前使用已保存的手动更新说明。可在“更新发布版本”中修改或切换为文件；在此更改日志文件路径也会切换为文件模式。");
+        if(config.ManualNotes!=null)f.Label(string.IsNullOrWhiteSpace(config.ManualNotes)?"当前使用默认简要说明，无需选择日志文件。可在“更新发布版本”中修改说明来源。":"当前使用已保存的手动更新说明。可在“更新发布版本”中修改或切换为文件；在此更改日志文件路径也会切换为文件模式。");
         if(config.SelectedAssets!=null)f.Label("当前按“更新发布版本”中保存的 "+config.SelectedAssets.Count+" 个文件选择上传，优先于附件匹配规则；修改其他配置会保留该选择。");
         var source=f.Text("源码目录",config.SourceFolder);var release=f.Text("发行目录",config.ReleaseFolder);var version=f.Text("版本号来源文件",config.VersionFile);f.Label("支持 Directory.Build.props / csproj、package.json、版本文本和 EXE。可填写相对源码目录的路径；留空自动识别。发行目录取当前版本文件，若有版本子目录则选择版本号最大的目录。");
         var participate=f.Check("参与“全部同步并发布最新”",config.IncludeInBatch);var advanced=f.Advanced("发布规则与更新日志");TextBox branch=null!,prefix=null!,patterns=null!,notes=null!;CheckBox replace=null!;ComboBox channel=null!;

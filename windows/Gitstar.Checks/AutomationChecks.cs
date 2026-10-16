@@ -28,7 +28,7 @@ static class AutomationChecks
             check(result.Uploaded==1&&!server.Draft&&sourceCalls==1&&server.Creates==1,"one-click flow pushes source before draft creation then uploads verifies and publishes");
             check(server.Assets.Values.Single().Name=="app.zip"&&!server.Notes.Contains("do-not-upload.txt"),"automatic publication uploads only remembered checked files even with an all-files pattern");
             check(result.Release is {Draft:false,Prerelease:false,AssetCount:1}&&result.Release.Id==result.ReleaseId&&result.Release.Body==server.Notes,"automation returns authoritative published state for immediate persistent UI update");
-            check(server.Notes.Contains("fixture commit")&&server.Notes.Contains(Sha)&&server.Notes.Contains("SHA-256"),"automatic release notes contain commit information and package digests");
+            var packageSha=Convert.ToHexString(SHA256.HashData(server.Assets.Values.Single().Data)).ToLowerInvariant();check(server.Notes.Contains(ReleaseNotes.DefaultText)&&server.Notes.Contains(packageSha)&&server.Notes.Contains("SHA-256"),"automatic release notes use simple default content and retain package digests");
             var repeat=await ProjectAutomationService.Run(config,api,Path.Combine(root,"stage"),Upload,Progress,CancellationToken.None);
             check(repeat.Unchanged==1&&server.Uploads==1&&server.Creates==1,"repeated click reuses verified same-version assets and avoids duplicate release creation");
         }
