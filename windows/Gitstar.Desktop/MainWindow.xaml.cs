@@ -118,7 +118,7 @@ public partial class MainWindow : Window
         foreach(var key in transfers.Where(p=>!p.Value.Active && !p.Value.NeedsDetection && !retained.Contains(p.Key)).Select(p=>p.Key).ToArray())transfers.Remove(key);
     }
     private void AccountLabel()=>model.Account=settings.Account.Length==0?"登录 GitHub":settings.Account;
-    private void RebuildGroups()
+    private void RebuildGroups(bool refresh=true)
     {
         var selected=(GroupSidebar.SelectedItem as GroupEntry)?.Id??"all";var allGroups=groups.Concat(settings.LocalGroups).ToList();
         var repoNames=repositories.Select(r=>r.FullName).Concat(releases.Select(r=>r.Repository)).Concat(settings.ExtraRepositories).Where(r=>!settings.HiddenRepositories.Contains(r,StringComparer.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
@@ -126,12 +126,13 @@ public partial class MainWindow : Window
         syncingGroups=true;
         try{
             model.Groups.Clear();model.Groups.Add(new("all","全部收藏","所有项目",repoNames.Count));
+            model.Groups.Add(new(SpecialFollows.GroupId,"特别关注","心形标记 · 仅保存在本机",SpecialFollows.Visible(settings,repoNames).Length));
             model.Groups.Add(new("local-following","本地关注","仅保存在本机",FollowLists.Local(repositories,settings.ExtraRepositories,settings.HiddenRepositories).Length));
             model.Groups.Add(new("ungrouped","未分组","账号收藏中未分组",repoNames.Count(r=>githubFollowed.Contains(r)&&!allGroups.Any(g=>g.Repositories.Contains(r,StringComparer.OrdinalIgnoreCase)))));
             foreach(var g in allGroups)model.Groups.Add(new(g.Source+"/"+g.Id,g.Name,g.Source,g.Repositories.Distinct(StringComparer.OrdinalIgnoreCase).Count(r=>!settings.HiddenRepositories.Contains(r,StringComparer.OrdinalIgnoreCase)&&(g.Source!="GitHub"||githubFollowed.Contains(r)))));
             GroupFilter.ItemsSource=model.Groups.Select(g=>g.Name).ToArray();
             var index=model.Groups.ToList().FindIndex(g=>g.Id==selected);GroupFilter.SelectedIndex=Math.Max(index,0);GroupSidebar.SelectedIndex=GroupFilter.SelectedIndex;
-        }finally{syncingGroups=false;}Display();
+        }finally{syncingGroups=false;}if(refresh)Display();
     }
     private void PlanUpdates()
     {
@@ -162,11 +163,12 @@ public partial class MainWindow : Window
         if(!localPage)cards=cards.Where(c=>!settings.HiddenRepositories.Contains(c.Repository,StringComparer.OrdinalIgnoreCase));
         if(!localPage&&selectedGroup=="ungrouped")cards=cards.Where(c=>githubFollowed.Contains(c.Repository)&&!allGroups.Any(g=>g.Repositories.Contains(c.Repository,StringComparer.OrdinalIgnoreCase)));
         if(!localPage&&selectedGroup=="local-following")cards=cards.Where(c=>localFollowed.Contains(c.Repository));
+        if(!localPage&&selectedGroup==SpecialFollows.GroupId)cards=cards.Where(c=>SpecialFollows.Contains(settings,c.Repository));
         if(!localPage&&allGroups.FirstOrDefault(g=>g.Source+"/"+g.Id==selectedGroup) is {} filterGroup)cards=cards.Where(c=>filterGroup.Repositories.Contains(c.Repository,StringComparer.OrdinalIgnoreCase)&&(filterGroup.Source!="GitHub"||githubFollowed.Contains(c.Repository)));
         cards=cards.Where(c=>(c.Title+" "+c.Repository+" "+c.Version).Contains(search,StringComparison.OrdinalIgnoreCase));
         if(!localPage)cards=cards.GroupBy(c=>c.Repository,StringComparer.OrdinalIgnoreCase).Select(g=>{var selectedRelease=Rules.SelectRelease(g.Select(c=>c.Release),new Binding{IncludePrerelease=channel!=0})!;return g.First(c=>ReferenceEquals(c.Release,selectedRelease));});
         var selected=model.Cards.Where(c=>c.IsSelected).Select(c=>(c.Repository,c.Release.Id)).Concat(backgroundSelections).ToHashSet();
-        model.Cards.Clear();foreach(var card in Card.Order(cards)){card.Transfer=TransferFor(card.Release,localPage);card.IsSelected=model.SelectionMode&&selected.Contains((card.Repository,card.Release.Id));model.Cards.Add(card);}
+        model.Cards.Clear();foreach(var card in Card.Order(cards)){card.Transfer=TransferFor(card.Release,localPage);card.IsSpecial=SpecialFollows.Contains(settings,card.Repository);card.IsSelected=model.SelectionMode&&selected.Contains((card.Repository,card.Release.Id));model.Cards.Add(card);}
         backgroundSelections.Clear();
         var now=DateTimeOffset.UtcNow;
         model.CountCaption=localPage?"本机待更新软件":"最近 7 天更新";
@@ -174,6 +176,7 @@ public partial class MainWindow : Window
         CountPanel.Background=(Brush)Resources["AccentSoft"];
         model.Empty=localPage?"没有已确认的软件更新":"还没有匹配的版本";
         model.Hint=localPage?$"已检测 {installed.Count} 个软件，已关联 {settings.Bindings.Count} 个。点击「自动匹配 / 批量关联」集中确认软件仓库；未匹配项仍可手动管理。":"登录 GitHub 同步收藏，或添加仓库；也可调整左侧分组、搜索和版本通道。";
+        if(!localPage&&selectedGroup==SpecialFollows.GroupId){model.Empty="特别关注中没有匹配的项目";model.Hint="点击项目卡片右上角的心形加入特别关注，也可调整搜索和版本通道。";}
         EmptyPanel.Visibility=model.Cards.Count==0?Visibility.Visible:Visibility.Collapsed;
     }
     private void Filter_Changed(object sender,RoutedEventArgs e){if(syncingGroups)return;if(GroupSidebar!=null && GroupFilter!=null){syncingGroups=true;try{GroupSidebar.SelectedIndex=GroupFilter.SelectedIndex;}finally{syncingGroups=false;}}Display();}
@@ -546,6 +549,7 @@ public partial class MainWindow : Window
             if(!local){groups=[new("fixture-tools","效率工具","GitHub",["example/editor","example/sync"]),new("fixture-android","Android","GitHub",["example/android"])];settings.LocalGroups=[new("fixture-local","我的常用","本地",["example/editor"])];RebuildGroups();}
             ChannelFilter.SelectedIndex=1;Page(local);
             if(firstGroup&&!local)GroupSidebar.SelectedIndex=model.Groups.ToList().FindIndex(g=>g.Id=="GitHub/fixture-tools");
+            if(Environment.GetCommandLineArgs().Contains("--special-follows"))SpecialFollowsSmoke(path,local);
             if(Environment.GetCommandLineArgs().Contains("--repository-facts")){UpdateLayout();IEnumerable<RepositoryFacts> Facts(DependencyObject node){if(node is RepositoryFacts facts)yield return facts;for(var i=0;i<VisualTreeHelper.GetChildrenCount(node);i++)foreach(var found in Facts(VisualTreeHelper.GetChild(node,i)))yield return found;}var visible=Facts(this).ToArray();if(visible.Length==0||visible.Any(row=>row.Metadata?.Stars!=12345))throw new IOException("Card metadata binding failed");bool Aligned(RepositoryFacts facts){var header=(Grid)facts.Parent;var card=(Grid)header.Parent;var action=card.Children.OfType<StackPanel>().First(panel=>Grid.GetColumn(panel)==2);var button=action.Children.OfType<Button>().First();var address=header.Children.OfType<DockPanel>().Single();var a=facts.TranslatePoint(new Point(),card);var b=button.TranslatePoint(new Point(),card);var c=address.TranslatePoint(new Point(),card);return Math.Abs(a.X+facts.ActualWidth-b.X-button.ActualWidth)<1.1&&Math.Abs(a.Y+facts.ActualHeight/2-c.Y-address.ActualHeight/2)<1.1&&facts.ActualHeight<=24.1;}var aligned=visible.All(Aligned);if(!aligned)throw new IOException("Repository facts must share the address row and align with the download button");File.WriteAllText(Path.ChangeExtension(path,".repository-facts.json"),JsonSerializer.Serialize(new{Local=local,SameRowAndRightAligned=aligned,Cards=visible.Length,AllBound=visible.All(row=>row.Metadata?.License=="GPL-3.0"),Labels=visible[0].Children.OfType<Button>().Select(button=>(button.Content as TextBlock)?.Text).ToArray()}));}
             if(batchPreview){model.SelectionMode=true;model.Cards[0].IsSelected=true;}
             if(progressPreview){model.Cards[0].Transfer.Stage("下载中 0%",false);model.Cards[0].Transfer.Downloaded(27000000,50000000);if(model.Cards.Count>1)model.Cards[1].Transfer.Stage("安装器运行中");var before=model.Cards[0].Transfer;Page(!local);Page(local);File.WriteAllText(Path.ChangeExtension(path,".progress.json"),JsonSerializer.Serialize(new{ProgressPreserved=ReferenceEquals(before,model.Cards[0].Transfer),Label=model.Cards[0].Transfer.Label,CountCaption=model.CountCaption,Count=model.Count},new JsonSerializerOptions{WriteIndented=true}));}

@@ -68,6 +68,15 @@
       <SolidColorBrush x:Key="StableInk" Color="#267554" />
       <SolidColorBrush x:Key="BetaSoft" Color="#FCF1DB" />
       <SolidColorBrush x:Key="BetaInk" Color="#8E6429" />
+      <SolidColorBrush x:Key="HeartInk" Color="#E5485D" />
+      <Style x:Key="SpecialFollowButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+        <Setter Property="Width" Value="28"/><Setter Property="Height" Value="28"/><Setter Property="MinHeight" Value="28"/><Setter Property="Padding" Value="5"/><Setter Property="Margin" Value="0,-3,0,0"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Foreground" Value="{DynamicResource Muted}"/>
+        <Setter Property="ToolTip" Value="{Binding SpecialFollowHint}"/><Setter Property="AutomationProperties.Name" Value="{Binding SpecialFollowHint}"/>
+        <Style.Triggers>
+          <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{DynamicResource HeartInk}"/><Setter Property="Background" Value="{DynamicResource AccentSoft}"/></Trigger>
+          <DataTrigger Binding="{Binding IsSpecial}" Value="True"><Setter Property="Foreground" Value="{DynamicResource HeartInk}"/></DataTrigger>
+        </Style.Triggers>
+      </Style>
       <Style x:Key="ProjectAddressButton" TargetType="Button" BasedOn="{StaticResource TertiaryButton}">
         <Setter Property="Width" Value="24"/><Setter Property="Height" Value="24"/><Setter Property="MinHeight" Value="24"/><Setter Property="Padding" Value="5"/><Setter Property="Margin" Value="1,0,0,0"/><Setter Property="VerticalAlignment" Value="Center"/>
         <Style.Triggers>
@@ -311,7 +320,12 @@
                         <RowDefinition Height="Auto" />
                       </Grid.RowDefinitions>
                       <local:OwnerAvatar Grid.RowSpan="3" Repository="{Binding Repository}" VerticalAlignment="Top" HorizontalAlignment="Left" />
-                      <TextBlock Grid.Column="1" Grid.ColumnSpan="2" Text="{Binding Title}" FontSize="18" FontWeight="SemiBold" />
+                      <TextBlock Grid.Column="1" Grid.ColumnSpan="2" Text="{Binding Title}" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,0,38,0" />
+                      <Button Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Top" Tag="{Binding}" Click="SpecialFollow_Click" Style="{StaticResource SpecialFollowButton}" AutomationProperties.AutomationId="SpecialFollowButton">
+                        <Path Data="M12,21 C10,19 2,13 2,7.5 C2,2 9,0 12,5 C15,0 22,2 22,7.5 C22,13 14,19 12,21 Z" Width="17" Height="17" Stretch="Uniform" Stroke="{Binding Foreground,RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6" StrokeLineJoin="Round">
+                          <Path.Style><Style TargetType="Path"><Setter Property="Fill" Value="Transparent"/><Style.Triggers><DataTrigger Binding="{Binding IsSpecial}" Value="True"><Setter Property="Fill" Value="{Binding Foreground,RelativeSource={RelativeSource AncestorType=Button}}"/></DataTrigger></Style.Triggers></Style></Path.Style>
+                        </Path>
+                      </Button>
                       <Grid Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,2,0,6">
                         <Grid.ColumnDefinitions>
                           <ColumnDefinition />

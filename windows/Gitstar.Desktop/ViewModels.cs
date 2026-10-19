@@ -10,6 +10,9 @@ public class Observable : INotifyPropertyChanged
 }
 public sealed class Card : Observable
 {
+    private bool special;
+    public bool IsSpecial {get=>special;set{if(special==value)return;Set(ref special,value);Changed(nameof(SpecialFollowHint));}}
+    public string SpecialFollowHint=>IsSpecial?"移出特别关注":"加入特别关注";
     public RepositoryMetadata Metadata {get;init;}=new();
     private bool selected;
     public bool IsSelected {get=>selected;set=>Set(ref selected,value);}

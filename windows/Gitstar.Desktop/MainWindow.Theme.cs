@@ -24,6 +24,7 @@ public partial class MainWindow
         var keys=new[]{"Background","Surface","Ink","Muted","Edge","Panel"};for(var i=0;i<keys.Length;i++)Resources[keys[i]]=UiBrush(palette[i]);
         Resources["StableSoft"]=UiBrush(settings.Dark?"#254137":"#E5F3EC");Resources["StableInk"]=UiBrush(settings.Dark?"#8ED7B6":"#267554");Resources["BetaSoft"]=UiBrush(settings.Dark?"#493A25":"#FCF1DB");Resources["BetaInk"]=UiBrush(settings.Dark?"#EBC388":"#8E6429");
         Resources["DangerInk"]=UiBrush(settings.Dark?"#FFADB4":"#B13E48");
+        Resources["HeartInk"]=UiBrush(settings.Dark?"#FF6B7C":"#E5485D");
         SetPageAccent(projectsPage?2:localPage?1:0);
     }
 }
