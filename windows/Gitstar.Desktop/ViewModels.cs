@@ -34,7 +34,7 @@ public sealed class Card : Observable
     public static IOrderedEnumerable<Card> Order(IEnumerable<Card> cards)=>cards.OrderByDescending(c=>c.SortTime).ThenByDescending(c=>c.Release.Published).ThenBy(c=>c.Repository,StringComparer.OrdinalIgnoreCase);
     private string? summary;
     public string Summary => summary ??= ReleasePreview.Create(Release.Body,Release.Tag);
-    public string Action => Update==null ? "保存安装包" : Update.Asset?.Name.EndsWith(".zip",StringComparison.OrdinalIgnoreCase)==true ? "获取便携新版" : "下载并安装";
+    public string Action => Update==null ? "保存安装包" : Update.App.Portable?"下载便携新版":Update.Asset?.Name.EndsWith(".zip",StringComparison.OrdinalIgnoreCase)==true ? "获取便携新版" : "下载并安装";
     public string Accent => Update!=null ? "#168673" : "#386AC6";
 }
 public sealed class TransferState : Observable

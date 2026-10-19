@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using Microsoft.Win32;
@@ -32,7 +32,7 @@ public partial class MainWindow
             var now=DateTimeOffset.UtcNow;var query=search.Text.Trim();
             visible=settings.Bindings.Where(b=>((InstalledVersion.Find(installed,b.AppId)?.Name??"")+" "+b.Repository+" "+b.AppId).Contains(query,StringComparison.OrdinalIgnoreCase)).Where(b=>filter.SelectedIndex switch{1=>!ReminderRules.Restricted(b,now),2=>b.Disabled,3=>b.PauseUntil>now,4=>b.IgnoredTag.Length>0,_=>true}).OrderBy(b=>InstalledVersion.Find(installed,b.AppId)?.Name??b.Repository,StringComparer.OrdinalIgnoreCase).ToArray();
             selected.IntersectWith(visible);list.Children.Clear();
-            if(visible.Length==0)list.Children.Add(ProjectText(settings.Bindings.Count==0?"尚未关联软件，可点击“添加 / 自动匹配”。":"没有符合条件的软件，请调整搜索或筛选。",13,true));
+            if(visible.Length==0)list.Children.Add(ProjectText(settings.Bindings.Count==0?"尚未关联软件，可点击“添加软件”。":"没有符合条件的软件，请调整搜索或筛选。",13,true));
             foreach(var binding in visible){
                 var app=InstalledVersion.Find(installed,binding.AppId);var body=new StackPanel();var heading=new Grid();heading.ColumnDefinitions.Add(new(){Width=GridLength.Auto});heading.ColumnDefinitions.Add(new());heading.ColumnDefinitions.Add(new(){Width=GridLength.Auto});
                 var check=new CheckBox{IsChecked=selected.Contains(binding),VerticalAlignment=VerticalAlignment.Top,Margin=new Thickness(0,4,10,0)};System.Windows.Automation.AutomationProperties.SetName(check,"选择 "+(app?.Name??binding.Repository));check.Checked+=(_,_)=>{selected.Add(binding);SelectionState();};check.Unchecked+=(_,_)=>{selected.Remove(binding);SelectionState();};heading.Children.Add(check);
@@ -47,7 +47,7 @@ public partial class MainWindow
             SelectionState();
         }
         apply=f.Action("应用到所选",()=>{if(action.SelectedIndex>0)Apply(visible.Where(selected.Contains).ToArray(),(BindingAction)(action.SelectedIndex-1));return Task.CompletedTask;});
-        f.Action("添加 / 自动匹配",()=>{f.Close();AutoBindingDialog();return Task.CompletedTask;});f.Action("关闭",()=>{f.Close();return Task.CompletedTask;});
+        f.Action("添加软件",()=>{BindingDialog();Render();return Task.CompletedTask;});f.Action("关闭",()=>{f.Close();return Task.CompletedTask;});
         selectAll.Click+=(_,_)=>{if(selecting)return;if(selectAll.IsChecked==true)selected.UnionWith(visible);else selected.ExceptWith(visible);Render();};
         search.TextChanged+=(_,_)=>{selected.Clear();Render();};filter.SelectionChanged+=(_,_)=>{selected.Clear();Render();};action.SelectionChanged+=(_,_)=>SelectionState();Render();
         if(previewPath!=null){if(Environment.GetCommandLineArgs().Contains("--software-multi")){selectAll.IsChecked=true;selectAll.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));action.SelectedIndex=3;SelectionState();var before=visible.Length;apply.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));var stopped=visible.All(b=>b.Disabled);action.SelectedIndex=4;apply.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));var restored=visible.All(b=>!ReminderRules.Restricted(b,DateTimeOffset.UtcNow));filter.SelectedIndex=2;var selectionCleared=selected.Count==0&&apply.IsEnabled==false;filter.SelectedIndex=0;selected.UnionWith(visible);Render();File.WriteAllText(Path.ChangeExtension(previewPath,".software-multi.json"),JsonSerializer.Serialize(new{DefaultShowsAll=before==settings.Bindings.Count,SelectAllAndBatchStop=stopped,BatchRestore=restored,FilterClearsHiddenSelection=selectionCleared}));if(!stopped||!restored||!selectionCleared)throw new IOException("Software multiselect regression");}f.RenderPreview(previewPath);}f.ShowDialog();

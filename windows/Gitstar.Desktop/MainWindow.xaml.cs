@@ -291,7 +291,7 @@ public partial class MainWindow : Window
         if(card.Transfer.Active)return;
         if(quitting)return;
         if(card.Update!=null && !installedFresh){await ScanMatchedAsync();PlanUpdates();Display();if(!updates.Any(u=>u.App.Id==card.Update.App.Id && u.Release.Id==card.Release.Id)){model.Status="已复检当前版本，此软件已不需要该更新。";return;}}
-        if(card.Transfer.NeedsDetection){SetInstalled(WindowsServices.Scan(settings.PortableApps,settings.Bindings));PlanUpdates();card.Transfer.Finish("");Display();model.Status="已重新检测实际版本；未完成的更新仍保留在列表。";return;}
+        if(card.Transfer.NeedsDetection){await ScanMatchedAsync();PlanUpdates();card.Transfer.Finish("");Display();model.Status="已重新检测实际版本；未完成的更新仍保留在列表。";return;}
         var selection=await ChoosePackage(card);if(selection==null)return;var release=selection.Release;var install=card.Update!=null;
         var downloadTarget=PackageTarget(release,selection.Asset,selection.Root);card.Transfer.Stage("等待下载任务");
         await Execute("下载",card.Repository+" · "+selection.Asset.Name,async ct=>{
@@ -311,8 +311,11 @@ public partial class MainWindow : Window
                 if(!install){state.Finish("已保存安装包");state.Detail=path;return;}
                 if(path.EndsWith(".exe",StringComparison.OrdinalIgnoreCase)){state.Stage("检测安装包架构");var platform=await Task.Run(()=>InstallerCompatibility.InspectExe(path,Environment.Is64BitOperatingSystem),ct);if(!platform.Compatible){state.Finish("安装包架构不兼容");state.Detail=platform.Name+" 与当前 Windows 不兼容；安装包已保存，未启动安装器。";throw new IOException(state.Detail);}state.Detail=platform.Name+" · 与当前 Windows 兼容";}
                 if(path.EndsWith(".msi",StringComparison.OrdinalIgnoreCase)){state.Stage("检测安装包架构");var platform=await Task.Run(()=>WindowsServices.MsiPlatform(path),ct);if(!Rules.IsCompatibleMsiTemplate(platform,Environment.Is64BitOperatingSystem)){state.Finish("安装包架构不兼容");state.Detail="MSI 平台："+platform+"；安装包已保存，未启动安装器。";throw new IOException(state.Detail);}}
-                if(path.EndsWith(".zip",StringComparison.OrdinalIgnoreCase)) {
-                    state.Stage("解压中");var dir=await Task.Run(()=>WindowsServices.ExtractPortable(path),ct);WindowsServices.Open(dir);state.Finish("便携新版已就绪");state.Detail=dir;model.Status="便携新版已解压到新目录；迁移配置后请重新关联，不会覆盖旧目录。";
+                if(PortableUpdateRules.ReplaceFiles(card.Update!.App,path)) {
+                    string? extracted=null;
+                    if(path.EndsWith(".zip",StringComparison.OrdinalIgnoreCase)){state.Stage("解压中");extracted=await Task.Run(()=>WindowsServices.ExtractPortable(path),ct);}
+                    state.Finish("替换后核对版本",true);state.Detail=extracted??path;model.Status="便携新版已下载，请关闭旧版后替换程序文件；完成后核对版本。";
+                    await PortableUpdateDialog(card,path,extracted,ct:ct);
                 }else{
                     state.Stage("等待安装确认");
                     if(DialogMessage.Show(this,"安装包已校验。现在打开安装器？由你完成安装步骤，退出后自动检测实际版本。","Gitstar",MessageBoxButton.YesNo)!=MessageBoxResult.Yes){state.Finish("安装包已下载");state.Detail=path;return;}
@@ -395,27 +398,6 @@ public partial class MainWindow : Window
             File.WriteAllText(Path.ChangeExtension(previewPath,".interaction.json"),JsonSerializer.Serialize(new{EditableRepositoryRoundtrip=edited,CheckBoxRoundtrip=checkEdited},new JsonSerializerOptions{WriteIndented=true}));
             var root=(FrameworkElement)f.Content;var bitmap=new System.Windows.Media.Imaging.RenderTargetBitmap((int)root.ActualWidth,(int)root.ActualHeight,96,96,PixelFormats.Pbgra32);bitmap.Render(root);var encoder=new System.Windows.Media.Imaging.PngBitmapEncoder();encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));using(var stream=File.Create(previewPath))encoder.Save(stream);f.Close();},DispatcherPriority.ApplicationIdle);
         f.ShowDialog();
-    }
-    private void BindingDialog()
-    {
-        SetInstalled(WindowsServices.Scan(settings.PortableApps,settings.Bindings));var f=new Form(this,"检测与关联本机软件",820,730);
-        f.Label("读取软件登记信息并核对主程序版本；无法唯一识别时可指定主程序 EXE。仓库关联由你确认，避免同名误识别。选择已有项可修改、暂停或恢复检查。");
-        var app=f.Select("检测到的软件",installed.Select(a=>$"{a.Name}  ·  {a.Version}"));
-        var portable=f.Check("手动添加便携软件");var name=f.Text("便携软件名称");var version=f.Text("便携软件当前版本");var location=f.Text("便携软件所在文件夹");
-        var mainProgram=f.Text("主程序 EXE 路径（可留空自动识别；不要选择卸载器/更新器）");f.Action("选择主程序",()=>{var picker=new OpenFileDialog{Filter="应用程序|*.exe"};if(picker.ShowDialog(f)==true)mainProgram.Text=picker.FileName;return Task.CompletedTask;});
-        var repo=f.Text("关联 GitHub 仓库 owner/repo");var prefix=f.Text("版本标签前缀（多产品仓库，例如 desktop-v；留空使用完整 tag）");var pattern=f.Text("安装包文件名包含（可留空；多包时下载前手动选）");
-        var beta=f.Check("包含测试版");var disabled=f.Check("停止自动检查");var ignored=f.Text("忽略的版本 tag（清空可恢复）");var pause=f.Text("暂停至 yyyy-MM-dd（清空可恢复）");
-        void Fill(){if(app.SelectedIndex<0)return;var b=settings.Bindings.FirstOrDefault(b=>(b.AppId==installed[app.SelectedIndex].Id || installed[app.SelectedIndex].AliasIds?.Contains(b.AppId)==true));mainProgram.Text=b?.ExecutablePath??"";repo.Text=b?.Repository??"";prefix.Text=b?.TagPrefix??"";pattern.Text=b?.AssetPattern??"";beta.IsChecked=b?.IncludePrerelease??false;disabled.IsChecked=b?.Disabled??false;ignored.Text=b?.IgnoredTag??"";pause.Text=b?.PauseUntil?.AddDays(-1).ToLocalTime().ToString("yyyy-MM-dd")??"";}
-        app.SelectionChanged+=(_,_)=>Fill();Fill();
-        f.Action("保存关联",async()=>{
-            if(mainProgram.Text.Trim().Length>0 && (!File.Exists(mainProgram.Text.Trim()) || !mainProgram.Text.Trim().EndsWith(".exe",StringComparison.OrdinalIgnoreCase)))throw new ArgumentException("请选择存在的主程序 EXE。");var r=Rules.RepositoryName(repo.Text);await api.Repo(r);
-            InstalledApp a;
-            if(portable.IsChecked==true){if(name.Text.Trim().Length==0||!Directory.Exists(location.Text)||Rules.CompareVersions(version.Text,version.Text)==null)throw new ArgumentException("请填写名称、可比较版本和存在的目录。");a=new("portable/"+Guid.NewGuid().ToString("N"),name.Text.Trim(),version.Text.Trim(),Path.GetFullPath(location.Text),true);settings.PortableApps.Add(a);}
-            else {if(app.SelectedIndex<0)throw new ArgumentException("请先选择软件。");a=installed[app.SelectedIndex];}
-            var b=settings.Bindings.FirstOrDefault(b=>b.AppId==a.Id || a.AliasIds?.Contains(b.AppId)==true);if(b==null){b=new(){AppId=a.Id};settings.Bindings.Add(b);}if(mainProgram.Text.Trim().Length>0 && (!File.Exists(mainProgram.Text.Trim()) || !mainProgram.Text.Trim().EndsWith(".exe",StringComparison.OrdinalIgnoreCase)))throw new ArgumentException("请选择存在的主程序 EXE。");b.ExecutablePath=mainProgram.Text.Trim().Length>0?Path.GetFullPath(mainProgram.Text.Trim()):"";b.Repository=r;b.TagPrefix=prefix.Text;b.AssetPattern=pattern.Text;b.IncludePrerelease=beta.IsChecked==true;b.Disabled=disabled.IsChecked==true;b.IgnoredTag=ignored.Text;b.PauseUntil=pause.Text.Trim().Length==0?null:DateTimeOffset.Parse(pause.Text).AddDays(1);
-            Save();f.Close();await RefreshAsync();
-        },true);
-        f.Action("移除关联",()=>{if(app.SelectedIndex>=0){var id=installed[app.SelectedIndex].Id;settings.Bindings.RemoveAll(b=>b.AppId==id);Save();PlanUpdates();Display();f.Close();}return Task.CompletedTask;});f.ShowDialog();
     }
     private void Settings_Click(object sender,RoutedEventArgs e)=>SettingsDialog();
     private void SettingsDialog(string? previewPath=null)
@@ -548,6 +530,8 @@ public partial class MainWindow : Window
     public async void RenderSmoke(string path,bool cards=false,bool local=false,bool dark=false,bool firstGroup=false,bool matching=false,bool settingsPreview=false,bool avatars=false,bool progressPreview=false,bool groupPreview=false,bool addPreview=false,bool batchPreview=false,bool tasksPreview=false,bool projectsPreview=false,bool sourcePreview=false,bool createPreview=false,bool projectSettingsPreview=false,bool workspacePreview=false,bool publishPreview=false,bool automationPreview=false)
     {
         settings.Dark=dark;ApplyTheme();
+        if(Environment.GetCommandLineArgs().Contains("--portable-update")){await PortableUpdateSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
+        if(Environment.GetCommandLineArgs().Contains("--manual-software")){BindingDialog(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--source-sync")){SourceSyncSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--follow-management")){await FollowManagementSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--reminders")){ReminderSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
