@@ -12,7 +12,7 @@ foreach($candidatePath in @($projectPath,$destination)){
     while($cursor){if(Test-Path -LiteralPath $cursor){if((Get-Item -LiteralPath $cursor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){throw "Source export path contains a link: $cursor"}};$cursor=Split-Path $cursor -Parent}
 }
 $excluded='(^|\\)(bin|obj|\.git|\.vs|node_modules|artifacts|outputs|dist|\.gradle|\.gradle-local)(\\|$)'
-$files=@('README.md','LICENSE','.gitignore','pantone-line.svg','docs\Gitstar使用说明.md')
+$files=@('README.md','CHANGELOG.md','CHANGELOG_HISTORY.md','LICENSE','.gitignore','pantone-line.svg','docs\Gitstar使用说明.md','docs\实现与验证.md')
 $windowsRoot=Join-Path $projectPath 'windows'
 $pending=[Collections.Generic.Stack[string]]::new();$pending.Push($windowsRoot)
 $screenshotsRoot=Join-Path $projectPath 'docs\screenshots'

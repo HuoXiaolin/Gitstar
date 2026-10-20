@@ -207,6 +207,7 @@ ReleaseNotesChecks.Run(Check,root);
 RepositoryMetadataChecks.Run(Check);
 SoftwareEntryChecks.Run(Check,root);
 SpecialFollowChecks.Run(Check,root);
+ActivationChecks.Run(Check);
 PortableReplacementChecks.Run(Check,root);
 await ReleaseStateChecks.Run(Check,root);
 await SelfUpdateChecks.Run(Check);

@@ -1,20 +1,44 @@
 ﻿param([string]$Dotnet='D:\Agant\toolchain\dotnet\dotnet.exe',[string]$Inno=(Join-Path $PSScriptRoot '..\build-tools\InnoSetup\ISCC.exe'),[string]$OutputRoot='D:\Agant\Github_Releases\Gitstar',[string]$SourceRoot='D:\Agant\Github_Source')
 $ErrorActionPreference='Stop'
+if(-not $PSBoundParameters.ContainsKey('Dotnet')){$dedicated='D:\Agant\toolchain\dotnet_10.0.401_Gitstar\dotnet.exe';if(Test-Path -LiteralPath $dedicated){$Dotnet=$dedicated}}
 $projectRoot=Split-Path $PSScriptRoot -Parent
-[xml]$versionProps=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Directory.Build.props')
-$version=$versionProps.Project.PropertyGroup.Version
+. (Join-Path $PSScriptRoot 'release-version.ps1')
+$lockDirectory=Join-Path $projectRoot 'artifacts'
+New-Item -ItemType Directory -Path $lockDirectory -Force | Out-Null
+try{$buildLock=[IO.File]::Open((Join-Path $lockDirectory 'installer-build.lock'),[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)}
+catch{throw 'Another installer build is already running for this project'}
+try{
+$versionPlan=Get-InstallerVersionPlan -PropsPath (Join-Path $PSScriptRoot 'Directory.Build.props') -BuildInstaller (Test-Path -LiteralPath $Inno -PathType Leaf)
+$version=$versionPlan.Version
+$versionArguments=@("-p:Version=$version","-p:AssemblyVersion=$($versionPlan.NumericVersion)","-p:FileVersion=$($versionPlan.NumericVersion)","-p:InformationalVersion=$version")
+Write-Output "Installer version: $version (Beijing day $($versionPlan.BuildDate); incremented=$($versionPlan.Incremented))"
 $publishPath=Join-Path $projectRoot 'artifacts\singlefile-publish'
 $outputRoot=[IO.Path]::GetFullPath($OutputRoot)
 $releasePath=$outputRoot
 $buildPath=Join-Path $projectRoot 'artifacts\release-build\'
-& $Dotnet build (Join-Path $PSScriptRoot 'Gitstar.Desktop\Gitstar.Desktop.csproj') -c Release "-p:BaseOutputPath=$buildPath" --ignore-failed-sources
+& $Dotnet build (Join-Path $PSScriptRoot 'Gitstar.Desktop\Gitstar.Desktop.csproj') -c Release "-p:BaseOutputPath=$buildPath" --ignore-failed-sources @versionArguments
 if($LASTEXITCODE -ne 0){throw 'Build failed'}
-& $Dotnet publish (Join-Path $PSScriptRoot 'Gitstar.Desktop\Gitstar.Desktop.csproj') -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:EnableSingleFileAnalyzer=false -p:DebugType=None -p:DebugSymbols=false "-p:BaseOutputPath=$buildPath" -o $publishPath
+& $Dotnet publish (Join-Path $PSScriptRoot 'Gitstar.Desktop\Gitstar.Desktop.csproj') -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:EnableSingleFileAnalyzer=false -p:DebugType=None -p:DebugSymbols=false "-p:BaseOutputPath=$buildPath" -o $publishPath @versionArguments
 if($LASTEXITCODE -ne 0){throw 'Publish failed'}
 Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\Gitstar使用说明.md') -Destination (Join-Path $publishPath '使用说明.md')
+if($versionPlan.BuildInstaller){
+  $stagedGuide=Join-Path $publishPath '使用说明.md'
+  Write-ReleaseText -Path $stagedGuide -Text (Set-ReleaseDocumentVersion -Text ([IO.File]::ReadAllText($stagedGuide)) -Kind guide -Version $version)
+}
 Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination (Join-Path $publishPath 'LICENSE')
 New-Item -ItemType Directory -Force -Path $releasePath | Out-Null
 $releaseNames=@('Gitstar.exe','使用说明.md','LICENSE')
+$installerBuilt=$false
+if($versionPlan.BuildInstaller){
+  # Compile in staging before replacing the official release files.
+  $stagedInstaller=Join-Path $publishPath 'Gitstar-setup.exe'
+  if(Test-Path -LiteralPath $stagedInstaller){Remove-Item -LiteralPath $stagedInstaller -Force}
+  & $Inno "/DReleaseRoot=$publishPath" "/DAppVersion=$version" (Join-Path $PSScriptRoot 'installer\Gitstar.iss')
+  if($LASTEXITCODE -ne 0 -or -not(Test-Path -LiteralPath $stagedInstaller -PathType Leaf)){throw 'Installer build failed'}
+  $installerBuilt=$true
+  $releaseNames+='Gitstar-setup.exe'
+}
+else {Write-Warning 'ISCC unavailable; portable EXE is built, installer script retained.'}
 foreach($releaseName in $releaseNames){
   $releaseFile=Join-Path $releasePath $releaseName
   try{Copy-Item -LiteralPath (Join-Path $publishPath $releaseName) -Destination $releaseFile -Force -ErrorAction Stop}
@@ -29,9 +53,6 @@ foreach($releaseName in $releaseNames){
     Write-Output 'Running app preserved; restart to load the updated executable.'
   }
 }
-$installerBuilt=$false
-if(Test-Path -LiteralPath $Inno){& $Inno "/DReleaseRoot=$outputRoot" "/DAppVersion=$version" (Join-Path $PSScriptRoot 'installer\Gitstar.iss');if($LASTEXITCODE -ne 0){throw 'Installer build failed'};$installerBuilt=$true}
-else {Write-Warning 'ISCC unavailable; portable EXE is built, installer script retained.'}
 $outputBoundary=[IO.Path]::GetFullPath($outputRoot).TrimEnd('\')+'\'
 $obsoleteZip=[IO.Path]::GetFullPath((Join-Path $outputRoot 'Gitstar-win-x64.zip'))
 if(Test-Path -LiteralPath $obsoleteZip){
@@ -68,5 +89,7 @@ foreach($oldRelease in Get-ChildItem -LiteralPath $outputRoot){
 $hashFiles=@((Join-Path $outputRoot 'Gitstar.exe'),(Join-Path $outputRoot '使用说明.md'),(Join-Path $outputRoot 'LICENSE'))
 if($installerBuilt){$hashFiles+=(Join-Path $outputRoot 'Gitstar-setup.exe')}
 Get-Item -LiteralPath $hashFiles | ForEach-Object {$releaseHash=Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256; "$($releaseHash.Hash)  $($_.Name)"} | Set-Content (Join-Path $outputRoot 'SHA256SUMS.txt') -Encoding UTF8
+if($installerBuilt){Complete-InstallerVersion -Plan $versionPlan -ProjectRoot $projectRoot}
 & (Join-Path $PSScriptRoot 'export-source.ps1') -ProjectRoot $projectRoot -SourceRoot $SourceRoot
 Get-ChildItem -LiteralPath $outputRoot -File | Select-Object Name,Length
+}finally{$buildLock.Dispose()}

@@ -13,7 +13,7 @@ public partial class MainWindow : Window
 {
     protected override void OnSourceInitialized(EventArgs e)
     {
-        base.OnSourceInitialized(e);WindowsServices.FitWindow(this,true);
+        base.OnSourceInitialized(e);WindowsServices.FitWindow(this,true);ConfigureNativeActivation();
     }
     private readonly LocalStore store;
     private Settings settings;
@@ -523,7 +523,6 @@ public partial class MainWindow : Window
         if(previewPath!=null&&Environment.GetCommandLineArgs().Contains("--release-selection"))ReleaseFileSelectionSmoke(project!,assets,previewPath);
         publishButton=f.Action("更新",()=>Publish(true),true);publishButton.IsEnabled=!reading&&assets.SelectedPaths.Length>0;var saveDraft=f.Action("保存为草稿",()=>Publish(false));f.Buttons.Children.Remove(saveDraft);advanced.Children.Add(saveDraft);if(previewPath!=null){versionHint.Text="应用文件版本：1.0.0.0";File.WriteAllText(Path.ChangeExtension(previewPath,".version.json"),JsonSerializer.Serialize(new{Tag=tag.Text,Directory=releaseFolder.Text,Editable=!tag.IsReadOnly,DraftId=id.Text}));f.RenderPreview(previewPath);}f.ShowDialog();
     }
-    public void Reopen(){ShowInTaskbar=true;Show();WindowState=WindowState.Normal;ResumeBackgroundViews();Activate();}
     private void OnClosing(object? sender,CancelEventArgs e) {if(exit)return;e.Cancel=true;Hide();model.Status="Gitstar 已收起到托盘，后台任务继续运行。";}
     public async void RequestExit()
     {
@@ -550,6 +549,7 @@ public partial class MainWindow : Window
             ChannelFilter.SelectedIndex=1;Page(local);
             if(firstGroup&&!local)GroupSidebar.SelectedIndex=model.Groups.ToList().FindIndex(g=>g.Id=="GitHub/fixture-tools");
             if(Environment.GetCommandLineArgs().Contains("--special-follows"))SpecialFollowsSmoke(path,local);
+            if(Environment.GetCommandLineArgs().Contains("--external-activation"))await ExternalActivationSmoke(path);
             if(Environment.GetCommandLineArgs().Contains("--repository-facts")){UpdateLayout();IEnumerable<RepositoryFacts> Facts(DependencyObject node){if(node is RepositoryFacts facts)yield return facts;for(var i=0;i<VisualTreeHelper.GetChildrenCount(node);i++)foreach(var found in Facts(VisualTreeHelper.GetChild(node,i)))yield return found;}var visible=Facts(this).ToArray();if(visible.Length==0||visible.Any(row=>row.Metadata?.Stars!=12345))throw new IOException("Card metadata binding failed");bool Aligned(RepositoryFacts facts){var header=(Grid)facts.Parent;var card=(Grid)header.Parent;var action=card.Children.OfType<StackPanel>().First(panel=>Grid.GetColumn(panel)==2);var button=action.Children.OfType<Button>().First();var address=header.Children.OfType<DockPanel>().Single();var a=facts.TranslatePoint(new Point(),card);var b=button.TranslatePoint(new Point(),card);var c=address.TranslatePoint(new Point(),card);return Math.Abs(a.X+facts.ActualWidth-b.X-button.ActualWidth)<1.1&&Math.Abs(a.Y+facts.ActualHeight/2-c.Y-address.ActualHeight/2)<1.1&&facts.ActualHeight<=24.1;}var aligned=visible.All(Aligned);if(!aligned)throw new IOException("Repository facts must share the address row and align with the download button");File.WriteAllText(Path.ChangeExtension(path,".repository-facts.json"),JsonSerializer.Serialize(new{Local=local,SameRowAndRightAligned=aligned,Cards=visible.Length,AllBound=visible.All(row=>row.Metadata?.License=="GPL-3.0"),Labels=visible[0].Children.OfType<Button>().Select(button=>(button.Content as TextBlock)?.Text).ToArray()}));}
             if(batchPreview){model.SelectionMode=true;model.Cards[0].IsSelected=true;}
             if(progressPreview){model.Cards[0].Transfer.Stage("下载中 0%",false);model.Cards[0].Transfer.Downloaded(27000000,50000000);if(model.Cards.Count>1)model.Cards[1].Transfer.Stage("安装器运行中");var before=model.Cards[0].Transfer;Page(!local);Page(local);File.WriteAllText(Path.ChangeExtension(path,".progress.json"),JsonSerializer.Serialize(new{ProgressPreserved=ReferenceEquals(before,model.Cards[0].Transfer),Label=model.Cards[0].Transfer.Label,CountCaption=model.CountCaption,Count=model.Count},new JsonSerializerOptions{WriteIndented=true}));}

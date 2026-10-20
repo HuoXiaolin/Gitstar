@@ -8,6 +8,8 @@ Gitstar 是一款 Windows 桌面应用，把 GitHub 关注项目、本机软件�
 
 当前版本：**2.0.0** · 作者：[HuoXiaolin](https://github.com/HuoXiaolin) · [下载发行版](https://github.com/HuoXiaolin/Gitstar/releases)
 
+[最近一次更新](CHANGELOG.md) · [历史更新日志](CHANGELOG_HISTORY.md)
+
 ## Gitstar 能做什么
 
 ### 跟进收藏项目的新版本
@@ -86,6 +88,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File windows/build.ps1 -Dotne
 生成安装版需准备 Inno Setup，可通过 `-Inno` 指定编译器路径。发行目录直接保存 EXE、安装包、使用说明、许可证和校验清单。
 
 本项目的开发目录为 `D:\Agant\github-update`；构建后，最新精简源码同步到 `D:\Agant\Github_Source\Gitstar`，发行文件输出到 `D:\Agant\Github_Releases\Gitstar`。可通过 `-SourceRoot` 和 `-OutputRoot` 自定义输出位置。
+
+通过 `windows/build.ps1` 生成安装包时，按北京时间的自然日判断，每天首次成功打包将第三段版本号加 1，例如 `2.0.0 → 2.0.1`，当天再次打包保持不变。版本号和最后成功打包日期一起保存在 `windows/Directory.Build.props`，清理构建缓存不会重复加号。构建失败、缺少安装器编译器或只运行 `dotnet build/publish` 时不递增。程序及安装包使用同一版本，Windows 数字文件版本对应为 `2.0.1.0`。
+
+可运行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File windows/check-build-version.ps1`，用隔离的编译器和安装器替身核对日期、失败重试、版本同步及并发锁规则；此检查不会重新生成正式安装包。
 
 ## 开源许可
 
