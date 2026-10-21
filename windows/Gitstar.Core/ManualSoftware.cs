@@ -20,6 +20,7 @@ public static class ManualSoftware
         if(bindings.Length>1)throw new IOException("该软件已有多个关联，请先在软件管理中保留一个关联。");
         if(bindings.FirstOrDefault() is {} binding)BindingManagement.Update(settings,binding,app,repo,app.ExecutablePath,beta,prefix,pattern,known);
         else settings.Bindings.Add(new(){AppId=app.Id,Repository=repo,ExecutablePath=app.ExecutablePath,IncludePrerelease=beta,TagPrefix=prefix.Trim(),AssetPattern=pattern.Trim()});
+        InstalledIdentity.Remember(settings.Bindings.Single(binding=>binding.AppId.Equals(app.Id,StringComparison.OrdinalIgnoreCase)),app);
         if(app.Portable){settings.PortableApps.RemoveAll(item=>item.Id==app.Id);settings.PortableApps.Add(app);}
         return app;
     }

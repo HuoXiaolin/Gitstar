@@ -14,9 +14,20 @@ public record Repository(string FullName, string Description, bool Private, bool
 }
 public enum UpdateSort { Published, RepositoryUpdated }
 public record StarGroup(string Id, string Name, string Source, List<string> Repositories, string Description="", bool IsPrivate=false);
-public record InstalledApp(string Id, string Name, string Version, string Location, bool Portable = false, string RepositoryHint = "",string ExecutablePath="",string VersionSource="注册表",string RegisteredVersion="",string[]? AliasIds=null);
+public record InstalledApp(string Id, string Name, string Version, string Location, bool Portable = false, string RepositoryHint = "",string ExecutablePath="",string VersionSource="注册表",string RegisteredVersion="",string[]? AliasIds=null)
+{
+    public string VersionDetails {get;init;}="";
+    public bool VersionNeedsReview {get;init;}
+}
 public class Binding
 {
+    public string ConfirmedVersion {get;set;}="";
+    public string ConfirmedVersionPath {get;set;}="";
+    public string ConfirmedVersionHash {get;set;}="";
+    public string AppName {get;set;}="";
+    public string AppLocation {get;set;}="";
+    public string[] AliasIds {get;set;}=[];
+    public Binding Snapshot()=>(Binding)MemberwiseClone();
     public string ExecutablePath {get;set;}="";
     public string AppId { get; set; } = "";
     public string Repository { get; set; } = "";

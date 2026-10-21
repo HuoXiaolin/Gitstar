@@ -91,17 +91,17 @@ public partial class MainWindow : Window
     {
         var accountKey=CacheKey;
         if(force && installedScan is {IsCompleted:false})await installedScan;
-        if(installedScan==null || installedScan.IsCompleted){var portable=settings.PortableApps.ToArray();var bindings=settings.Bindings.Select(b=>new Binding{AppId=b.AppId,ExecutablePath=b.ExecutablePath}).ToArray();installedScan=Task.Run(()=>WindowsServices.Scan(portable,bindings));}
+        if(installedScan==null || installedScan.IsCompleted){var portable=settings.PortableApps.ToArray();var bindings=settings.Bindings.Select(b=>b.Snapshot()).ToArray();var known=installed.ToArray();installedScan=Task.Run(()=>WindowsServices.Scan(portable,bindings,known));}
         var detected=await installedScan;if(exit || accountKey!=CacheKey)return;
         SetInstalled(detected);
     }
     private async Task ScanMatchedAsync()
     {
-        var accountKey=CacheKey;var bindings=settings.Bindings.Select(b=>new Binding{AppId=b.AppId,ExecutablePath=b.ExecutablePath}).ToArray();var known=installed.ToArray();var portable=settings.PortableApps.ToArray();
+        var accountKey=CacheKey;var bindings=settings.Bindings.Select(b=>b.Snapshot()).ToArray();var known=installed.ToArray();var portable=settings.PortableApps.ToArray();
         var fresh=await Task.Run(()=>WindowsServices.ScanMatched(bindings,portable,known));if(exit || accountKey!=CacheKey)return;
         SetInstalled(known.Where(a=>!bindings.Any(b=>InstalledVersion.Find([a],b.AppId)!=null)).Concat(fresh).ToList());
     }
-    private void SetInstalled(List<InstalledApp> detected){installed=detected;installedFresh=true;SaveInstalledSnapshot();}
+    private void SetInstalled(List<InstalledApp> detected){var repair=InstalledIdentity.Reconcile(settings,detected,installed);installed=repair.Apps;installedFresh=true;store.Set("settings",settings);SaveInstalledSnapshot();}
     private void SaveInstalledSnapshot()=>store.Set(CacheKey+"/installed",InstalledSnapshot.Capture(installed,settings.Bindings));
     private void Save(){store.Set("settings",settings);if(installedFresh)SaveInstalledSnapshot();}
     private void SaveOperations()=>store.Set(OperationsKey,operations);
@@ -109,7 +109,7 @@ public partial class MainWindow : Window
     private void LoadCache() {
         PathPreferences.Migrate(settings);store.Set("settings",settings);repositories=store.Get(CacheKey+"/repos",new List<Repository>());recentCacheCleared=store.Get(CacheKey+"/recent-cleared",false);
         var saved=store.Get(CacheKey+"/releases",new List<Release>()).Concat(store.Get(CacheKey+"/matched-releases",new List<Release>())).GroupBy(release=>(release.Repository.ToLowerInvariant(),release.Id)).Select(group=>group.First());releases=ReleaseRetention.Compact(saved,settings.Bindings);
-        groups=store.Get(CacheKey+"/groups",new List<StarGroup>());packages=store.Get(PackagesKey,new List<DownloadedPackage>());installed=InstalledSnapshot.Capture(store.Get(CacheKey+"/installed",new InstalledSnapshot(DateTimeOffset.MinValue,[])).Apps,settings.Bindings).Apps;installedFresh=false;LoadProjects();
+        groups=store.Get(CacheKey+"/groups",new List<StarGroup>());packages=store.Get(PackagesKey,new List<DownloadedPackage>());var cachedApps=store.Get(CacheKey+"/installed",new InstalledSnapshot(DateTimeOffset.MinValue,[])).Apps;installed=InstalledSnapshot.Capture(InstalledIdentity.Reconcile(settings,cachedApps).Apps,settings.Bindings).Apps;store.Set("settings",settings);installedFresh=false;LoadProjects();
     }
     private void SaveCache() {releases=ReleaseRetention.Compact(releases,settings.Bindings);PruneTransfers();var bound=settings.Bindings.Select(binding=>binding.Repository).ToHashSet(StringComparer.OrdinalIgnoreCase);store.Set(CacheKey+"/repos",repositories);store.Set(CacheKey+"/releases",recentCacheCleared?new List<Release>():releases);store.Set(CacheKey+"/matched-releases",releases.Where(release=>bound.Contains(release.Repository)).ToList());store.Set(CacheKey+"/groups",groups);store.Set(CacheKey+"/recent-cleared",recentCacheCleared);}
     private void PruneTransfers()
@@ -138,7 +138,7 @@ public partial class MainWindow : Window
     {
         updates=[];
         foreach(var b in settings.Bindings.Where(b=>b.Enabled(DateTimeOffset.UtcNow))) {
-            var app=InstalledVersion.Find(installed,b.AppId); if(app==null)continue;
+            var app=InstalledVersion.Find(installed,b.AppId); if(app==null||app.VersionNeedsReview)continue;
             var r=Rules.SelectRelease(releases.Where(r=>r.Repository.Equals(b.Repository,StringComparison.OrdinalIgnoreCase)),b); if(r==null||r.Tag==b.IgnoredTag)continue;
             if(Rules.CompareVersions(Rules.VersionTag(r,b),app.Version)>0)updates.Add(new(app,b,r,Rules.SelectAsset(r,b)));
         }
@@ -337,11 +337,12 @@ public partial class MainWindow : Window
         var state=card.Transfer;
         try{
             await process.WaitForExitAsync(ct);if(settings.Account!=account){state.Finish("重新检测版本",true);return;}state.Stage("检测安装结果");
-            SetInstalled(await Task.Run(()=>WindowsServices.Scan(settings.PortableApps,settings.Bindings)));PlanUpdates();
+            var known=installed.ToArray();var bindings=settings.Bindings.Select(binding=>binding.Snapshot()).ToArray();var portable=settings.PortableApps.ToArray();
+            SetInstalled(await Task.Run(()=>WindowsServices.Scan(portable,bindings,known)));PlanUpdates();
             var actual=InstalledVersion.Find(installed,card.Update?.App.Id??"");
             var target=card.Update==null?card.Release.Tag:Rules.VersionTag(card.Release,card.Update.Binding);
             if(actual!=null && Rules.CompareVersions(actual.Version,target) is >=0){state.Finish("已更新");state.Detail="检测到已安装版本："+actual.Version;model.Status=card.Title+" 已更新至 "+actual.Version;Display();await CleanupInstalledPackages(packagePath);}
-            else{state.Finish("重新检测版本",true);state.Detail="未确认目标版本；安装器可能已交给另一个进程，或安装被取消。";model.Status=card.Title+"："+state.Detail;Display();}
+            else{state.Finish("重新检测版本",true);state.Detail=actual==null?"未找到原安装位置的主程序，请核对安装位置。":$"当前检测版本：{actual.Version}；目标版本：{target}。尚未确认更新完成，请核对安装位置或等待安装器结束。";model.Status=card.Title+"："+state.Detail;Display();}
         }catch(OperationCanceledException){state.Finish("重新检测版本",true);state.Detail="已停止等待安装器；安装器仍可继续运行，请稍后检测版本。";throw;}catch(Exception ex){state.Finish("重新检测版本",true);state.Detail="无法确认安装结果："+ex.Message;}
         finally{process.Dispose();}
     }
@@ -358,7 +359,7 @@ public partial class MainWindow : Window
     private void AutoBindingDialog(string? previewPath=null)
     {
         if(quitting)return;
-        if(previewPath==null)SetInstalled(WindowsServices.Scan(settings.PortableApps,settings.Bindings));
+        if(previewPath==null)SetInstalled(WindowsServices.Scan(settings.PortableApps,settings.Bindings,installed));
         var knownNames=repositories.Select(r=>r.FullName).Order(StringComparer.OrdinalIgnoreCase).ToArray();
         var suggest=AppMatcher.Prepare(repositories);
         var rows=installed.Where(a=>!settings.Bindings.Any(b=>b.AppId==a.Id)).Select(a=>{
@@ -386,7 +387,7 @@ public partial class MainWindow : Window
                 foreach(var row in selected){ct.ThrowIfCancellationRequested();model.Status="正在关联："+row.Name;
                     try{
                         if(!validated.TryGetValue(row.Repository,out var info)){info=repositories.FirstOrDefault(r=>r.FullName.Equals(row.Repository,StringComparison.OrdinalIgnoreCase))??await api.Repo(row.Repository,ct);validated[row.Repository]=info;if(!repositories.Any(r=>r.FullName==info.FullName))repositories.Add(info);}
-                        if(!settings.Bindings.Any(b=>b.AppId==row.App.Id)){settings.Bindings.Add(new(){AppId=row.App.Id,Repository=info.FullName});Save();added++;}
+                        if(!settings.Bindings.Any(b=>InstalledVersion.Find([row.App],b.AppId)!=null)){var binding=new Binding{AppId=row.App.Id,Repository=info.FullName};InstalledIdentity.Remember(binding,row.App);settings.Bindings.Add(binding);Save();added++;}
                         if(!releases.Any(r=>r.Repository.Equals(info.FullName,StringComparison.OrdinalIgnoreCase))){releases.AddRange(await api.Releases(info.FullName,ct,settings.Bindings));SaveCache();}
                     }catch(Exception ex)when(ex is not OperationCanceledException){failures.Add(row.Name+"："+ex.Message);}
                 }

@@ -34,5 +34,6 @@ public static class BindingManagement
         var changed=binding.AppId!=app.Id||!binding.Repository.Equals(repo,StringComparison.OrdinalIgnoreCase)||binding.TagPrefix!=prefix.Trim();
         if(changed){ReminderRules.ClearNotifications(settings,binding.AppId,InstalledVersion.Find(apps,binding.AppId));ReminderRules.ClearNotifications(settings,app.Id,app);binding.IgnoredTag="";}
         binding.AppId=app.Id;binding.Repository=repo;binding.ExecutablePath=executable;binding.IncludePrerelease=beta;binding.TagPrefix=prefix.Trim();binding.AssetPattern=pattern.Trim();
+        InstalledIdentity.Remember(binding,app);
     }
 }

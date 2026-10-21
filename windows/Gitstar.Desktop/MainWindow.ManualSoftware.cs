@@ -41,7 +41,7 @@ public partial class MainWindow
         }
         mode.SelectionChanged+=(_,_)=>Mode();existing.SelectionChanged+=(_,_)=>{if(mode.SelectedIndex==1)Mode();};
         executable.LostKeyboardFocus+=(_,_)=>{if(!filling&&executable.Text.Length>0&&executable.Text!=detected?.ExecutablePath)ReadProgram();};Mode();
-        f.Action("重新检测",async()=>{var scanned=await Task.Run(()=>WindowsServices.Scan(settings.PortableApps,settings.Bindings));if(account!=CacheKey)throw new IOException("账号已改变，请重新打开添加窗口。");SetInstalled(scanned);f.Close();BindingDialog();});
+        f.Action("重新检测",async()=>{var known=installed.ToArray();var scanned=await Task.Run(()=>WindowsServices.Scan(settings.PortableApps,settings.Bindings,known));if(account!=CacheKey)throw new IOException("账号已改变，请重新打开添加窗口。");SetInstalled(scanned);f.Close();BindingDialog();});
         var save=f.Action("保存关联",()=>{
             if(account!=CacheKey)throw new IOException("账号已改变，请重新打开添加窗口。");InstalledApp selected;
             if(mode.SelectedIndex==0){if(Directory.Exists(executable.Text)){ReadProgram();if(detected==null)throw new IOException("请从检测结果中选择软件主程序。");}selected=WindowsServices.DescribePortable(executable.Text,name.Text,version.Text==detected?.Version?"":version.Text);}

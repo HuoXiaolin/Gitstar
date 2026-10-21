@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using Microsoft.Win32;
@@ -11,8 +11,9 @@ public partial class MainWindow
     {
         var f=new Form(this,"本机软件管理",940,740);
         f.Label("集中管理已关联软件的仓库匹配、版本忽略和检查状态。支持多选与全选当前结果，修改后立即依据已有记录更新列表。");
+        f.Label("以实际安装位置的主程序版本为准；升级后自动沿用关联并合并同一安装位置的重复项，保留停止、暂停和忽略设置。不同安装位置或不同匹配规则分别保留。");
         var filters=new Grid();filters.ColumnDefinitions.Add(new());filters.ColumnDefinitions.Add(new(){Width=new GridLength(190)});var searchPanel=new StackPanel{Margin=new Thickness(0,0,12,0)};var statePanel=new StackPanel();filters.Children.Add(searchPanel);Grid.SetColumn(statePanel,1);filters.Children.Add(statePanel);f.Fields.Children.Add(filters);
-        TextBox search=null!;ComboBox filter=null!;f.Into(searchPanel,()=>search=f.Text("搜索软件或仓库",focus?.Repository??""));f.Into(statePanel,()=>filter=f.Select("检查状态",["全部软件","正常检查","已停止","已暂停","已忽略版本"]));
+        TextBox search=null!;ComboBox filter=null!;f.Into(searchPanel,()=>search=f.Text("搜索软件或仓库",focus?.Repository??""));f.Into(statePanel,()=>filter=f.Select("检查状态",["全部软件","正常检查","已停止","已暂停","已忽略版本","版本待核对"]));
         var selectionLine=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(0,0,0,12)};var selectAll=new CheckBox{Content="全选当前结果",IsThreeState=true,VerticalAlignment=VerticalAlignment.Center};var count=ProjectText("",12,true);count.Margin=new Thickness(14,0,0,0);selectionLine.Children.Add(selectAll);selectionLine.Children.Add(count);f.Fields.Children.Add(selectionLine);
         var list=new StackPanel();f.Fields.Children.Add(list);var selected=new HashSet<Binding>();Binding[] visible=[];var selecting=false;
         var action=f.Select("批量操作",["选择批量操作","忽略当前版本","暂停检查 7 天","停止自动检查","恢复检查与提醒","解除关联"]);f.Fields.Children.Remove(action);var actionLabel=f.Fields.Children[f.Fields.Children.Count-1];f.Fields.Children.Remove(actionLabel);action.Width=156;action.Margin=new Thickness(8,6,0,0);f.Buttons.Children.Add(action);
@@ -30,14 +31,14 @@ public partial class MainWindow
         void Render()
         {
             var now=DateTimeOffset.UtcNow;var query=search.Text.Trim();
-            visible=settings.Bindings.Where(b=>((InstalledVersion.Find(installed,b.AppId)?.Name??"")+" "+b.Repository+" "+b.AppId).Contains(query,StringComparison.OrdinalIgnoreCase)).Where(b=>filter.SelectedIndex switch{1=>!ReminderRules.Restricted(b,now),2=>b.Disabled,3=>b.PauseUntil>now,4=>b.IgnoredTag.Length>0,_=>true}).OrderBy(b=>InstalledVersion.Find(installed,b.AppId)?.Name??b.Repository,StringComparer.OrdinalIgnoreCase).ToArray();
+            visible=settings.Bindings.Where(b=>((InstalledVersion.Find(installed,b.AppId)?.Name??"")+" "+b.Repository+" "+b.AppId).Contains(query,StringComparison.OrdinalIgnoreCase)).Where(b=>filter.SelectedIndex switch{1=>!ReminderRules.Restricted(b,now),2=>b.Disabled,3=>b.PauseUntil>now,4=>b.IgnoredTag.Length>0,5=>InstalledVersion.Find(installed,b.AppId) is not {} app||app.VersionNeedsReview,_=>true}).OrderBy(b=>InstalledVersion.Find(installed,b.AppId)?.Name??b.Repository,StringComparer.OrdinalIgnoreCase).ToArray();
             selected.IntersectWith(visible);list.Children.Clear();
             if(visible.Length==0)list.Children.Add(ProjectText(settings.Bindings.Count==0?"尚未关联软件，可点击“添加软件”。":"没有符合条件的软件，请调整搜索或筛选。",13,true));
             foreach(var binding in visible){
                 var app=InstalledVersion.Find(installed,binding.AppId);var body=new StackPanel();var heading=new Grid();heading.ColumnDefinitions.Add(new(){Width=GridLength.Auto});heading.ColumnDefinitions.Add(new());heading.ColumnDefinitions.Add(new(){Width=GridLength.Auto});
                 var check=new CheckBox{IsChecked=selected.Contains(binding),VerticalAlignment=VerticalAlignment.Top,Margin=new Thickness(0,4,10,0)};System.Windows.Automation.AutomationProperties.SetName(check,"选择 "+(app?.Name??binding.Repository));check.Checked+=(_,_)=>{selected.Add(binding);SelectionState();};check.Unchecked+=(_,_)=>{selected.Remove(binding);SelectionState();};heading.Children.Add(check);
-                var info=new StackPanel{Margin=new Thickness(0,0,12,0)};info.Children.Add(ProjectText((app?.Name??binding.Repository.Split('/').Last())+(app!=null?"  ·  "+app.Version:""),14));info.Children.Add(ProjectText(binding.Repository,12,true));info.Children.Add(ProjectText(ReminderRules.Status(binding,now),12,true));var source=app==null?"本机记录待检测 · "+binding.AppId:app.ExecutablePath.Length>0?app.ExecutablePath:app.Location.Length>0?app.Location:app.Id;info.Children.Add(ProjectText(source,11,true));Grid.SetColumn(info,1);heading.Children.Add(info);
-                foreach(var label in info.Children.OfType<TextBlock>())label.Margin=new Thickness(0,0,0,3);var sourceLabel=(TextBlock)info.Children[info.Children.Count-1];sourceLabel.TextWrapping=TextWrapping.NoWrap;sourceLabel.TextTrimming=TextTrimming.CharacterEllipsis;sourceLabel.ToolTip=source;
+                var info=new StackPanel{Margin=new Thickness(0,0,12,0)};info.Children.Add(ProjectText((app?.Name??(binding.AppName.Length>0?binding.AppName:binding.Repository.Split('/').Last()))+(app!=null?"  ·  "+app.Version:""),14));info.Children.Add(ProjectText(binding.Repository,12,true));info.Children.Add(ProjectText(ReminderRules.Status(binding,now),12,true));if(app!=null)info.Children.Add(ProjectText("版本来源："+app.VersionSource,11,true));var source=app==null?"请核对安装位置 · "+(binding.ExecutablePath.Length>0?binding.ExecutablePath:binding.AppLocation.Length>0?binding.AppLocation:binding.AppId):app.ExecutablePath.Length>0?app.ExecutablePath:app.Location.Length>0?app.Location:app.Id;info.Children.Add(ProjectText(source,11,true));Grid.SetColumn(info,1);heading.Children.Add(info);
+                foreach(var label in info.Children.OfType<TextBlock>())label.Margin=new Thickness(0,0,0,3);var sourceLabel=(TextBlock)info.Children[info.Children.Count-1];sourceLabel.TextWrapping=TextWrapping.NoWrap;sourceLabel.TextTrimming=TextTrimming.CharacterEllipsis;sourceLabel.ToolTip=source+"\n"+(app?.VersionDetails??"");if(app?.VersionNeedsReview==true)((TextBlock)info.Children[0]).Text+=" · 版本待核对";
                 var edit=new Button{Content="修改匹配",VerticalAlignment=VerticalAlignment.Top};edit.Click+=(_,_)=>{EditSoftwareBinding(f,binding);Render();};Grid.SetColumn(edit,2);heading.Children.Add(edit);body.Children.Add(heading);
                 var buttons=new WrapPanel{Margin=new Thickness(28,8,0,0)};body.Children.Add(buttons);
                 void Inline(string text,BindingAction operation,bool enabled=true){var button=new Button{Content=text,Margin=new Thickness(0,0,8,4),Padding=new Thickness(10,6,10,6),IsEnabled=enabled};if(operation==BindingAction.Unlink)button.Foreground=new SolidColorBrush(Color.FromRgb(190,60,75));button.Click+=(_,_)=>Apply([binding],operation);buttons.Children.Add(button);}
@@ -58,8 +59,30 @@ public partial class MainWindow
         var choices=installed.GroupBy(a=>a.Id).Select(g=>g.First()).OrderBy(a=>a.Name,StringComparer.OrdinalIgnoreCase).ToList();if(known==null){known=new(binding.AppId,binding.Repository.Split('/').Last(),"待检测","");choices.Insert(0,known);}var index=choices.FindIndex(a=>a.Id==known.Id);
         var software=f.Select("本机软件",choices.Select(a=>a.Name+" · "+a.Version+" · "+(a.ExecutablePath.Length>0?a.ExecutablePath:a.Location.Length>0?a.Location:a.Id)),index);
         var repo=f.Text("GitHub 仓库地址或 owner/repo",binding.Repository);var executable=f.Text("主程序 EXE 路径",binding.ExecutablePath);var beta=f.Check("包含测试版",binding.IncludePrerelease);var prefix=f.Text("版本标签前缀",binding.TagPrefix);var pattern=f.Text("安装包文件名包含",binding.AssetPattern);f.Label("保留当前停止检查与暂停设置。更换软件、仓库或版本标签前缀时，清除旧匹配的忽略版本记录。修改匹配不会发起全机扫描。");
+        var confirmed=f.Text("应用关于页版本（可选，文件属性不准确时填写）",binding.ConfirmedVersion);
+        f.Label("优先自动读取应用版本声明、主程序和安装登记。可按应用关于页确认版本；确认绑定当前 EXE 的 SHA-256，程序更新或路径改变后失效。留空恢复自动识别，不使用仓库目标版本代填。");
+        (string Version,string Path,string Hash)? confirmation=null;
+        executable.TextChanged+=(_,_)=>{confirmed.Text="";confirmation=null;};
+        confirmed.TextChanged+=(_,_)=>confirmation=null;
         software.SelectionChanged+=(_,_)=>{if(software.SelectedIndex>=0)executable.Text=choices[software.SelectedIndex].ExecutablePath;};
         f.Action("选择主程序",()=>{var picker=new OpenFileDialog{Filter="应用程序|*.exe"};if(picker.ShowDialog(f)==true)executable.Text=picker.FileName;return Task.CompletedTask;});
-        f.Action("保存匹配",()=>{var path=executable.Text.Trim();if(path.Length>0&&(!File.Exists(path)||!path.EndsWith(".exe",StringComparison.OrdinalIgnoreCase)))throw new IOException("请选择存在的主程序 EXE。");if(software.SelectedIndex<0)throw new IOException("请选择本机软件。");BindingManagement.Update(settings,binding,choices[software.SelectedIndex],repo.Text,path.Length>0?Path.GetFullPath(path):"",beta.IsChecked==true,prefix.Text,pattern.Text,installed);Save();PlanUpdates();Display();model.Status="已保存软件匹配；点击“检查更新”获取对应仓库的新版本。";f.Close();return Task.CompletedTask;},true);f.Action("取消",()=>{f.Close();return Task.CompletedTask;});if(previewPath!=null)f.RenderPreview(previewPath);f.ShowDialog();
+        f.Action("选择运行中的程序",()=>{
+            var running=WindowsServices.RelatedRunningPrograms([binding.Snapshot()]);if(running.Count==0)throw new IOException("未找到相关的运行中程序，请先打开该软件，或直接选择主程序文件。");
+            var picker=new Form(f,"核对实际运行位置",780,480);var choice=picker.Select("运行中的相关软件",running.Select(program=>program.Path+" · "+InstalledVersion.NormalizeVersion(program.ProductVersion)));
+            picker.Label("选择应用关于页对应的实际进程。多份安装分别保留，不会用另一份程序的版本覆盖当前安装记录。");
+            picker.Action("使用此程序",()=>{if(choice.SelectedIndex<0)throw new IOException("请选择程序。");executable.Text=running[choice.SelectedIndex].Path;picker.Close();return Task.CompletedTask;},true);picker.Action("取消",()=>{picker.Close();return Task.CompletedTask;});picker.ShowDialog();return Task.CompletedTask;
+        });
+        f.Action("重新确认应用版本",()=>{confirmation=WindowsServices.ConfirmInstalledVersion(confirmed.Text,executable.Text.Trim());if(confirmation.Value.Version.Length==0)throw new IOException("请先填写应用关于页显示的版本号。");model.Status="已核对当前主程序文件，保存匹配后生效。";return Task.CompletedTask;});
+        f.Action("保存匹配",async()=>{
+            var path=executable.Text.Trim();if(path.Length>0&&(!File.Exists(path)||!path.EndsWith(".exe",StringComparison.OrdinalIgnoreCase)))throw new IOException("请选择存在的主程序 EXE。");if(software.SelectedIndex<0)throw new IOException("请选择本机软件。");
+            var unchanged=confirmed.Text.Trim()==binding.ConfirmedVersion&&path.Equals(binding.ConfirmedVersionPath,StringComparison.OrdinalIgnoreCase);
+            var evidence=confirmation??(unchanged?(Version:binding.ConfirmedVersion,Path:binding.ConfirmedVersionPath,Hash:binding.ConfirmedVersionHash):WindowsServices.ConfirmInstalledVersion(confirmed.Text,path));
+            BindingManagement.Update(settings,binding,choices[software.SelectedIndex],repo.Text,path.Length>0?Path.GetFullPath(path):"",beta.IsChecked==true,prefix.Text,pattern.Text,installed);
+            binding.ConfirmedVersion=evidence.Version;binding.ConfirmedVersionPath=evidence.Path;binding.ConfirmedVersionHash=evidence.Hash;
+            var prior=installed.ToArray();var snapshot=binding.Snapshot();var portable=settings.PortableApps.ToArray();
+            var detected=await Task.Run(()=>WindowsServices.ScanMatched([snapshot],portable,prior));
+            SetInstalled(prior.Where(app=>InstalledVersion.Find([app],binding.AppId)==null).Concat(detected).ToList());
+            Save();PlanUpdates();Display();model.Status="已保存软件匹配与版本来源，并重新核对实际安装版本。";f.Close();
+        },true);f.Action("取消",()=>{f.Close();return Task.CompletedTask;});if(previewPath!=null)f.RenderPreview(previewPath);f.ShowDialog();
     }
 }

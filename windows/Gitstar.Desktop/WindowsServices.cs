@@ -28,22 +28,7 @@ public static partial class WindowsServices
         window.Height=height;window.Width=width;window.WindowState=System.Windows.WindowState.Normal;
         window.Left=topLeft.X+(availableWidth-width)/2;window.Top=topLeft.Y+(availableHeight-height)/2;
     }
-    public static List<InstalledApp> Scan(IEnumerable<InstalledApp>? portable=null,IEnumerable<Binding>? bindings=null)
-    {
-        List<InstalledApp> list=[];var metadata=new Dictionary<string,ProgramVersion?>(StringComparer.OrdinalIgnoreCase);var explicitPaths=(bindings??[]).Where(b=>b.ExecutablePath.Length>0).GroupBy(b=>b.AppId).ToDictionary(g=>g.Key,g=>g.First().ExecutablePath);
-        foreach(var hive in new[] {RegistryHive.LocalMachine,RegistryHive.CurrentUser}) foreach(var view in new[] {RegistryView.Registry64,RegistryView.Registry32}) {
-            using var root=RegistryKey.OpenBaseKey(hive,view); using var uninstall=root.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall");
-            if(uninstall==null)continue;
-            foreach(var key in uninstall.GetSubKeyNames()) {
-                try { using var e=uninstall.OpenSubKey(key); var name=e?.GetValue("DisplayName") as string; if(string.IsNullOrWhiteSpace(name)||Convert.ToInt32(e?.GetValue("SystemComponent")??0)==1)continue;
-                    var hint=new[]{"URLInfoAbout","URLUpdateInfo","HelpLink"}.Select(field=>AppMatcher.GitHubRepository(e?.GetValue(field) as string??"")).FirstOrDefault(r=>r.Length>0)??"";
-                    var id=$"{hive}/{view}/{key}";var item=new InstalledApp(id,name,e?.GetValue("DisplayVersion") as string??"未知",e?.GetValue("InstallLocation") as string??"",RepositoryHint:hint,ExecutablePath:explicitPaths.GetValueOrDefault(id)??"");list.Add(DetectVersion(item,e?.GetValue("DisplayIcon") as string??"",e?.GetValue("UninstallString") as string??"",metadata));
-                } catch(System.Security.SecurityException) { }
-            }
-        }
-        foreach(var app in portable??[]){var selected=explicitPaths.GetValueOrDefault(app.Id);list.Add(DetectVersion(selected==null?app:app with{ExecutablePath=selected},"","",metadata));}
-        return MergeInstallRecords(list);
-    }
+    public static List<InstalledApp> Scan(IEnumerable<InstalledApp>? portable=null,IEnumerable<Binding>? bindings=null,IEnumerable<InstalledApp>? known=null)=>ScanCurrentPrograms(bindings??[],portable??[],known??[],false);
     public static void Startup(bool enabled)
     {
         SetStartupEntry(Registry.CurrentUser,StartupKey,enabled,Environment.ProcessPath??throw new IOException("无法确定当前程序位置。"));

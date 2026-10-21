@@ -8,6 +8,32 @@ using System.Security.Cryptography;
 using System.IO.Compression;
 
 try {
+if(args.FirstOrDefault()=="--set-binding-program"&&args.Length==3){
+    using var activation=new AppActivation(null);if(!activation.IsPrimary)throw new IOException("请先从 Gitstar 托盘彻底退出，避免覆盖正在修改的设置。");
+    var repository=Rules.RepositoryName(args[1]);if(!Rules.ValidRepository(repository))throw new IOException("仓库地址无效。");
+    var path=Path.GetFullPath(args[2]);if(!File.Exists(path)||!path.EndsWith(".exe",StringComparison.OrdinalIgnoreCase))throw new IOException("主程序路径不存在。");
+    using var db=new LocalStore();var settings=db.Get("settings",new Settings());var selected=settings.Bindings.Where(binding=>binding.Repository.Equals(repository,StringComparison.OrdinalIgnoreCase)).ToList();
+    if(selected.Count==0)throw new IOException("未找到已有软件关联。");
+    if(selected.Select(binding=>binding.ExecutablePath).Where(value=>value.Length>0).Distinct(StringComparer.OrdinalIgnoreCase).Count()>1)throw new IOException("此仓库关联了多个安装位置，请在软件管理中逐项选择。");
+    var cacheKey="cache/"+(settings.Account.Length>0?settings.Account:"guest")+"/installed";var old=db.Get(cacheKey,new InstalledSnapshot(DateTimeOffset.MinValue,[]));var oldIds=selected.Select(binding=>binding.AppId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    foreach(var entry in selected){entry.ExecutablePath=path;entry.ConfirmedVersion="";entry.ConfirmedVersionPath="";entry.ConfirmedVersionHash="";}
+    var focus=new Settings{Bindings=selected};var detected=WindowsServices.ScanMatched(selected,settings.PortableApps,old.Apps);var repair=InstalledIdentity.Reconcile(focus,detected,old.Apps);
+    var confirmed=focus.Bindings.Select(binding=>InstalledVersion.Find(repair.Apps,binding.AppId)).ToArray();
+    if(confirmed.Any(app=>app==null||!app.ExecutablePath.Equals(path,StringComparison.OrdinalIgnoreCase)||app.Version=="未知"))throw new IOException("无法核对所选位置的实际程序版本，未保存。");
+    settings.Bindings.RemoveAll(binding=>binding.Repository.Equals(repository,StringComparison.OrdinalIgnoreCase));settings.Bindings.AddRange(focus.Bindings);
+    var replacedIds=repair.Apps.SelectMany(app=>(app.AliasIds??[]).Append(app.Id)).Concat(oldIds).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var combined=old.Apps.Where(app=>!replacedIds.Contains(app.Id)).Concat(repair.Apps);
+    db.Set("settings",settings);db.Set(cacheKey,InstalledSnapshot.Capture(combined,settings.Bindings));
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new{Repository=repository,Path=path,Version=confirmed[0]!.Version,Bindings=focus.Bindings.Count}));return;
+}
+if(args.FirstOrDefault()=="--inspect-installed-identity"){
+    using var document=System.Text.Json.JsonDocument.Parse(File.ReadAllText(args[1]));
+    var settings=System.Text.Json.JsonSerializer.Deserialize<Settings>(document.RootElement.GetProperty("Settings"))!;
+    var known=System.Text.Json.JsonSerializer.Deserialize<List<InstalledApp>>(document.RootElement.GetProperty("Apps"))!;
+    var before=settings.Bindings.Count;var detected=WindowsServices.ScanMatched(settings.Bindings,settings.PortableApps,known);
+    var repair=InstalledIdentity.Reconcile(settings,detected,known);
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new{Before=before,After=settings.Bindings.Count,repair.Migrated,repair.Merged,Programs=settings.Bindings.Select(binding=>new{binding.Repository,App=InstalledVersion.Find(repair.Apps,binding.AppId)?.Name,Version=InstalledVersion.Find(repair.Apps,binding.AppId)?.Version,NeedsReview=InstalledVersion.Find(repair.Apps,binding.AppId)?.VersionNeedsReview,Details=InstalledVersion.Find(repair.Apps,binding.AppId)?.VersionDetails,ProgramPath=binding.ExecutablePath,HasProgramPath=binding.ExecutablePath.Length>0,binding.Disabled})}));return;
+}
 if(args.FirstOrDefault()=="--inspect-git-auth"){
     var repository=args[1];GitHubClient.Validate(repository);using var db=new LocalStore();using var client=new GitHubClient(db.Get("settings",new Settings()));client.Token=CredentialStorage.Load(db).AccessToken;if(client.Token.Length==0)throw new IOException("应用没有已保存的登录授权。");
     var project=await client.Project(repository,CancellationToken.None);var git=new GitWorkspace(client.Token);var start=git.CreateStartInfo(Environment.CurrentDirectory,"ls-remote","https://github.com/"+repository+".git","refs/heads/"+project.DefaultBranch);start.Environment["GIT_ASKPASS"]=args[2];
@@ -206,6 +232,8 @@ await SourceSyncChecks.Run(Check,root);
 ReleaseNotesChecks.Run(Check,root);
 RepositoryMetadataChecks.Run(Check);
 SoftwareEntryChecks.Run(Check,root);
+InstalledIdentityChecks.Run(Check,root);
+VersionEvidenceChecks.Run(Check,root);
 SpecialFollowChecks.Run(Check,root);
 ActivationChecks.Run(Check);
 PortableReplacementChecks.Run(Check,root);

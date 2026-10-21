@@ -25,7 +25,7 @@ public sealed class Card : Observable
     public string Repository => Release.Repository;
     public string FollowSource {get;init;}="";
     public string Version => Update==null ? Release.Tag : $"{Update.App.Version}  →  {Release.Tag}";
-    public string VersionEvidence=>Update==null?"":$"版本来源：{Update.App.VersionSource}\n程序：{Update.App.ExecutablePath}\n登记版本：{Update.App.RegisteredVersion}";
+    public string VersionEvidence=>Update==null?"":$"版本来源：{Update.App.VersionSource}\n程序：{Update.App.ExecutablePath}\n{Update.App.VersionDetails}\n登记版本：{Update.App.RegisteredVersion}";
     public string Channel => Release.Channel;
     public string BadgeColor => Release.Prerelease ? "#FFF1D6" : "#E9F7F1";
     public string BadgeInk => Release.Prerelease ? "#9D650B" : "#17845E";
