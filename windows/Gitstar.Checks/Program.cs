@@ -237,6 +237,7 @@ VersionEvidenceChecks.Run(Check,root);
 SpecialFollowChecks.Run(Check,root);
 ActivationChecks.Run(Check);
 PortableReplacementChecks.Run(Check,root);
+RootPortableReplacementChecks.Run(Check,root);
 await ReleaseStateChecks.Run(Check,root);
 await SelfUpdateChecks.Run(Check);
 await UpdateSortingChecks.Run(Check);

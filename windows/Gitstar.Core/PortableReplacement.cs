@@ -11,6 +11,7 @@ public static class PortableReplacement
 {
     private static readonly HashSet<string> ProgramTypes=new(StringComparer.OrdinalIgnoreCase){".exe",".dll",".pdb",".mui",".pri",".pak",".asar",".bin",".js",".css",".html",".htm",".wasm",".node",".svg",".png",".jpg",".jpeg",".gif",".ico",".ttf",".woff",".woff2",".otf",".qm",".rcc",".mo",".manifest"};
     private static bool Inside(string path,string root)=>path.StartsWith(root.TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase);
+    private static bool VolumeRoot(string path)=>Path.GetFullPath(path).TrimEnd('\\','/').Equals(Path.GetPathRoot(Path.GetFullPath(path))?.TrimEnd('\\','/'),StringComparison.OrdinalIgnoreCase);
     private static string Hash(string path){using var input=File.OpenRead(path);return Convert.ToHexString(SHA256.HashData(input));}
     private static void NoLinks(string path)
     {
@@ -32,19 +33,21 @@ public static class PortableReplacement
     {
         program=Path.GetFullPath(program);package=Path.GetFullPath(package);NoLinks(program);NoLinks(package);
         if(!File.Exists(program)||!program.EndsWith(".exe",StringComparison.OrdinalIgnoreCase))throw new IOException("请先在软件管理中关联原主程序 EXE，才能直接替换。");
-        var root=Path.GetDirectoryName(program)!;if(root.TrimEnd('\\')==Path.GetPathRoot(root)?.TrimEnd('\\'))throw new IOException("主程序不能直接位于磁盘根目录，请先放入独立软件文件夹。");
+        var root=Path.GetDirectoryName(program)!;var volumeRoot=VolumeRoot(root);
         var files=new List<PortableReplacementFile>();var preserved=0;
         void Add(string source,string target){NoLinks(source);NoLinks(target);if(!Inside(target,root)||source.Equals(target,StringComparison.OrdinalIgnoreCase))throw new IOException("新版与原程序的位置冲突，请将新版下载到其他目录。");if(Directory.Exists(target))throw new IOException("目标文件位置被文件夹占用："+target);if(new FileInfo(source).Length>4L*1024*1024*1024)throw new IOException("新版文件过大，请核对更新文件。");var exists=File.Exists(target);files.Add(new(source,target,exists,exists?Hash(target):"",Hash(source)));}
         if(extracted==null){
             if(Path.GetExtension(package).ToLowerInvariant()!=".exe"||Regex.IsMatch(Path.GetFileName(package),@"setup|installer|^(unins|uninstall|update|crash|helper)",RegexOptions.IgnoreCase))throw new IOException("请选择便携 ZIP 或独立主程序 EXE，安装器不能直接替换。");
             Add(package,program);
         }else{
-            extracted=Path.GetFullPath(extracted);NoLinks(extracted);if(!Directory.Exists(extracted)||Inside(extracted,root)||Inside(root,extracted)||extracted.Equals(root,StringComparison.OrdinalIgnoreCase))throw new IOException("新版解压目录必须与原软件目录分开。");
+            extracted=Path.GetFullPath(extracted);NoLinks(extracted);if(!Directory.Exists(extracted)||VolumeRoot(extracted)||!volumeRoot&&Inside(extracted,root)||Inside(root,extracted)||extracted.Equals(root,StringComparison.OrdinalIgnoreCase))throw new IOException("请选择独立的新版解压文件夹，不要选择整个磁盘或与原软件目录重叠的位置。");
             var candidates=Files(extracted).Where(file=>file.EndsWith(".exe",StringComparison.OrdinalIgnoreCase)&&!Regex.IsMatch(Path.GetFileName(file),@"^(unins|uninstall|setup|update|crash|helper)",RegexOptions.IgnoreCase)).ToArray();
             var matching=candidates.Where(file=>Path.GetFileName(file).Equals(Path.GetFileName(program),StringComparison.OrdinalIgnoreCase)).ToArray();
             var primary=matching.Length==1?matching[0]:matching.Length==0&&candidates.Length==1?candidates[0]:throw new IOException("无法唯一识别压缩包中的主程序，请选择对应便携包，或解压后手动替换。");
             var payload=Path.GetDirectoryName(primary)!;
-            foreach(var source in Files(payload)){
+            var payloadFiles=Files(payload).ToArray();
+            if(volumeRoot&&(payloadFiles.Length!=1||!payloadFiles[0].Equals(primary,StringComparison.OrdinalIgnoreCase)))throw new IOException("磁盘根目录支持替换独立主程序；此便携包含多个文件，请选择独立软件目录。");
+            foreach(var source in payloadFiles){
                 var target=source.Equals(primary,StringComparison.OrdinalIgnoreCase)?program:Path.GetFullPath(Path.Combine(root,Path.GetRelativePath(payload,source)));
                 if(File.Exists(target)&&!source.Equals(primary,StringComparison.OrdinalIgnoreCase)&&!ProgramFile(source)){preserved++;continue;}Add(source,target);
             }
@@ -58,6 +61,7 @@ public static class PortableReplacement
     public static PortableReplacementResult Apply(PortableReplacementPlan plan,bool keepBackup=false,CancellationToken ct=default,Action<int,int>? progress=null)
     {
         NoLinks(plan.Root);if(!Inside(plan.Program,plan.Root)||plan.Files.Count==0)throw new IOException("更新计划无效，请重新打开更新窗口。");
+        if(VolumeRoot(plan.Root)&&(plan.Files.Count!=1||!plan.Files[0].Target.Equals(plan.Program,StringComparison.OrdinalIgnoreCase)||!VolumeRoot(Path.GetDirectoryName(plan.Program)!)))throw new IOException("根目录更新仅能替换指定主程序，不能写入其他文件。");
         foreach(var file in plan.Files){
             NoLinks(file.Target);NoLinks(file.Source);if(!Inside(file.Target,plan.Root)||file.Source.Equals(file.Target,StringComparison.OrdinalIgnoreCase))throw new IOException("更新文件越过软件目录。");
             if(file.SourceHash.Length==0||Hash(file.Source)!=file.SourceHash)throw new IOException("新版文件已变化，请重新下载并核对更新文件。");
