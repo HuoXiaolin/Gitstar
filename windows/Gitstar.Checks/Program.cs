@@ -189,7 +189,7 @@ Check(PackageRules.Installed(latestPackage,[packageBinding],[installedTool]),"in
 Check(!PackageRules.Installed(latestPackage,[packageBinding],[installedTool with{Version="1.0"}]) && !PackageRules.Installed(latestPackage,[packageBinding],[installedTool with{VersionSource="注册表"}]),"old or unverified installed version cannot trigger package deletion");
 Check(!PackageRules.Installed(androidPackage,[packageBinding],[installedTool]),"desktop installation does not imply Android package installed");
 Check(!PackageRules.Installed(latestPackage,[packageBinding],[installedTool with{ExecutablePath=latestPackage.Path}]),"portable main program cannot be cleaned as an installer package");
-Check(!new Settings().KeepLatestPackages && !new Settings().DeleteInstalledPackages && new Settings().PromptInstalledPackageCleanup,"package deletion is opt-in and cleanup prompt defaults on");
+Check(new Settings().KeepLatestPackages && !new Settings().DeleteInstalledPackages && new Settings().PromptInstalledPackageCleanup,"latest package retention defaults on while post-install deletion stays opt-in and cleanup prompt stays on");
 var now=DateTimeOffset.UtcNow;Release R(string tag,bool beta,params Asset[] assets)=>new(1,"owner/app",tag,tag,"log",beta,now,"https://github.com/owner/app",assets.ToList());
 var history=Enumerable.Range(0,10000).Select(i=>R((i%3==0?"desktop-":"mobile-")+(10000-i),i%2==0) with{Id=i+1,Published=now.AddMinutes(-i),Body=new string('x',4096)}).ToArray();var line=new Binding{Repository="owner/app",TagPrefix="desktop-"};var compact=ReleaseRetention.Compact(history,[line]);
 Check(compact.Count<=4 && compact.Sum(r=>r.Body.Length)<20000,"ten thousand releases compact to feed and subscribed-line candidates");
@@ -241,6 +241,7 @@ RootPortableReplacementChecks.Run(Check,root);
 await NotificationChecks.Run(Check);
 await RepositoryIssueChecks.Run(Check);
 await UploadProgressChecks.Run(Check,root);
+DownloadDefaultsChecks.Run(Check);
 await ReleaseStateChecks.Run(Check,root);
 await SelfUpdateChecks.Run(Check);
 await UpdateSortingChecks.Run(Check);

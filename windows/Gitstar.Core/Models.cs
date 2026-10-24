@@ -48,7 +48,7 @@ public class Settings
     public UpdateSort RecentSort {get;set;}
     public UpdateSort ProjectsSort {get;set;}=UpdateSort.RepositoryUpdated;
     public int SameVersionDownload {get;set;}
-    public bool KeepLatestPackages {get;set;}
+    public bool KeepLatestPackages {get;set;}=true;
     public bool DeleteInstalledPackages {get;set;}
     public bool PromptInstalledPackageCleanup {get;set;}=true;
     public string ClientId { get; set; } = "";

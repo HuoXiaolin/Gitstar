@@ -78,6 +78,7 @@ public partial class MainWindow
     }
     private async Task DownloadBatch(ReleaseDownload[] items,string root,int duplicatePolicy)
     {
+        if(!ConfirmDownloadSettings(root,true))return;
         await Execute("批量下载",$"{items.Length} 个发行包",async batchToken=>{
             var conflicts=PackageRules.OriginalNameConflicts(items);if(conflicts.Length>0)throw new IOException("原名相同的不同附件不能保存到同一目录："+string.Join("、",conflicts));
             var parent=currentOperation.Value!;var succeeded=0;var skipped=0;var failed=0;
