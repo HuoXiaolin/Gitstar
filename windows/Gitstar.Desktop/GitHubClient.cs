@@ -9,6 +9,7 @@ public sealed partial class GitHubClient : IDisposable
     public Func<string,ReleasePage?>? ReadReleasePage {get;set;}
     public Action<string,ReleasePage>? SaveReleasePage {get;set;}
     private readonly HttpClient http;
+    private readonly HttpClient uploadHttp;
     private readonly string clientId;
     private string token="";
     private string[]? oauthScopes;
@@ -20,15 +21,18 @@ public sealed partial class GitHubClient : IDisposable
         var handler = new HttpClientHandler { AllowAutoRedirect=false, UseProxy=!settings.DirectConnection };
         if (settings.Proxy.Length > 0) { var u = new Uri(settings.Proxy); if (u.UserInfo.Length > 0) throw new ArgumentException("代理地址中不要包含密码。"); handler.Proxy = new WebProxy(u); }
         http = new HttpClient(transport??handler) { Timeout=TimeSpan.FromMinutes(3) };
+        uploadHttp=new HttpClient(transport??handler,disposeHandler:false){Timeout=Timeout.InfiniteTimeSpan};
         http.DefaultRequestHeaders.UserAgent.ParseAdd("Gitstar/"+AppInfo.Version);
+        uploadHttp.DefaultRequestHeaders.UserAgent.ParseAdd("Gitstar/"+AppInfo.Version);
     }
-    private async Task<JsonElement> Request(string url, HttpMethod? method=null, object? body=null, CancellationToken ct=default,Action<JsonElement>? consume=null,string? etag=null,Action<string,bool>? cacheResult=null,bool fresh=false)
+    private async Task<JsonElement> Request(string url, HttpMethod? method=null, object? body=null, CancellationToken ct=default,Action<JsonElement>? consume=null,string? etag=null,Action<string,bool>? cacheResult=null,bool fresh=false,string? modifiedSince=null,Action<HttpResponseMessage>? headers=null)
     {
         await EnsureFreshToken(ct);
         using var msg = new HttpRequestMessage(method ?? HttpMethod.Get, url.StartsWith("https://",StringComparison.Ordinal) ? url : "https://api.github.com/" + url);
         if (msg.RequestUri!.Host is not ("api.github.com" or "uploads.github.com")) throw new ArgumentException("无效的 GitHub API 主机。");
         msg.Headers.Accept.ParseAdd("application/vnd.github+json"); msg.Headers.Add("X-GitHub-Api-Version","2022-11-28");
         if(etag!=null && EntityTagHeaderValue.TryParse(etag,out var tag))msg.Headers.IfNoneMatch.Add(tag);
+        if(modifiedSince!=null)msg.Headers.TryAddWithoutValidation("If-Modified-Since",modifiedSince);
         if(fresh)msg.Headers.CacheControl=new CacheControlHeaderValue{NoCache=true,NoStore=true};
         if (Token.Length > 0) msg.Headers.Authorization = new AuthenticationHeaderValue("Bearer",Token);
         if (body != null) msg.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8,"application/json");
@@ -38,11 +42,14 @@ public sealed partial class GitHubClient : IDisposable
         HttpResponseMessage received;
         try{received=await http.SendAsync(msg,HttpCompletionOption.ResponseHeadersRead,deadline.Token);}catch(OperationCanceledException ex)when(!ct.IsCancellationRequested){throw new IOException("GitHub 请求超时，请检查网络或代理后重试。",ex);}
         using var response = received;
+        headers?.Invoke(response);
         if(response.Headers.TryGetValues("X-OAuth-Scopes",out var scopes))oauthScopes=string.Join(",",scopes).Split(',',StringSplitOptions.TrimEntries|StringSplitOptions.RemoveEmptyEntries);
         if(response.StatusCode==HttpStatusCode.NotModified && msg.Headers.IfNoneMatch.Count>0){cacheResult?.Invoke(etag!,true);return default;}
+        if(response.StatusCode==HttpStatusCode.NotModified&&modifiedSince!=null)return default;
         if (!response.IsSuccessStatusCode) {
             var content=await response.Content.ReadAsStringAsync(deadline.Token);
             var reason = response.StatusCode switch { HttpStatusCode.Unauthorized=>"登录已失效，请重新授权。", HttpStatusCode.Forbidden=>"权限不足或请求额度已用尽，请稍后重试。", HttpStatusCode.NotFound=>"仓库/版本不存在，或当前账号没有权限。", _=>$"GitHub 请求失败：{(int)response.StatusCode}" };
+            if(url.StartsWith("notifications?",StringComparison.Ordinal)&&response.StatusCode==HttpStatusCode.Forbidden)reason="GitHub 消息接口不可用：请核对凭据是否支持 notifications 或 repo 权限；细粒度令牌与 GitHub App 令牌不支持此接口。可在浏览器查看消息。";
             if(response.Headers.TryGetValues("X-RateLimit-Remaining",out var remaining)&&remaining.FirstOrDefault()=="0"&&response.Headers.TryGetValues("X-RateLimit-Reset",out var reset)&&long.TryParse(reset.FirstOrDefault(),out var seconds))reason=$"GitHub 请求额度已用尽，可在 {DateTimeOffset.FromUnixTimeSeconds(seconds).ToLocalTime():MM-dd HH:mm} 后重试。";
             if(response.StatusCode==(HttpStatusCode)429 || (response.StatusCode==HttpStatusCode.Forbidden && (content.Contains("rate limit",StringComparison.OrdinalIgnoreCase)||response.Headers.Contains("Retry-After")||response.Headers.TryGetValues("X-RateLimit-Remaining",out var quota)&&quota.FirstOrDefault()=="0")))throw new GitHubRateLimitException(reason);
             if(response.StatusCode==HttpStatusCode.NotFound)throw new GitHubNotFoundException(reason);
@@ -145,17 +152,11 @@ public sealed partial class GitHubClient : IDisposable
     { Validate(repo); return await Request($"repos/{repo}/releases",HttpMethod.Post,new {tag_name=tag,target_commitish=commit,name=tag,body=notes,draft=true,prerelease=beta},ct); }
     public async Task VerifyCommit(string repo,string sha,CancellationToken ct)
     { Validate(repo); var e=await Request($"repos/{repo}/commits/{Uri.EscapeDataString(sha)}",ct:ct);if(!string.Equals(S(e,"sha"),sha,StringComparison.OrdinalIgnoreCase))throw new IOException("目标 commit 未能在远程确认。"); }
-    public async Task Upload(string repo,long id,string path,CancellationToken ct)
-    {
-        await EnsureFreshToken(ct);Validate(repo); using var stream=File.OpenRead(path); using var req=new HttpRequestMessage(HttpMethod.Post,$"https://uploads.github.com/repos/{repo}/releases/{id}/assets?name={Uri.EscapeDataString(Path.GetFileName(path))}") {Content=new StreamContent(stream)};
-        req.Headers.Authorization=new("Bearer",Token); req.Content.Headers.ContentType=new("application/octet-stream");
-        using var res=await http.SendAsync(req,ct); if(!res.IsSuccessStatusCode)throw new IOException($"上传安装包失败：{(int)res.StatusCode}。草稿已保留。");
-        using var doc=JsonDocument.Parse(await res.Content.ReadAsStringAsync(ct)); if(doc.RootElement.GetProperty("size").GetInt64()!=stream.Length || S(doc.RootElement,"state")!="uploaded")throw new IOException("上传结果待核实。");
-    }
+    public async Task Upload(string repo,long id,string path,CancellationToken ct)=>await UploadAutomationAsset(repo,id,path,Path.GetFileName(path),ct);
     public Task<JsonElement> ReleaseDetails(string repo,long id,CancellationToken ct){Validate(repo);return Request($"repos/{repo}/releases/{id}",ct:ct,fresh:true);}
     public Task<JsonElement> Publish(string repo,long id,CancellationToken ct)=>Request($"repos/{repo}/releases/{id}",HttpMethod.Patch,new {draft=false},ct);
     public static void Validate(string repo) { if(!Rules.ValidRepository(repo))throw new ArgumentException("请输入 owner/repository 格式的 GitHub 仓库。"); }
-    public void Dispose()=>http.Dispose();
+    public void Dispose(){uploadHttp.Dispose();http.Dispose();}
 }
 
 public sealed class GitHubRateLimitException(string message):IOException(message);

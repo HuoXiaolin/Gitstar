@@ -60,6 +60,7 @@ public class Settings
     public bool Dark { get; set; }
     public DateTimeOffset? LastCheck { get; set; }
     public int RefreshIntervalHours { get; set; } = 24;
+    public int NotificationIntervalMinutes { get; set; }
     public List<Binding> Bindings { get; set; } = [];
     public List<InstalledApp> PortableApps { get; set; } = [];
     public List<string> ExtraRepositories { get; set; } = [];

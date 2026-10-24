@@ -84,7 +84,20 @@ static class AutomationChecks
         }
         using(var server=new AutomationServer{NoDigest=true})using(var api=new GitHubClient(new(),server.Handler)){
             await ProjectAutomationService.Run(config,api,Path.Combine(root,"stage"),Upload,Progress,CancellationToken.None);
-            check(server.Downloads>0,"remote assets without a digest are verified by streamed download rather than matching only file size");
+            check(server.Downloads==1,"digest-less upload is fully downloaded once and final verification reuses the same asset identity");
+            await ProjectAutomationService.Run(config,api,Path.Combine(root,"stage"),Upload,Progress,CancellationToken.None);
+            check(server.Downloads==2&&server.Uploads==1,"a new publish attempt rechecks remote content without uploading unchanged assets");
+        }
+        using(var server=new AutomationServer{NoDigest=true})using(var api=new GitHubClient(new(),server.Handler)){
+            var bytes=Encoding.UTF8.GetBytes("verified content");var sha=Convert.ToHexString(SHA256.HashData(bytes));server.Add("app.zip",bytes);var item=server.Assets.Values.Single();var verified=new HashSet<string>();
+            JsonElement Metadata(long id,string name,string? digest=null,string state="uploaded",long? size=null)=>JsonSerializer.SerializeToElement(new{id,name,digest,state,size=size??bytes.Length});
+            check(await api.AutomationAssetMatches("owner/repo",Metadata(item.Id,item.Name),bytes.Length,sha,CancellationToken.None,verified)&&server.Downloads==1,"first digest-less asset verification reads complete content");
+            check(await api.AutomationAssetMatches("owner/repo",Metadata(item.Id,"renamed.zip"),bytes.Length,sha,CancellationToken.None,verified)&&server.Downloads==1,"renamed verified asset reuses content evidence by asset ID");
+            check(!await api.AutomationAssetMatches("owner/repo",Metadata(item.Id,item.Name,"sha256:"+new string('0',64)),bytes.Length,sha,CancellationToken.None,verified),"fresh conflicting server digest overrides earlier content evidence");
+            check(!await api.AutomationAssetMatches("owner/repo",Metadata(item.Id,item.Name,state:"starter"),bytes.Length,sha,CancellationToken.None,verified)&&!await api.AutomationAssetMatches("owner/repo",Metadata(item.Id,item.Name,size:bytes.Length+1),bytes.Length,sha,CancellationToken.None,verified),"fresh upload state and size are checked before evidence reuse");
+            server.Add("replacement.zip",Encoding.UTF8.GetBytes("corrupt! content"));var replacement=server.Assets.Values.Last();
+            check(!await api.AutomationAssetMatches("owner/repo",Metadata(replacement.Id,replacement.Name),bytes.Length,sha,CancellationToken.None,verified)&&server.Downloads==2,"same-size replacement with new asset ID must be downloaded and corrupt content fails");
+            check(!await api.AutomationAssetMatches("owner/repo",Metadata(replacement.Id,replacement.Name),bytes.Length,sha,CancellationToken.None,verified)&&server.Downloads==3,"failed content verification is never cached");
         }
         using(var server=new AutomationServer())using(var api=new GitHubClient(new(),server.Handler)){
             var before=sourceCalls;var rejected=false;try{await ProjectAutomationService.Run(config with{NotesFile="missing.md"},api,Path.Combine(root,"stage"),Upload,Progress,CancellationToken.None);}catch(IOException){rejected=true;}

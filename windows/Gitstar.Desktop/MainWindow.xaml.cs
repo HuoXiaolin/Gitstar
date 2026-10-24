@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Windows;
@@ -65,7 +65,7 @@ public partial class MainWindow : Window
         menu.Items.Add("彻底退出",null,(_,_)=>Dispatcher.Invoke(RequestExit));tray.ContextMenuStrip=menu;
         Closing+=OnClosing;
         ConfigureBackgroundMemory();
-        timer.Tick+=async(_,_)=>{if(RefreshSchedule.CanStartAutomatic(refreshing,busy,batchPublishing,quitting,clearingCache) && RefreshSchedule.IsDue(settings.RefreshIntervalHours,settings.LastCheck,lastAttempt,DateTimeOffset.UtcNow))await RefreshAsync(true);};
+        timer.Tick+=async(_,_)=>{if(!RefreshSchedule.CanStartAutomatic(refreshing,busy,batchPublishing,quitting,clearingCache))return;if(NotificationSchedule.IsDue(settings.NotificationIntervalMinutes,noticeLastAttempt,DateTimeOffset.UtcNow))_=RefreshNotificationBadge();if(RefreshSchedule.IsDue(settings.RefreshIntervalHours,settings.LastCheck,lastAttempt,DateTimeOffset.UtcNow))await RefreshAsync(true);};
         Loaded+=async(_,_)=>await InitializeSessionAsync();
     }
     internal async Task InitializeSessionAsync()
@@ -74,6 +74,7 @@ public partial class MainWindow : Window
             ready=true;PlanUpdates();Display();
             QueueBackgroundMemoryReclaim();
             if(smokeMode)return;
+            if(NotificationSchedule.IsDue(settings.NotificationIntervalMinutes,noticeLastAttempt,DateTimeOffset.UtcNow))_=RefreshNotificationBadge();
             if(exit)return;
             if(settings.Startup)WindowsServices.Startup(true);
             timer.Start();if(RefreshSchedule.IsDue(settings.RefreshIntervalHours,settings.LastCheck,lastAttempt,DateTimeOffset.UtcNow))await RefreshAsync(true);
@@ -117,7 +118,7 @@ public partial class MainWindow : Window
         var retained=releases.SelectMany(r=>new[]{TransferKey(r,false),TransferKey(r,true)}).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach(var key in transfers.Where(p=>!p.Value.Active && !p.Value.NeedsDetection && !retained.Contains(p.Key)).Select(p=>p.Key).ToArray())transfers.Remove(key);
     }
-    private void AccountLabel()=>model.Account=settings.Account.Length==0?"登录 GitHub":settings.Account;
+    private void AccountLabel(){model.Account=settings.Account.Length==0?"登录 GitHub":settings.Account;ResetNoticeAccount();}
     private void RebuildGroups(bool refresh=true)
     {
         var selected=(GroupSidebar.SelectedItem as GroupEntry)?.Id??"all";var allGroups=groups.Concat(settings.LocalGroups).ToList();
@@ -194,6 +195,7 @@ public partial class MainWindow : Window
         if(api.Token.Length==0 && settings.ExtraRepositories.Count==0 && settings.Bindings.Count==0 && settings.SelfRepository.Length==0){await ScanInstalledAsync(true);if(exit)return;if(!background)model.Status="已重新扫描本机软件；登录 GitHub 或添加仓库后可检查新版本。";return;}
         if(!matchedOnly)lastAttempt=DateTimeOffset.UtcNow;
         await Execute("检查",matchedOnly?"检查已关联软件":background?"后台自动检查关注项目":"手动检查关注项目",async ct=>{
+            var messageRefresh=NotificationSchedule.FollowsUpdates(settings.NotificationIntervalMinutes)?RefreshNotificationBadge(ct):Task.CompletedTask;
             var clock=Stopwatch.StartNew();var warnings=new List<string>();model.Status=matchedOnly?"正在复检已关联软件…":"正在重新检测本机版本…";if(matchedOnly)await ScanMatchedAsync();else await ScanInstalledAsync(true);if(exit)return;ct.ThrowIfCancellationRequested();PlanUpdates();Display();model.Status=matchedOnly?"正在检查已关联仓库…":"正在同步收藏和分组…";
             if(!matchedOnly && api.Token.Length>0) {
                 repositories=await api.Stars(ct);
@@ -214,6 +216,7 @@ public partial class MainWindow : Window
             if(exit)return;
             PlanUpdates();Display();
             if(!matchedOnly && warnings.Count==0)settings.LastCheck=DateTimeOffset.UtcNow;
+            await messageRefresh;
             var newUpdates=updates.Where(u=>!settings.Notified.Contains($"{u.App.Id}/{u.Release.Id}")).ToList();
             if(newUpdates.Count>0) {notificationLocal=true;tray.ShowBalloonTip(6000,"Gitstar",$"{newUpdates.Count} 个已关联软件有新版本，点击打开查看。",Forms.ToolTipIcon.Info);settings.Notified.AddRange(newUpdates.Select(u=>$"{u.App.Id}/{u.Release.Id}"));}
             if(!matchedOnly){Release? own=null;try{own=names.Contains(AppInfo.Repository,StringComparer.OrdinalIgnoreCase)?Rules.SelectRelease(releases.Where(r=>r.Repository.Equals(AppInfo.Repository,StringComparison.OrdinalIgnoreCase)),new Binding()):await api.LatestGitstarRelease(ct);}catch(Exception ex)when(ex is IOException or System.Net.Http.HttpRequestException){/* Optional app update checks do not invalidate subscribed-project results; About exposes check errors. */}if(own!=null && Rules.CompareVersions(own.Tag,typeof(Program).Assembly.GetName().Version?.ToString()??"1.0.0.0")>0 && !settings.Notified.Contains("self/"+own.Id)){notificationLocal=false;tray.ShowBalloonTip(6000,"Gitstar 有新版本",own.Tag+" · 请在最近更新查看日志并手动下载安装。",Forms.ToolTipIcon.Info);settings.Notified.Add("self/"+own.Id);}}
@@ -239,14 +242,10 @@ public partial class MainWindow : Window
         finally{if(started && (kind is "Star管理" or "分组管理" or "批量管理" or "项目管理")){Save();SaveCache();RebuildGroups();PlanUpdates();Display();}op.Updated=DateTimeOffset.Now;taskTransfers.Remove(op.Id);SaveOperations();currentOperation.Value=previous;if(kind=="检查"){refreshing=false;if(automaticCheckId==op.Id){automaticCheckId=null;if(run.Token.IsCancellationRequested)lastAttempt=null;}}run.Dispose();if(settings.KeepLatestPackages && !quitting && !exit)_=Dispatcher.BeginInvoke(async()=>await CleanupOldPackages());}
         QueueBackgroundMemoryReclaim();
     }
-    private async void Login_Click(object sender,RoutedEventArgs e)
+    private void Login_Click(object sender,RoutedEventArgs e)
     {
+        if(settings.Account.Length>0){AccountDialog();return;}
         if(busy||batchPublishing){DialogMessage.Show(this,"请先等待当前任务完成。","Gitstar");return;}
-        if(settings.Account.Length>0) {
-            if(DialogMessage.Show(this,$"退出 {settings.Account}？此账号缓存将留在本机，界面切回未登录状态。","Gitstar",MessageBoxButton.OKCancel)!=MessageBoxResult.OK)return;
-            store.Set("profile/"+settings.Account,settings);CredentialStorage.Clear(store);var old=settings;
-            settings=new Settings {ClientId=old.ClientId,Proxy=old.Proxy,DirectConnection=old.DirectConnection,Startup=old.Startup,Dark=old.Dark,DownloadFolder=old.DownloadFolder,RecentSort=old.RecentSort,ProjectsSort=old.ProjectsSort};api.Token="";Save();SwitchOperations();LoadCache();RebuildGroups();AccountLabel();PlanUpdates();Display();return;
-        }
         AuthorizeGitHub();
     }
     private void AuthorizeGitHub()
@@ -417,6 +416,8 @@ public partial class MainWindow : Window
         f.Section("下载与更新");var folder=f.Text("默认下载目录",settings.DownloadFolder);var sameVersion=f.Select("同版本安装包已存在时",["每次询问：替换或跳过","重新下载并替换","跳过下载和安装"],settings.SameVersionDownload);f.Label("安装包直接保存在此目录，不创建项目或版本子文件夹。文件名包含项目和版本，区分不同项目的同名安装包。替换前会核对旧下载记录，新文件校验成功后才覆盖。");f.Section("网络与启动");var proxy=f.Text("应用代理地址（http/https/socks5，无用户名密码；留空使用系统代理）",settings.Proxy);var direct=f.Check("直连（不使用系统代理）",settings.DirectConnection);f.Section("开机静默启动");var startup=f.Check("登录 Windows 后静默启动到托盘",settings.Startup);RenderStartupSettings(f,startup,previewPath);f.Section("外观");var dark=f.Check("深色模式",settings.Dark);
         f.Section("自动检查");var frequency=f.Select("后台刷新频率",RefreshSchedule.Labels,Array.IndexOf(RefreshSchedule.Hours,RefreshSchedule.Normalize(settings.RefreshIntervalHours)));
         f.Label("默认每天刷新一次，也可设为仅手动。切换页面只显示缓存；点击「检查更新」或托盘「立即检查更新」可强制刷新，不受周期限制。后台不下载；关闭窗口收起托盘。");
+        f.Section("消息提醒");var messageFrequency=f.Select("消息轮询周期",NotificationSchedule.Labels,Array.IndexOf(NotificationSchedule.Minutes,NotificationSchedule.Normalize(settings.NotificationIntervalMinutes)));
+        f.Label("默认跟随软件更新检查，也可独立设置消息周期或仅手动刷新。未读消息在消息按钮右上角显示小红点。服务器最短请求间隔与失败暂缓重试仍生效；消息窗口始终可手动刷新。");
         RenderAbout(f);
         f.Action("重新授权 GitHub",()=>{settings.ClientId=client.Text.Trim();Save();f.Close();AuthorizeGitHub();return Task.CompletedTask;});
         f.Action("导出公共配置",()=>{var d=new SaveFileDialog {Filter="JSON|*.json",FileName="Gitstar-settings.json"};if(d.ShowDialog(f)==true){var publicRepos=repositories.Where(r=>!r.Private).Select(r=>r.FullName).ToHashSet(StringComparer.OrdinalIgnoreCase);var payload=new {schemaVersion=1,repositories=settings.ExtraRepositories.Where(publicRepos.Contains).ToArray(),groups=settings.LocalGroups.Select(g=>g with {Repositories=g.Repositories.Where(publicRepos.Contains).ToList()}).Where(g=>g.Repositories.Count>0).ToArray()};File.WriteAllText(d.FileName,JsonSerializer.Serialize(payload,new JsonSerializerOptions {WriteIndented=true}));}return Task.CompletedTask;});
@@ -424,8 +425,9 @@ public partial class MainWindow : Window
         f.Action("保存",()=>{
             if(proxy.Text.Trim().Length>0 && (!Uri.TryCreate(proxy.Text.Trim(),UriKind.Absolute,out var u)||u.Scheme is not ("http" or "https" or "socks5")||u.UserInfo.Length>0))throw new ArgumentException("代理请输入 http、https 或 socks5 地址，不能包含密码。");
             settings.SelfRepository=AppInfo.Repository;settings.ClientId=client.Text.Trim();settings.DownloadFolder=Path.GetFullPath(folder.Text);settings.Proxy=proxy.Text.Trim();settings.DirectConnection=direct.IsChecked==true;settings.Startup=startup.IsChecked==true;settings.Dark=dark.IsChecked==true;
+            settings.NotificationIntervalMinutes=NotificationSchedule.Minutes[messageFrequency.SelectedIndex];
             settings.SameVersionDownload=sameVersion.SelectedIndex;settings.KeepLatestPackages=keepLatest.IsChecked==true;settings.DeleteInstalledPackages=autoDelete.IsChecked==true;settings.PromptInstalledPackageCleanup=promptDelete.IsChecked==true;settings.RefreshIntervalHours=RefreshSchedule.Hours[frequency.SelectedIndex];WindowsServices.Startup(settings.Startup);Save();var authorization=api.Credentials;api.Dispose();api=new(settings);ConfigureApiCache();api.CredentialsChanged=auth=>CredentialStorage.Save(store,auth);api.SetCredentials(authorization);AvatarCache.Configure(settings);ApplyTheme();Display();f.Close();return Task.CompletedTask;
-        },true);f.SectionNavigation(previewPath!=null?(Environment.GetCommandLineArgs().Contains("--settings-follow")?"关注列表":Environment.GetCommandLineArgs().Contains("--settings-about")?"关于":Environment.GetCommandLineArgs().Contains("--settings-appearance")?"外观":Environment.GetCommandLineArgs().Contains("--settings-auto")?"自动检查":Environment.GetCommandLineArgs().Contains("--settings-startup")?"开机静默启动":"下载与更新"):null);if(previewPath!=null)f.RenderPreview(previewPath);f.ShowDialog();
+        },true);f.SectionNavigation(previewPath!=null?(Environment.GetCommandLineArgs().Contains("--settings-follow")?"关注列表":Environment.GetCommandLineArgs().Contains("--settings-about")?"关于":Environment.GetCommandLineArgs().Contains("--settings-appearance")?"外观":Environment.GetCommandLineArgs().Contains("--settings-auto")?"自动检查":Environment.GetCommandLineArgs().Contains("--settings-messages")?"消息提醒":Environment.GetCommandLineArgs().Contains("--settings-startup")?"开机静默启动":"下载与更新"):null);if(previewPath!=null)f.RenderPreview(previewPath);f.ShowDialog();
     }
     private void Tasks_Click(object sender,RoutedEventArgs e)=>TasksDialog();
     private void TasksDialog(string? previewPath=null)
@@ -533,6 +535,10 @@ public partial class MainWindow : Window
     public async void RenderSmoke(string path,bool cards=false,bool local=false,bool dark=false,bool firstGroup=false,bool matching=false,bool settingsPreview=false,bool avatars=false,bool progressPreview=false,bool groupPreview=false,bool addPreview=false,bool batchPreview=false,bool tasksPreview=false,bool projectsPreview=false,bool sourcePreview=false,bool createPreview=false,bool projectSettingsPreview=false,bool workspacePreview=false,bool publishPreview=false,bool automationPreview=false)
     {
         settings.Dark=dark;ApplyTheme();
+        if(Environment.GetCommandLineArgs().Contains("--upload-progress")){var state=new TransferState();state.Stage("上传中 42%",false);state.Percentage=42;state.Detail=new ReleaseUploadProgress("Example-Setup-x64.exe",7800000,18500000,TimeSpan.FromSeconds(25),false,TimeSpan.Zero).Detail;automaticPublishing["example/Gitstar"]=state;}
+        if(Environment.GetCommandLineArgs().Contains("--account-info")){settings.Account="example-user";AccountDialog(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
+        if(Environment.GetCommandLineArgs().Contains("--notification-dot"))NotificationsDot.Visibility=Visibility.Visible;
+        if(Environment.GetCommandLineArgs().Contains("--notifications")){NotificationDialog(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--portable-update")){await PortableUpdateSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--manual-software")){BindingDialog(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--source-sync")){SourceSyncSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}

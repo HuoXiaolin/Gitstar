@@ -12,8 +12,11 @@ public static class ReleaseAssetFiles
         foreach(var path in paths){
             ct.ThrowIfCancellationRequested();var file=new FileInfo(path);if(file.Length==0||file.Attributes.HasFlag(FileAttributes.ReparsePoint))throw new IOException("附件为空或是文件链接："+file.Name);
             progress?.Invoke(file.Name);var copy=System.IO.Path.Combine(stage,file.Name);
-            using(var input=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read,81920,true))using(var output=new FileStream(copy,FileMode.CreateNew,FileAccess.Write,FileShare.None,81920,true))await input.CopyToAsync(output,ct);
-            using var data=File.OpenRead(copy);files.Add(new(ReleaseRules.AssetName(file.Name),copy,data.Length,Convert.ToHexString(await SHA256.HashDataAsync(data,ct)),file.Name));
+            using(var input=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read,81920,true))using(var output=new FileStream(copy,FileMode.CreateNew,FileAccess.Write,FileShare.None,81920,true))using(var hash=IncrementalHash.CreateHash(HashAlgorithmName.SHA256)){
+                var buffer=new byte[81920];int count;long total=0;
+                while((count=await input.ReadAsync(buffer,ct))>0){await output.WriteAsync(buffer.AsMemory(0,count),ct);hash.AppendData(buffer,0,count);total+=count;}
+                files.Add(new(ReleaseRules.AssetName(file.Name),copy,total,Convert.ToHexString(hash.GetHashAndReset()),file.Name));
+            }
         }
         if(files.GroupBy(item=>item.Name,StringComparer.OrdinalIgnoreCase).Any(group=>group.Count()>1))throw new IOException("附件的兼容名称重复，请调整文件名后重试。");
         var manifest=files.FirstOrDefault(item=>item.Name.Equals("SHA256SUMS.txt",StringComparison.OrdinalIgnoreCase));

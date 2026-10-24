@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using Microsoft.Win32;
@@ -24,7 +24,11 @@ public partial class MainWindow
         section.Children.Add(ProjectText(config==null?"配置源码目录、发行目录和版本号来源后，一键提交全部源码变更并发布最新安装包。":"源码："+config.SourceFolder+"\n发行："+config.ReleaseFolder,12,true));
         if(config!=null){section.Children.Add(ProjectText("版本来源："+(config.VersionFile.Length>0?config.VersionFile:"自动读取")+"   ·   "+(config.IncludeInBatch?"参与全部发布":"仅单独发布"),11,true));if(config.SelectedAssets!=null)section.Children.Add(ProjectText("自动上传：按已保存的勾选结果，共 "+config.SelectedAssets.Count+" 个文件；可在“更新”中调整。",11,true));}
         var actions=new WrapPanel();section.Children.Add(actions);var running=automaticPublishing.TryGetValue(project.FullName,out var state);var button=ProjectAction(actions,"同步并发布最新",()=>AutoPublishProject(project),true,ProjectWritable(project)&&!running);
-        if(running){button.Opacity=1;button.SetBinding(ContentControl.ContentProperty,new System.Windows.Data.Binding(nameof(TransferState.Label)){Source=state});}
+        if(running){
+            button.Opacity=1;button.SetBinding(ContentControl.ContentProperty,new System.Windows.Data.Binding(nameof(TransferState.Label)){Source=state});
+            var progress=new ProgressBar{Minimum=0,Maximum=100,Height=7,Margin=new Thickness(0,12,0,6)};progress.SetResourceReference(ForegroundProperty,"Accent");progress.SetBinding(ProgressBar.ValueProperty,new System.Windows.Data.Binding(nameof(TransferState.Percentage)){Source=state});progress.SetBinding(ProgressBar.IsIndeterminateProperty,new System.Windows.Data.Binding(nameof(TransferState.Indeterminate)){Source=state});section.Children.Add(progress);
+            var detail=ProjectText("",12,true);detail.SetBinding(TextBlock.TextProperty,new System.Windows.Data.Binding(nameof(TransferState.Detail)){Source=state});section.Children.Add(detail);
+        }
         ProjectAction(actions,"自动发布配置",()=>ProjectDialog(()=>AutomationConfigDialog(project)),enabled:!running);
         section.Children.Add(ProjectText("按 .gitignore 提交全部变更；自动读取版本与日志。已存在相同版本时更新附件与日志，保留版本标签。",11,true));
     }
@@ -81,11 +85,12 @@ public partial class MainWindow
             await Execute("自动发布",project.FullName,async ct=>{
                 var op=currentOperation.Value!;op.Repository=project.FullName;transfer.Stage("排队等待发布");await automationSlots.WaitAsync(ct);
                 try{
-                    void Progress(string text,long? id){transfer.Stage(text);model.Status=project.Name+" · "+text;if(id!=null){op.RemoteId=id;SaveOperations();}}
+                    void Progress(string text,long? id){transfer.Stage(text);transfer.Detail="";model.Status=project.Name+" · "+text;if(id!=null&&op.RemoteId!=id){op.RemoteId=id;SaveOperations();}}
+                    void UploadProgress(ReleaseUploadProgress info){void Apply(){if(exit)return;transfer.Stage(info.Label,info.AwaitingResponse);transfer.Percentage=info.Percentage;transfer.Detail=info.Detail;model.Status=project.Name+" · "+info.Label+" · "+info.Detail;}if(Dispatcher.CheckAccess())Apply();else Dispatcher.BeginInvoke(Apply);}
                     await api.EnsureFreshToken(ct);var git=new GitWorkspace(api.Token);
                     var result=await ProjectAutomationService.Run(config,api,Path.Combine(store.Root,"automation-staging"),async token=>{
                         await api.EnsureFreshToken(token);git=new GitWorkspace(api.Token);var before=await git.Inspect(config.SourceFolder,token);if(!ProjectRules.MatchesRemote(before.Remote,project.FullName))throw new IOException("源码目录 origin 与项目不一致，请重新关联。");await git.EnsureIdentity(config.SourceFolder,api.CommitIdentity,token);var state=await git.AutoUpload(config.SourceFolder,project.FullName,config.Branch,token);state=await VerifySourceRemote(state,project.FullName,token);RememberWorkspace(project,state);op.Results.Add("成功：源码已同步 · "+state.Commit[..Math.Min(10,state.Commit.Length)]);SaveOperations();return state;
-                    },Progress,ct,token=>git.Run(config.SourceFolder,token,"log","-5","--pretty=format:- %s (%h)"));
+                    },Progress,ct,token=>git.Run(config.SourceFolder,token,"log","-5","--pretty=format:- %s (%h)"),UploadProgress);
                     op.Tag=result.Tag;op.RemoteId=result.ReleaseId;op.Results.Add(result.Skipped?"成功：按配置保留同版本附件":"成功："+result.Tag+" · 上传 "+result.Uploaded+" 个，复用 "+result.Unchanged+" 个附件");
                     if(result.Release is {} verified)RememberProjectVersion(project.FullName,result.Skipped?verified:verified with{LastUploadedAt=DateTimeOffset.UtcNow,LastUploadedCount=result.Uploaded,LastReusedCount=result.Unchanged,LastAction="同步并发布"});await RefreshReleaseDirectoryStatus(project.FullName,ct);transfer.Stage("同步发布完成");completed=true;
                 }finally{automationSlots.Release();}
