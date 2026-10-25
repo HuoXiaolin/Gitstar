@@ -22,6 +22,13 @@ if(Test-Path -LiteralPath $screenshotsRoot){
     }
     $pending.Push($screenshotsRoot)
 }
+$supportRoot=Join-Path $projectPath 'docs\support'
+if(Test-Path -LiteralPath $supportRoot){
+    foreach($folder in @((Join-Path $projectPath 'docs'),$supportRoot)){
+        if((Get-Item -LiteralPath $folder -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){throw "Support asset directory is a link: $folder"}
+    }
+    $pending.Push($supportRoot)
+}
 while($pending.Count){
     foreach($item in Get-ChildItem -LiteralPath $pending.Pop() -Force){
         $relative=$item.FullName.Substring($projectPath.Length+1)

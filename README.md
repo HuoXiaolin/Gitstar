@@ -106,6 +106,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File windows/build.ps1 -Dotne
 
 可运行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File windows/check-build-version.ps1`，用隔离的编译器和安装器替身核对日期、失败重试、版本同步及并发锁规则；此检查不会重新生成正式安装包。
 
+## 支持项目
+
+感谢你使用 Gitstar。如果它让你跟进开源软件、管理本机更新或发布项目更省心，欢迎点个 Star，也可以自愿赞助支持。
+
+赞助将用于补贴开发和维护中的 **AI Token 等工具开销**，也为持续改进提供动力。金额随意，感谢每一份支持；反馈问题、提出建议同样是在帮助项目。
+
+| 支付宝 | 微信支付 |
+| :---: | :---: |
+| <img src="docs/support/alipay.jpg" alt="支付宝赞助二维码" width="200"> | <img src="docs/support/wechat.png" alt="微信支付赞助二维码" width="200"> |
+
 ## 开源许可
 
 Copyright (C) 2026 HuoXiaolin。Gitstar 采用 [GNU GPL v3.0](LICENSE)（`GPL-3.0-only`）发布。
