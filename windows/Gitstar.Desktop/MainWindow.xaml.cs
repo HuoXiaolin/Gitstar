@@ -537,6 +537,7 @@ public partial class MainWindow : Window
     public async void RenderSmoke(string path,bool cards=false,bool local=false,bool dark=false,bool firstGroup=false,bool matching=false,bool settingsPreview=false,bool avatars=false,bool progressPreview=false,bool groupPreview=false,bool addPreview=false,bool batchPreview=false,bool tasksPreview=false,bool projectsPreview=false,bool sourcePreview=false,bool createPreview=false,bool projectSettingsPreview=false,bool workspacePreview=false,bool publishPreview=false,bool automationPreview=false)
     {
         settings.Dark=dark;ApplyTheme();
+        if(Environment.GetCommandLineArgs().Contains("--software-audit")){SoftwareAuditDialog(this,path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--download-settings-notice")){DownloadSettingsNoticeSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--upload-progress")){var state=new TransferState();state.Stage("上传中 42%",false);state.Percentage=42;state.Detail=new ReleaseUploadProgress("Example-Setup-x64.exe",7800000,18500000,TimeSpan.FromSeconds(25),false,TimeSpan.Zero).Detail;automaticPublishing["example/Gitstar"]=state;}
         if(Environment.GetCommandLineArgs().Contains("--account-info")){settings.Account="example-user";AccountDialog(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}

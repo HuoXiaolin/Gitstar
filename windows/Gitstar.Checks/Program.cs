@@ -8,6 +8,7 @@ using System.Security.Cryptography;
 using System.IO.Compression;
 
 try {
+if(args.FirstOrDefault()=="--portable-process-fixture"&&args.Length==2){File.WriteAllText(args[1],System.Text.Json.JsonSerializer.Serialize(new{Pid=Environment.ProcessId,WorkingDirectory=Environment.CurrentDirectory}));await Task.Delay(TimeSpan.FromSeconds(45));return;}
 if(args.FirstOrDefault()=="--set-binding-program"&&args.Length==3){
     using var activation=new AppActivation(null);if(!activation.IsPrimary)throw new IOException("请先从 Gitstar 托盘彻底退出，避免覆盖正在修改的设置。");
     var repository=Rules.RepositoryName(args[1]);if(!Rules.ValidRepository(repository))throw new IOException("仓库地址无效。");
@@ -238,10 +239,12 @@ SpecialFollowChecks.Run(Check,root);
 ActivationChecks.Run(Check);
 PortableReplacementChecks.Run(Check,root);
 RootPortableReplacementChecks.Run(Check,root);
+await PortableProcessChecks.Run(Check,root);
 await NotificationChecks.Run(Check);
 await RepositoryIssueChecks.Run(Check);
 await UploadProgressChecks.Run(Check,root);
 DownloadDefaultsChecks.Run(Check);
+SoftwareAuditChecks.Run(Check,root);
 await ReleaseStateChecks.Run(Check,root);
 await SelfUpdateChecks.Run(Check);
 await UpdateSortingChecks.Run(Check);

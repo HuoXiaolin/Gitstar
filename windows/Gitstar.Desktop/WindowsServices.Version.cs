@@ -6,7 +6,7 @@ namespace Gitstar.Desktop;
 public static partial class WindowsServices
 {
     internal record RegisteredProgram(InstalledApp App,string Icon="",string Uninstall="");
-    private static List<RegisteredProgram> RegisteredPrograms()
+    private static List<RegisteredProgram> RegisteredPrograms(Action<string>? warning=null)
     {
         var list=new List<RegisteredProgram>();
         foreach(var hive in new[]{RegistryHive.LocalMachine,RegistryHive.CurrentUser})foreach(var view in new[]{RegistryView.Registry64,RegistryView.Registry32}){
@@ -18,10 +18,11 @@ public static partial class WindowsServices
                     if(string.IsNullOrWhiteSpace(name)||Convert.ToInt32(entry?.GetValue("SystemComponent")??0)==1)continue;
                     var hint=new[]{"URLInfoAbout","URLUpdateInfo","HelpLink"}.Select(field=>AppMatcher.GitHubRepository(entry?.GetValue(field) as string??"")).FirstOrDefault(value=>value.Length>0)??"";
                     var icon=entry?.GetValue("DisplayIcon") as string??"";var candidate=ProgramPath(icon);
+                    if(warning!=null&&candidate.StartsWith(@"\\",StringComparison.Ordinal)){warning("网络主程序位置暂不自动核对。");candidate="";}
                     if(candidate.Length>0&&(!File.Exists(candidate)||candidate.StartsWith(Environment.GetFolderPath(Environment.SpecialFolder.Windows)+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase)||Regex.IsMatch(Path.GetFileNameWithoutExtension(candidate),@"^(unins|uninstall|setup|update|crash|helper|rundll)",RegexOptions.IgnoreCase)))candidate="";
                     list.Add(new(new($"{hive}/{view}/{key}",name,entry?.GetValue("DisplayVersion") as string??"未知",entry?.GetValue("InstallLocation") as string??"",RepositoryHint:hint,ExecutablePath:candidate),icon,entry?.GetValue("UninstallString") as string??""));
-                }catch(Exception ex)when(ex is System.Security.SecurityException or IOException or UnauthorizedAccessException){}
-            }catch(Exception ex)when(ex is System.Security.SecurityException or IOException or UnauthorizedAccessException){}
+                }catch(Exception ex)when(ex is System.Security.SecurityException or IOException or UnauthorizedAccessException){warning?.Invoke("部分软件安装登记无法读取："+ex.Message);}
+            }catch(Exception ex)when(ex is System.Security.SecurityException or IOException or UnauthorizedAccessException){warning?.Invoke("部分安装登记范围无法读取："+ex.Message);}
         }
         return list;
     }
@@ -30,12 +31,13 @@ public static partial class WindowsServices
         var subscriptions=bindings.ToArray();return ScanInventory(RegisteredPrograms(),subscriptions,portable,known,matchedOnly,RelatedRunningPrograms(subscriptions));
     }
     public static List<InstalledApp> ScanMatched(IEnumerable<Binding> bindings,IEnumerable<InstalledApp> portable,IEnumerable<InstalledApp>? known=null)=>ScanCurrentPrograms(bindings,portable,known??[],true);
-    internal static List<InstalledApp> ScanInventory(IEnumerable<RegisteredProgram> registry,IEnumerable<Binding> bindings,IEnumerable<InstalledApp> portable,IEnumerable<InstalledApp> known,bool matchedOnly,IEnumerable<ProgramVersion>? running=null)
+    internal static List<InstalledApp> ScanInventory(IEnumerable<RegisteredProgram> registry,IEnumerable<Binding> bindings,IEnumerable<InstalledApp> portable,IEnumerable<InstalledApp> known,bool matchedOnly,IEnumerable<ProgramVersion>? running=null,CancellationToken ct=default)
     {
         var records=registry.Concat(portable.Select(app=>new RegisteredProgram(app))).ToList();var apps=records.Select(record=>record.App).ToArray();
         var subscriptions=bindings.ToArray();var saved=known.ToArray();var targets=new Dictionary<string,List<Binding>>(StringComparer.OrdinalIgnoreCase);
         var previousIds=subscriptions.SelectMany(binding=>binding.AliasIds.Append(binding.AppId)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach(var binding in subscriptions){
+            ct.ThrowIfCancellationRequested();
             var target=InstalledIdentity.Target(binding,apps,saved);
             if(target==null){
                 var previous=InstalledVersion.Find(saved,binding.AppId);
@@ -49,6 +51,7 @@ public static partial class WindowsServices
         }
         var cache=new Dictionary<string,ProgramVersion?>(StringComparer.OrdinalIgnoreCase);var list=new List<InstalledApp>();
         foreach(var record in records.DistinctBy(record=>record.App.Id,StringComparer.OrdinalIgnoreCase)){
+            ct.ThrowIfCancellationRequested();
             targets.TryGetValue(record.App.Id,out var matches);if(matchedOnly&&matches==null&&!previousIds.Contains(record.App.Id))continue;
             var preferred=(matches??[]).Select(binding=>binding.ExecutablePath).Where(path=>path.Length>0).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             var app=preferred.Length==1?record.App with{ExecutablePath=preferred[0]}:record.App;
