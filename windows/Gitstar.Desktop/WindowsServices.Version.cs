@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Microsoft.Win32;
 namespace Gitstar.Desktop;
@@ -26,14 +26,14 @@ public static partial class WindowsServices
         }
         return list;
     }
-    private static List<InstalledApp> ScanCurrentPrograms(IEnumerable<Binding> bindings,IEnumerable<InstalledApp> portable,IEnumerable<InstalledApp> known,bool matchedOnly)
+    private static List<InstalledApp> ScanCurrentPrograms(IEnumerable<Binding> bindings,IEnumerable<InstalledApp> portable,IEnumerable<InstalledApp> known,bool matchedOnly,CancellationToken ct=default)
     {
-        var subscriptions=bindings.ToArray();return ScanInventory(RegisteredPrograms(),subscriptions,portable,known,matchedOnly,RelatedRunningPrograms(subscriptions));
+        var subscriptions=bindings.ToArray();var apps=ScanInventory(RegisteredPrograms(),subscriptions,portable,known,matchedOnly,RelatedRunningPrograms(subscriptions),ct);return matchedOnly?apps:SoftwareInventory.Combine(apps,UserPrograms(ct),subscriptions);
     }
     public static List<InstalledApp> ScanMatched(IEnumerable<Binding> bindings,IEnumerable<InstalledApp> portable,IEnumerable<InstalledApp>? known=null)=>ScanCurrentPrograms(bindings,portable,known??[],true);
     internal static List<InstalledApp> ScanInventory(IEnumerable<RegisteredProgram> registry,IEnumerable<Binding> bindings,IEnumerable<InstalledApp> portable,IEnumerable<InstalledApp> known,bool matchedOnly,IEnumerable<ProgramVersion>? running=null,CancellationToken ct=default)
     {
-        var records=registry.Concat(portable.Select(app=>new RegisteredProgram(app))).ToList();var apps=records.Select(record=>record.App).ToArray();
+        var explicitPortable=portable.ToArray();var records=registry.Concat(explicitPortable.Select(app=>new RegisteredProgram(app))).Select(record=>explicitPortable.Any(app=>app.Portable&&(app.Id.Equals(record.App.Id,StringComparison.OrdinalIgnoreCase)||app.ExecutablePath.Length>0&&app.ExecutablePath.Equals(record.App.ExecutablePath,StringComparison.OrdinalIgnoreCase)))?record with{App=record.App with{Portable=true}}:record).ToList();var apps=records.Select(record=>record.App).ToArray();
         var subscriptions=bindings.ToArray();var saved=known.ToArray();var targets=new Dictionary<string,List<Binding>>(StringComparer.OrdinalIgnoreCase);
         var previousIds=subscriptions.SelectMany(binding=>binding.AliasIds.Append(binding.AppId)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach(var binding in subscriptions){

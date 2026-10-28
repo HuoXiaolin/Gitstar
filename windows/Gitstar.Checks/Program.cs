@@ -1,4 +1,4 @@
-using Gitstar.Core;
+﻿using Gitstar.Core;
 using Gitstar.Desktop;
 using System.Net;
 using System.Net.Http;
@@ -54,6 +54,9 @@ if(args.FirstOrDefault()=="--inspect-feed"){
     Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new{Repository=repository,Stable=Rules.SelectRelease(releases,new Binding())?.Tag,Combined=Rules.SelectRelease(releases,new Binding{IncludePrerelease=true})?.Tag,PageCount=pages.Count,RetainedCandidates=releases.Select(r=>new{r.Tag,r.Prerelease,r.IsLatest,r.Published})}));return;
 }
 if(args.Contains("--scan-installed")){var scanned=WindowsServices.Scan();foreach(var entry in scanned.Where(a=>a.Name.Equals("Lertaro",StringComparison.OrdinalIgnoreCase)))Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(entry));return;}
+if(args.Contains("--inspect-user-programs")){var started=System.Diagnostics.Stopwatch.StartNew();var scanned=WindowsServices.UserPrograms();Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new{Count=scanned.Count,Milliseconds=started.ElapsedMilliseconds,AppDataPrograms=scanned.Count(app=>app.ExecutablePath.Contains("\\AppData\\",StringComparison.OrdinalIgnoreCase)),PhysicalDuplicates=scanned.GroupBy(app=>app.ExecutablePath,StringComparer.OrdinalIgnoreCase).Count(group=>group.Count()>1)}));return;}
+if(args.FirstOrDefault()=="--inspect-software-inventory"){List<InstalledApp> apps;if(args.Length>2){using var input=System.Text.Json.JsonDocument.Parse(File.ReadAllText(args[2]));var config=System.Text.Json.JsonSerializer.Deserialize<Settings>(input.RootElement.GetProperty("Settings"))!;var known=System.Text.Json.JsonSerializer.Deserialize<List<InstalledApp>>(input.RootElement.GetProperty("Apps"))!;apps=WindowsServices.Scan(config.PortableApps,config.Bindings,known);}else apps=WindowsServices.Scan();File.WriteAllText(args[1],System.Text.Json.JsonSerializer.Serialize(apps,new System.Text.Json.JsonSerializerOptions{WriteIndented=true}));Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new{Count=apps.Count,RepeatedNames=apps.GroupBy(app=>app.Name,StringComparer.OrdinalIgnoreCase).Count(group=>group.Count()>1)}));return;}
+if(args.FirstOrDefault()=="--inspect-repository-search"){using var api=new GitHubClient(new());using var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(35));var page=await api.SearchRepositories(args[1],deadline.Token);Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new{Count=page.Items.Count,page.Total,page.Incomplete,First=page.Items.FirstOrDefault()?.FullName}));return;}
 var count=0;
 void Check(bool value,string label){if(!value)throw new Exception("FAIL: "+label);Console.WriteLine("PASS: "+label);count++;}
 StartupAndReminderChecks.Run(Check);
@@ -245,6 +248,9 @@ await RepositoryIssueChecks.Run(Check);
 await UploadProgressChecks.Run(Check,root);
 DownloadDefaultsChecks.Run(Check);
 SoftwareAuditChecks.Run(Check,root);
+SoftwareDiscoveryChecks.Run(Check,root);
+SoftwareInventoryChecks.Run(Check,root);
+await RepositorySearchChecks.Run(Check);
 await ReleaseStateChecks.Run(Check,root);
 await SelfUpdateChecks.Run(Check);
 await UpdateSortingChecks.Run(Check);

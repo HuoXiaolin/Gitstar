@@ -28,6 +28,6 @@ public static partial class WindowsServices
             var folder=Path.GetDirectoryName(binding.ExecutablePath);if(folder==null||AuditPath(folder)!=SoftwarePathState.Present)continue;
             try{foreach(var candidate in PortableExecutables(folder)){ct.ThrowIfCancellationRequested();apps.Add(DescribePortable(candidate));}}catch(Exception error)when(error is IOException or UnauthorizedAccessException){}
         }
-        return new(InstalledIdentity.Merge(apps),warnings.Distinct().ToList());
+        return new(SoftwareInventory.Combine(apps,UserPrograms(ct),subscriptions),warnings.Distinct().ToList());
     }
 }

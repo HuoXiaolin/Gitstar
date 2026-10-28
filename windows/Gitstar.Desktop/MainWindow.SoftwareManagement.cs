@@ -58,13 +58,15 @@ public partial class MainWindow
         var f=new Form(owner,"修改软件匹配",760,720);var known=InstalledVersion.Find(installed,binding.AppId);
         var choices=installed.GroupBy(a=>a.Id).Select(g=>g.First()).OrderBy(a=>a.Name,StringComparer.OrdinalIgnoreCase).ToList();if(known==null){known=new(binding.AppId,binding.Repository.Split('/').Last(),"待检测","");choices.Insert(0,known);}var index=choices.FindIndex(a=>a.Id==known.Id);
         var software=f.Select("本机软件",choices.Select(a=>a.Name+" · "+a.Version+" · "+(a.ExecutablePath.Length>0?a.ExecutablePath:a.Location.Length>0?a.Location:a.Id)),index);
+        var updateMode=f.Select("更新方式",["便携软件：下载后替换程序文件","安装版软件：下载后运行安装器"],known.Portable?0:1);
         var repo=f.Text("GitHub 仓库地址或 owner/repo",binding.Repository);var executable=f.Text("主程序 EXE 路径",binding.ExecutablePath);var beta=f.Check("包含测试版",binding.IncludePrerelease);var prefix=f.Text("版本标签前缀",binding.TagPrefix);var pattern=f.Text("安装包文件名包含",binding.AssetPattern);f.Label("保留当前停止检查与暂停设置。更换软件、仓库或版本标签前缀时，清除旧匹配的忽略版本记录。修改匹配不会发起全机扫描。");
         var confirmed=f.Text("应用关于页版本（可选，文件属性不准确时填写）",binding.ConfirmedVersion);
+        AddRepositorySearch(f,repo,()=>repo.Text,value=>repo.Text=value,()=>known.Name);
         f.Label("优先自动读取应用版本声明、主程序和安装登记。可按应用关于页确认版本；确认绑定当前 EXE 的 SHA-256，程序更新或路径改变后失效。留空恢复自动识别，不使用仓库目标版本代填。");
         (string Version,string Path,string Hash)? confirmation=null;
         executable.TextChanged+=(_,_)=>{confirmed.Text="";confirmation=null;};
         confirmed.TextChanged+=(_,_)=>confirmation=null;
-        software.SelectionChanged+=(_,_)=>{if(software.SelectedIndex>=0)executable.Text=choices[software.SelectedIndex].ExecutablePath;};
+        software.SelectionChanged+=(_,_)=>{if(software.SelectedIndex>=0){executable.Text=choices[software.SelectedIndex].ExecutablePath;updateMode.SelectedIndex=choices[software.SelectedIndex].Portable?0:1;}};
         f.Action("选择主程序",()=>{var picker=new OpenFileDialog{Filter="应用程序|*.exe"};if(picker.ShowDialog(f)==true)executable.Text=picker.FileName;return Task.CompletedTask;});
         f.Action("选择运行中的程序",()=>{
             var running=WindowsServices.RelatedRunningPrograms([binding.Snapshot()]);if(running.Count==0)throw new IOException("未找到相关的运行中程序，请先打开该软件，或直接选择主程序文件。");
@@ -74,12 +76,13 @@ public partial class MainWindow
         });
         f.Action("重新确认应用版本",()=>{confirmation=WindowsServices.ConfirmInstalledVersion(confirmed.Text,executable.Text.Trim());if(confirmation.Value.Version.Length==0)throw new IOException("请先填写应用关于页显示的版本号。");model.Status="已核对当前主程序文件，保存匹配后生效。";return Task.CompletedTask;});
         f.Action("保存匹配",async()=>{
-            var path=executable.Text.Trim();if(path.Length>0&&(!File.Exists(path)||!path.EndsWith(".exe",StringComparison.OrdinalIgnoreCase)))throw new IOException("请选择存在的主程序 EXE。");if(software.SelectedIndex<0)throw new IOException("请选择本机软件。");
+            var path=executable.Text.Trim();if(path.Length>0)path=WindowsServices.SoftwareInputPath(path);if(path.Length>0&&(!File.Exists(path)||!path.EndsWith(".exe",StringComparison.OrdinalIgnoreCase)))throw new IOException("请选择存在的主程序 EXE。");if(software.SelectedIndex<0)throw new IOException("请选择本机软件。");if(updateMode.SelectedIndex==0&&path.Length==0)throw new IOException("便携替换需要指定主程序 EXE。");
             var unchanged=confirmed.Text.Trim()==binding.ConfirmedVersion&&path.Equals(binding.ConfirmedVersionPath,StringComparison.OrdinalIgnoreCase);
             var evidence=confirmation??(unchanged?(Version:binding.ConfirmedVersion,Path:binding.ConfirmedVersionPath,Hash:binding.ConfirmedVersionHash):WindowsServices.ConfirmInstalledVersion(confirmed.Text,path));
             BindingManagement.Update(settings,binding,choices[software.SelectedIndex],repo.Text,path.Length>0?Path.GetFullPath(path):"",beta.IsChecked==true,prefix.Text,pattern.Text,installed);
+            var selected=choices[software.SelectedIndex] with{ExecutablePath=path,Portable=updateMode.SelectedIndex==0};settings.PortableApps.RemoveAll(app=>app.Id.Equals(selected.Id,StringComparison.OrdinalIgnoreCase));if(selected.Portable)settings.PortableApps.Add(selected);
             binding.ConfirmedVersion=evidence.Version;binding.ConfirmedVersionPath=evidence.Path;binding.ConfirmedVersionHash=evidence.Hash;
-            var prior=installed.ToArray();var snapshot=binding.Snapshot();var portable=settings.PortableApps.ToArray();
+            var prior=installed.Select(app=>app.Id.Equals(selected.Id,StringComparison.OrdinalIgnoreCase)?selected:app).ToArray();var snapshot=binding.Snapshot();var portable=settings.PortableApps.ToArray();
             var detected=await Task.Run(()=>WindowsServices.ScanMatched([snapshot],portable,prior));
             SetInstalled(prior.Where(app=>InstalledVersion.Find([app],binding.AppId)==null).Concat(detected).ToList());
             Save();PlanUpdates();Display();model.Status="已保存软件匹配与版本来源，并重新核对实际安装版本。";f.Close();

@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
 
@@ -6,9 +6,9 @@ namespace Gitstar.Desktop;
 
 public partial class MainWindow
 {
-    private sealed record PackageSelection(Release Release,Asset Asset,string Root,bool Historical);
+    private sealed record PackageSelection(Release Release,List<Asset> Assets,string Root,bool Historical) { public Asset Asset=>Assets[0]; }
     private Task<PackageSelection?> ChoosePackage(Card card,string? previewPath=null)=>ChoosePackage(card,(page,ct)=>api.DownloadVersions(card.Repository,page,ct),ct=>api.LatestDownloadVersion(card.Repository,ct),(id,ct)=>api.DownloadVersionById(card.Repository,id,ct),previewPath);
-    private async Task<PackageSelection?> ChoosePackage(Card card,Func<int,CancellationToken,Task<GitHubClient.DownloadVersionPage>> readPage,Func<CancellationToken,Task<Release?>> readLatest,Func<long,CancellationToken,Task<Release?>> readVersion,string? previewPath,Action<Form,ComboBox,ComboBox,Button,Button>? inspect=null)
+    private async Task<PackageSelection?> ChoosePackage(Card card,Func<int,CancellationToken,Task<GitHubClient.DownloadVersionPage>> readPage,Func<CancellationToken,Task<Release?>> readLatest,Func<long,CancellationToken,Task<Release?>> readVersion,string? previewPath,Action<Form,ComboBox,ListBox,Button,Button>? inspect=null)
     {
         var install=card.Update!=null;var f=new Form(this,card.Action,700,install?520:620);f.Label(card.Repository+(install?" · "+card.Release.Tag:""));
         using var lifetime=new CancellationTokenSource();var closed=false;f.Closed+=(_,_)=>{closed=true;lifetime.Cancel();};
@@ -18,23 +18,30 @@ public partial class MainWindow
         f.Fields.Children.Remove(version);var versionRow=new Grid{Margin=new Thickness(0,7,0,16),Visibility=install?Visibility.Collapsed:Visibility.Visible};versionRow.ColumnDefinitions.Add(new());versionRow.ColumnDefinitions.Add(new(){Width=GridLength.Auto});version.Margin=new Thickness(0);versionRow.Children.Add(version);
         var more=new Button{Content="加载更多版本",Margin=new Thickness(12,0,0,0),MinHeight=40};Grid.SetColumn(more,1);versionRow.Children.Add(more);f.Fields.Children.Add(versionRow);
         var note=new TextBlock{Text=install?"": "正在读取最新版本…",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,10),FontSize=12,Visibility=install?Visibility.Collapsed:Visibility.Visible};note.SetResourceReference(TextBlock.ForegroundProperty,"Muted");f.Fields.Children.Add(note);
-        var choices=f.Select("选择安装包",[]);var folder=f.Text("保存目录",settings.DownloadFolder);
-        f.Label(install?(card.Update!.App.Portable?"便携软件无需安装：优先选择便携 ZIP 或主程序 EXE。下载后提示替换原程序文件，保留配置与个人数据，不启动安装器。":"EXE/MSI：下载后询问是否打开安装器。ZIP：解压后提示替换程序文件，保留配置与个人数据。") :"按当前电脑架构和文件类型推荐安装包，展开列表仍可选择其他文件。仅保存，不启动安装器；历史版本安装包会保留。");
+        f.Label(install?"选择安装包":"选择下载文件（支持多选）");CheckBox? selectAll=null;var selectingAll=false;
+        var choices=new ListBox{SelectionMode=install?SelectionMode.Single:SelectionMode.Multiple,MinHeight=90,MaxHeight=190,Margin=new Thickness(0,4,0,12)};
+        if(!install){var check=new FrameworkElementFactory(typeof(CheckBox));check.SetBinding(CheckBox.ContentProperty,new System.Windows.Data.Binding());check.SetBinding(CheckBox.IsCheckedProperty,new System.Windows.Data.Binding("IsSelected"){RelativeSource=new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.FindAncestor,typeof(ListBoxItem),1),Mode=System.Windows.Data.BindingMode.TwoWay});check.SetValue(CheckBox.MarginProperty,new Thickness(4,6,4,6));choices.ItemTemplate=new DataTemplate{VisualTree=check};}
+        f.Fields.Children.Add(choices);
+        if(!install){selectAll=new CheckBox{Content="全选当前版本文件",IsThreeState=true,Margin=new Thickness(0,0,0,10)};selectAll.Click+=(_,_)=>{if(selectingAll)return;if(choices.SelectedItems.Count==choices.Items.Count)choices.UnselectAll();else choices.SelectAll();};f.Fields.Children.Add(selectAll);}
+        var folder=f.Text("保存目录",settings.DownloadFolder);
+        f.Label(install?(card.Update!.App.Portable?"便携软件无需安装：优先选择便携 ZIP 或主程序 EXE。下载后提示替换原程序文件，保留配置与个人数据，不启动安装器。":"EXE/MSI：下载后询问是否打开安装器。ZIP：解压后提示替换程序文件，保留配置与个人数据。") :"按当前电脑架构和文件类型推荐安装包，可勾选多个文件，一次依次下载；再次点击可取消选择。仅保存，不启动安装器；历史版本安装包会保留。");
         f.Action("选择目录",()=>{var dialog=new OpenFolderDialog{Title="选择安装包保存目录"};if(Directory.Exists(folder.Text))dialog.InitialDirectory=folder.Text;if(dialog.ShowDialog(f)==true)folder.Text=dialog.FolderName;return Task.CompletedTask;});
-        List<Release> ordered=[];List<Asset> assets=[];var filling=false;var fillingAssets=false;var loading=false;var nextPage=1;var hasMore=true;var chosenAssets=new Dictionary<long,long>();
+        List<Release> ordered=[];List<Asset> assets=[];var filling=false;var fillingAssets=false;var loading=false;var nextPage=1;var hasMore=true;var chosenAssets=new Dictionary<long,HashSet<long>>();
         Button download=null!;
         void Assets()
         {
             fillingAssets=true;assets=!install&&ordered.Count==0?[]:current.Assets.Where(asset=>asset.Size>0).ToList();choices.ItemsSource=assets.Select(asset=>$"{asset.Name}  ·  {asset.Size/1048576.0:F1} MB").ToArray();
             var preferred=PackagePreference.Select(assets,System.Runtime.InteropServices.RuntimeInformation.OSArchitecture,card.Update?.Binding.AssetPattern??"",card.Update?.App.Portable==true);
-            var selected=chosenAssets.TryGetValue(current.Id,out var remembered)?assets.FindIndex(asset=>asset.Id==remembered):-1;
-            if(selected<0&&install&&card.Update?.App.Portable!=true&&card.Update?.Asset is {} linked)selected=assets.FindIndex(asset=>asset.Id==linked.Id);
-            if(selected<0&&preferred!=null)selected=assets.FindIndex(asset=>asset.Id==preferred.Id);
-            choices.SelectedIndex=selected;fillingAssets=false;choices.IsEnabled=assets.Count>0;download.IsEnabled=!loading&&choices.SelectedIndex>=0;
+            var rememberedSelection=chosenAssets.TryGetValue(current.Id,out var remembered);var selected=rememberedSelection?assets.FindIndex(asset=>remembered!.Contains(asset.Id)):-1;
+            if(!rememberedSelection&&selected<0&&install&&card.Update?.App.Portable!=true&&card.Update?.Asset is {} linked)selected=assets.FindIndex(asset=>asset.Id==linked.Id);
+            if(!rememberedSelection&&selected<0&&preferred!=null)selected=assets.FindIndex(asset=>asset.Id==preferred.Id);
+            choices.SelectedIndex=selected;if(!install&&chosenAssets.TryGetValue(current.Id,out var saved))foreach(var i in Enumerable.Range(0,assets.Count).Where(i=>saved.Contains(assets[i].Id)))choices.SelectedItems.Add(choices.Items[i]);fillingAssets=false;choices.IsEnabled=assets.Count>0;download.IsEnabled=!loading&&choices.SelectedIndex>=0;
             if(!loading)note.Text=assets.Count==0?"此版本没有可下载的安装包，请选择其他版本。":$"{current.Tag} · {current.Channel} · {current.Published.ToLocalTime():yyyy-MM-dd HH:mm}";
             if(!loading&&assets.Count>0&&choices.SelectedIndex<0)note.Text="未识别出适合当前电脑的安装包，可展开列表手动选择其他文件保存。";
+            SelectionState();
         }
-        choices.SelectionChanged+=(_,_)=>{if(fillingAssets)return;if(choices.SelectedIndex>=0&&choices.SelectedIndex<assets.Count)chosenAssets[current.Id]=assets[choices.SelectedIndex].Id;download.IsEnabled=!loading&&choices.SelectedIndex>=0;};
+        void SelectionState(){download.IsEnabled=!loading&&choices.SelectedItems.Count>0;download.Content=install?"开始下载":$"下载所选文件（{choices.SelectedItems.Count}）";if(selectAll!=null){selectingAll=true;selectAll.IsChecked=choices.SelectedItems.Count==0?false:choices.SelectedItems.Count==choices.Items.Count?true:null;selectingAll=false;}}
+        choices.SelectionChanged+=(_,_)=>{if(fillingAssets)return;chosenAssets[current.Id]=choices.SelectedItems.Cast<string>().Select(item=>assets[choices.Items.IndexOf(item)].Id).ToHashSet();SelectionState();};
         void Versions(long selected)
         {
             filling=true;ordered=DownloadVersionRules.Order(known,channel);version.ItemsSource=ordered.Select(release=>$"{release.Tag}  ·  {release.Channel}"+(release.Id==latest?.Id?"  ·  最新":"")).ToArray();version.SelectedIndex=ordered.FindIndex(release=>release.Id==selected);if(version.SelectedIndex<0&&ordered.Count>0)version.SelectedIndex=0;filling=false;
@@ -61,10 +68,11 @@ public partial class MainWindow
         more.Click+=async(_,_)=>await Load(nextPage==1);
         download=f.Action("开始下载",()=>{
             if(loading||choices.SelectedIndex<0||choices.SelectedIndex>=assets.Count)return Task.CompletedTask;
-            var asset=assets[choices.SelectedIndex];var root=Path.GetFullPath(folder.Text);
+            var selected=choices.SelectedItems.Cast<string>().Select(item=>assets[choices.Items.IndexOf(item)]).ToList();var asset=selected[0];var root=Path.GetFullPath(folder.Text);
+            if(selected.GroupBy(item=>PackageRules.OriginalFileName(item.Name),StringComparer.OrdinalIgnoreCase).Any(group=>group.Count()>1))throw new IOException("所选附件包含同名文件，请分开下载到不同目录。");
             if(install&&!Rules.IsWindowsInstallCandidate(asset)&&!(card.Update!.App.Portable&&PackagePreference.Select([asset],System.Runtime.InteropServices.RuntimeInformation.OSArchitecture,portable:true)!=null)){DialogMessage.Show(f,"此安装包与当前电脑不兼容，请选择 Windows 安装包。","Gitstar");return Task.CompletedTask;}
-            if(string.IsNullOrEmpty(asset.Digest)&&DialogMessage.Show(f,"作者未提供 SHA-256 摘要，本次只能核对文件大小。仍要下载吗？","Gitstar",MessageBoxButton.YesNo,MessageBoxImage.Warning)!=MessageBoxResult.Yes)return Task.CompletedTask;
-            settings.DownloadFolder=root;Save();f.Tag=new PackageSelection(current,asset,root,!install&&current.Id!=latest?.Id);f.Close();return Task.CompletedTask;
+            if(selected.Any(item=>string.IsNullOrEmpty(item.Digest))&&DialogMessage.Show(f,"部分文件未提供 SHA-256 摘要，这些文件只能核对大小。仍要下载所选文件吗？","Gitstar",MessageBoxButton.YesNo,MessageBoxImage.Warning)!=MessageBoxResult.Yes)return Task.CompletedTask;
+            settings.DownloadFolder=root;Save();f.Tag=new PackageSelection(current,selected,root,!install&&current.Id!=latest?.Id);f.Close();return Task.CompletedTask;
         },true);
         latest=install?current:null;Versions(current.Id);if(!install){download.IsEnabled=false;f.Loaded+=async(_,_)=>await Load(true);}
         if(previewPath!=null)f.RenderPreview(previewPath);

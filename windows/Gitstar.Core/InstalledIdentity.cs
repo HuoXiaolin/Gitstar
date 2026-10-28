@@ -25,11 +25,16 @@ public static class InstalledIdentity
         return matches.Length==1?matches[0]:null;
     }
     public static List<InstalledApp> Merge(IEnumerable<InstalledApp> source)=>source
-        .GroupBy(app=>PathKey(app.ExecutablePath) is {Length:>0} path?"file:"+path:"id:"+app.Id,StringComparer.OrdinalIgnoreCase)
+        .GroupBy(app=>PathKey(app.ExecutablePath) is {Length:>0} path?"file:"+path:RegistrationKey(app),StringComparer.OrdinalIgnoreCase)
         .Select(group=>{
             var current=group.OrderBy(app=>app.Portable).First();
             return current with{AliasIds=group.SelectMany(app=>(app.AliasIds??[]).Append(app.Id)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray()};
         }).OrderBy(app=>app.Name,StringComparer.OrdinalIgnoreCase).ToList();
+    private static string RegistrationKey(InstalledApp app)
+    {
+        var parts=app.Id.Split('/',3);
+        return parts.Length==3&&parts[1].StartsWith("Registry",StringComparison.Ordinal)?"registry:"+parts[0]+"/"+parts[2]+"|"+PathKey(app.Location)+"|"+Name(app.Name)+"|"+app.Version:"id:"+app.Id;
+    }
 
     public static InstalledApp? Target(Binding binding,IEnumerable<InstalledApp> detected,IEnumerable<InstalledApp>? previous=null)
     {

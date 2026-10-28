@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Windows;
@@ -296,22 +296,23 @@ public partial class MainWindow : Window
         if(card.Transfer.NeedsDetection){await ScanMatchedAsync();PlanUpdates();card.Transfer.Finish("");Display();model.Status="已重新检测实际版本；未完成的更新仍保留在列表。";return;}
         var selection=await ChoosePackage(card);if(selection==null)return;var release=selection.Release;var install=card.Update!=null;
         if(!ConfirmDownloadSettings(selection.Root,selection.Historical))return;
-        var downloadTarget=PackageTarget(release,selection.Asset,selection.Root);card.Transfer.Stage("等待下载任务");
-        await Execute("下载",card.Repository+" · "+selection.Asset.Name,async ct=>{
-            var state=card.Transfer;var operation=currentOperation.Value!;operation.Repository=card.Repository;operation.Tag=release.Tag;operation.File=downloadTarget+".partial";state.Percentage=0;state.Detail=selection.Asset.Name;state.Stage("下载中 0%",false);
+        var stopDownloads=false;var savedCount=0;foreach(var asset in selection.Assets){
+        Operation? fileOperation=null;var downloadTarget=PackageTarget(release,asset,selection.Root);card.Transfer.Stage("等待下载任务");
+        await Execute("下载",card.Repository+" · "+asset.Name,async ct=>{
+            var state=card.Transfer;var operation=currentOperation.Value!;fileOperation=operation;operation.Repository=card.Repository;operation.Tag=release.Tag;operation.File=downloadTarget+".partial";state.Percentage=0;state.Detail=asset.Name;state.Stage("下载中 0%",false);
             try{
                 var progressAt=DateTime.MinValue;
-                var replaceSame=false;var previousPackage=packages.FirstOrDefault(p=>p.Path.Equals(downloadTarget,StringComparison.OrdinalIgnoreCase)&&PackageRules.SameVersion(p,release,selection.Asset));
+                var replaceSame=false;var previousPackage=packages.FirstOrDefault(p=>p.Path.Equals(downloadTarget,StringComparison.OrdinalIgnoreCase)&&PackageRules.SameVersion(p,release,asset));
                 if(previousPackage!=null&&await PackageFiles.Matches(previousPackage,ct)){
                     state.Stage("处理同版本安装包");var decision=settings.SameVersionDownload;
                     if(decision==0){var duplicate=new Form(this,"同版本安装包已存在",640,420);duplicate.Label(card.Repository+" · "+release.Tag+"\n\n"+downloadTarget+"\n\n选择重新下载并替换，或跳过本次下载和安装。旧文件会保留到新文件校验成功。");duplicate.Action("跳过",()=>{decision=2;duplicate.Close();return Task.CompletedTask;}).IsCancel=true;duplicate.Action("重新下载并替换",()=>{decision=1;duplicate.Close();return Task.CompletedTask;},true);duplicate.ShowDialog();if(decision==0)decision=2;}
-                    if(decision==2){state.Finish("已跳过下载");state.Detail=downloadTarget;operation.Results.Add("已存在同版本安装包，跳过下载和安装。");model.Status="已跳过同版本安装包："+selection.Asset.Name;return;}replaceSame=true;
+                    if(decision==2){state.Finish("已跳过下载");state.Detail=downloadTarget;operation.Results.Add("已存在同版本安装包，跳过下载和安装。");model.Status="已跳过同版本安装包："+asset.Name;return;}replaceSame=true;
                 }
                 // Download continuations run on the UI context; report directly to avoid queued percentages overwriting later stages.
-                var path=await WindowsServices.Download(api,release,selection.Asset,selection.Root,(a,b)=>{if(a<b && DateTime.UtcNow-progressAt<TimeSpan.FromMilliseconds(100))return;progressAt=DateTime.UtcNow;state.Downloaded(a,b);model.Status=$"正在下载 {selection.Asset.Name} · {state.Detail}";},ct,()=>{state.Stage("校验中");model.Status="正在校验安装包："+selection.Asset.Name;},token=>CanReplacePackage(release,selection.Asset,downloadTarget,token,replaceSame),forceDownload:replaceSame,targetPath:downloadTarget);
+                var path=await WindowsServices.Download(api,release,asset,selection.Root,(a,b)=>{if(a<b && DateTime.UtcNow-progressAt<TimeSpan.FromMilliseconds(100))return;progressAt=DateTime.UtcNow;state.Downloaded(a,b);model.Status=$"正在下载 {asset.Name} · {state.Detail}";},ct,()=>{state.Stage("校验中");model.Status="正在校验安装包："+asset.Name;},token=>CanReplacePackage(release,asset,downloadTarget,token,replaceSame),forceDownload:replaceSame,targetPath:downloadTarget);
                 model.Status="安装包已保存："+path;
-                await RecordPackage(release,selection.Asset,path,selection.Root,ct,retainForBatch:selection.Historical);
-                if(!install){state.Finish("已保存安装包");state.Detail=path;return;}
+                await RecordPackage(release,asset,path,selection.Root,ct,retainForBatch:selection.Historical);
+                if(!install){savedCount++;state.Finish("已保存文件");state.Detail=$"{savedCount}/{selection.Assets.Count} · {path}";return;}
                 if(path.EndsWith(".exe",StringComparison.OrdinalIgnoreCase)){state.Stage("检测安装包架构");var platform=await Task.Run(()=>InstallerCompatibility.InspectExe(path,Environment.Is64BitOperatingSystem),ct);if(!platform.Compatible){state.Finish("安装包架构不兼容");state.Detail=platform.Name+" 与当前 Windows 不兼容；安装包已保存，未启动安装器。";throw new IOException(state.Detail);}state.Detail=platform.Name+" · 与当前 Windows 兼容";}
                 if(path.EndsWith(".msi",StringComparison.OrdinalIgnoreCase)){state.Stage("检测安装包架构");var platform=await Task.Run(()=>WindowsServices.MsiPlatform(path),ct);if(!Rules.IsCompatibleMsiTemplate(platform,Environment.Is64BitOperatingSystem)){state.Finish("安装包架构不兼容");state.Detail="MSI 平台："+platform+"；安装包已保存，未启动安装器。";throw new IOException(state.Detail);}}
                 if(PortableUpdateRules.ReplaceFiles(card.Update!.App,path)) {
@@ -327,10 +328,13 @@ public partial class MainWindow : Window
                     state.Stage("安装器运行中");state.Detail="请在安装器中完成操作；安装器未提供可读取的百分比。";model.Status=state.Detail;
                     await ObserveInstaller(process,card,settings.Account,ct,path);
                 }
-            }catch(OperationCanceledException){if(!state.NeedsDetection){state.Finish("重新下载");state.Detail="下载已停止，重试将重新下载。";}throw;}
-            catch(Exception ex){if(state.Label!="安装包架构不兼容")state.Finish("重试下载");state.Detail=ex.Message;throw;}
+            }catch(OperationCanceledException){stopDownloads=true;if(!state.NeedsDetection){state.Finish("重新下载");state.Detail="下载已停止，后续文件不再下载。已保存文件保留。";}throw;}
+            catch(Exception ex){stopDownloads=true;if(state.Label!="安装包架构不兼容")state.Finish("重试下载");state.Detail=ex.Message;throw;}
         },resources:new[]{"file:"+downloadTarget}.Concat(install?new[]{"app:"+card.Update!.App.Id}:Array.Empty<string>()).ToArray(),transfer:card.Transfer);
         if(card.Transfer.Active)card.Transfer.Finish("重新下载");
+        if(fileOperation==null||fileOperation.State!="完成")stopDownloads=true;if(stopDownloads||quitting)break;
+        }
+        if(!install&&selection.Assets.Count>1)model.Status=$"所选 {selection.Assets.Count} 个文件，已保存 {savedCount} 个。"+(stopDownloads?"后续下载已停止。":"可在任务记录查看各文件结果。");
     }
     private async Task ObserveInstaller(Process process,Card card,string account,CancellationToken ct,string packagePath)
     {
@@ -356,10 +360,16 @@ public partial class MainWindow : Window
         if(localPage){AutoBindingDialog();return;}
         AddProjectDialog();
     }
-    private void AutoBindingDialog(string? previewPath=null)
+    private bool discoveringSoftware;
+    private async void AutoBindingDialog(string? previewPath=null)
     {
         if(quitting)return;
-        if(previewPath==null)SetInstalled(WindowsServices.Scan(settings.PortableApps,settings.Bindings,installed));
+        if(previewPath==null){
+            if(discoveringSoftware)return;discoveringSoftware=true;
+            try{model.Status="正在检测本机软件与用户程序位置…";await ScanInstalledAsync();if(quitting)return;}
+            catch(Exception ex){model.Status="软件检测未完成："+ex.Message;DialogMessage.Show(this,model.Status,"Gitstar");return;}
+            finally{discoveringSoftware=false;}
+        }
         var knownNames=repositories.Select(r=>r.FullName).Order(StringComparer.OrdinalIgnoreCase).ToArray();
         var suggest=AppMatcher.Prepare(repositories);
         var rows=installed.Where(a=>!settings.Bindings.Any(b=>b.AppId==a.Id)).Select(a=>{
@@ -378,6 +388,7 @@ public partial class MainWindow : Window
         table.Columns.Add(new DataGridTextColumn {Header="匹配依据",Binding=new System.Windows.Data.Binding(nameof(MatchRow.Reason)),IsReadOnly=true,Width=180});f.Fields.Children.Add(table);
         f.Action("取消勾选",()=>{foreach(var row in rows)row.Selected=false;return Task.CompletedTask;});
         f.Action("手动管理 / 便携软件",()=>{f.Close();BindingDialog();return Task.CompletedTask;});
+        f.Action("搜索所选行仓库",()=>{if(table.SelectedItem is not MatchRow row)throw new IOException("请先点击需要关联的软件行。");RepositorySearchDialog(f,row.Repository,value=>{row.Repository=value;table.Items.Refresh();},row.App.Name);return Task.CompletedTask;});
         f.Action("关联所选",async()=>{
             table.CommitEdit();table.CommitEdit(DataGridEditingUnit.Row,true);var selected=rows.Where(r=>r.Selected).ToList();if(selected.Count==0)throw new IOException("请勾选需要关联的软件。");
             foreach(var row in selected){row.Repository=Rules.RepositoryName(row.Repository);GitHubClient.Validate(row.Repository);}
@@ -544,6 +555,7 @@ public partial class MainWindow : Window
         if(Environment.GetCommandLineArgs().Contains("--notification-dot"))NotificationsDot.Visibility=Visibility.Visible;
         if(Environment.GetCommandLineArgs().Contains("--notifications")){NotificationDialog(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--portable-update")){await PortableUpdateSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
+        if(Environment.GetCommandLineArgs().Contains("--repository-search")){RepositorySearchDialog(this,"editor",value=>{},previewPath:path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--manual-software")){BindingDialog(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--source-sync")){SourceSyncSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--follow-management")){await FollowManagementSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}

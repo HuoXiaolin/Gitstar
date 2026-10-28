@@ -28,7 +28,7 @@ public static partial class WindowsServices
         window.Height=height;window.Width=width;window.WindowState=System.Windows.WindowState.Normal;
         window.Left=topLeft.X+(availableWidth-width)/2;window.Top=topLeft.Y+(availableHeight-height)/2;
     }
-    public static List<InstalledApp> Scan(IEnumerable<InstalledApp>? portable=null,IEnumerable<Binding>? bindings=null,IEnumerable<InstalledApp>? known=null)=>ScanCurrentPrograms(bindings??[],portable??[],known??[],false);
+    public static List<InstalledApp> Scan(IEnumerable<InstalledApp>? portable=null,IEnumerable<Binding>? bindings=null,IEnumerable<InstalledApp>? known=null,CancellationToken ct=default)=>ScanCurrentPrograms(bindings??[],portable??[],known??[],false,ct);
     public static void Startup(bool enabled)
     {
         SetStartupEntry(Registry.CurrentUser,StartupKey,enabled,Environment.ProcessPath??throw new IOException("无法确定当前程序位置。"));
