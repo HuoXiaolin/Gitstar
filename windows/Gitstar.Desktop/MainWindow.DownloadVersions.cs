@@ -11,6 +11,12 @@ public partial class MainWindow
     private async Task<PackageSelection?> ChoosePackage(Card card,Func<int,CancellationToken,Task<GitHubClient.DownloadVersionPage>> readPage,Func<CancellationToken,Task<Release?>> readLatest,Func<long,CancellationToken,Task<Release?>> readVersion,string? previewPath,Action<Form,ComboBox,ListBox,Button,Button>? inspect=null)
     {
         var install=card.Update!=null;var f=new Form(this,card.Action,700,install?520:620);f.Label(card.Repository+(install?" · "+card.Release.Tag:""));
+        var selectionLabel=new TextBlock{Text="当前选择",VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,10,0),FontWeight=FontWeights.SemiBold};
+        var selectionText=new TextBlock{Name="CurrentPackageSelection",Text="尚未选择文件",VerticalAlignment=VerticalAlignment.Center,TextTrimming=TextTrimming.CharacterEllipsis};NameScope.SetNameScope(f,new NameScope());f.RegisterName(selectionText.Name,selectionText);
+        var selectionRow=new Grid();selectionRow.ColumnDefinitions.Add(new(){Width=GridLength.Auto});selectionRow.ColumnDefinitions.Add(new());selectionRow.Children.Add(selectionLabel);Grid.SetColumn(selectionText,1);selectionRow.Children.Add(selectionText);
+        var selectionBox=new Border{Child=selectionRow,Padding=new Thickness(12,10,12,10),Margin=new Thickness(18,0,18,4),BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(8)};selectionBox.SetResourceReference(Border.BackgroundProperty,"Surface");selectionBox.SetResourceReference(Border.BorderBrushProperty,"Edge");
+        var layout=(Grid)f.Content;layout.RowDefinitions.Insert(2,new(){Height=GridLength.Auto});Grid.SetRow(f.Buttons,3);Grid.SetRow(selectionBox,2);layout.Children.Add(selectionBox);
+        selectionBox.MouseLeftButtonUp+=(_,_)=>{var details=new Form(f,"当前选择的下载文件",700,480);details.Label(selectionText.ToolTip as string??selectionText.Text);details.Action("关闭",()=>{details.Close();return Task.CompletedTask;});details.ShowDialog();};
         using var lifetime=new CancellationTokenSource();var closed=false;f.Closed+=(_,_)=>{closed=true;lifetime.Cancel();};
         var channel=ChannelFilter.SelectedIndex;var known=new List<Release>{card.Release};var current=card.Release;Release? latest=null;
         var version=f.Select("选择版本",[]);
@@ -40,7 +46,7 @@ public partial class MainWindow
             if(!loading&&assets.Count>0&&choices.SelectedIndex<0)note.Text="未识别出适合当前电脑的安装包，可展开列表手动选择其他文件保存。";
             SelectionState();
         }
-        void SelectionState(){download.IsEnabled=!loading&&choices.SelectedItems.Count>0;download.Content=install?"开始下载":$"下载所选文件（{choices.SelectedItems.Count}）";if(selectAll!=null){selectingAll=true;selectAll.IsChecked=choices.SelectedItems.Count==0?false:choices.SelectedItems.Count==choices.Items.Count?true:null;selectingAll=false;}}
+        void SelectionState(){var selected=choices.SelectedItems.Cast<string>().Select(item=>assets[choices.Items.IndexOf(item)]).ToArray();selectionLabel.Text=selected.Length>1?$"当前选择（{selected.Length} 项）":"当前选择";selectionText.Text=selected.Length==0?"尚未选择文件":string.Join("；",selected.Select(asset=>asset.Name));selectionText.ToolTip=selected.Length==0?"尚未选择文件":string.Join("\n",selected.Select(asset=>$"{asset.Name} · {asset.Size/1048576.0:F1} MB"))+"\n点击查看全部所选文件。";download.IsEnabled=!loading&&selected.Length>0;download.Content=install?"开始下载":$"下载所选文件（{selected.Length}）";if(selectAll!=null){selectingAll=true;selectAll.IsChecked=selected.Length==0?false:selected.Length==choices.Items.Count?true:null;selectingAll=false;}}
         choices.SelectionChanged+=(_,_)=>{if(fillingAssets)return;chosenAssets[current.Id]=choices.SelectedItems.Cast<string>().Select(item=>assets[choices.Items.IndexOf(item)].Id).ToHashSet();SelectionState();};
         void Versions(long selected)
         {

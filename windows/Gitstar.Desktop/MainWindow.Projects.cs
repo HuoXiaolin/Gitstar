@@ -62,6 +62,7 @@ public partial class MainWindow
     }
     private void Projects_Click(object sender,RoutedEventArgs e)
     {
+        LeaveRankings();UseFeature(UsageFeature.ProjectsPage);
         projectsPage=true;model.SelectionMode=false;UpdatesToolbar.Visibility=UpdatesContent.Visibility=Visibility.Collapsed;ProjectsHost.Visibility=Visibility.Visible;
         RecentButton.Background=LocalButton.Background=(Brush)Resources["Surface"];RecentButton.Foreground=LocalButton.Foreground=(Brush)Resources["Ink"];
         SetPageAccent(2);

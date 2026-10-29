@@ -37,9 +37,11 @@ public partial class MainWindow
     {
         if(exit||quitting||reopeningWindow)return;reopeningWindow=true;
         try{
+            var opened=!IsVisible||WindowState==WindowState.Minimized;
             ShowInTaskbar=true;Show();if(WindowState!=WindowState.Maximized)WindowState=WindowState.Normal;
             ResumeBackgroundViews();InvalidateVisual();UpdateLayout();
             var target=OwnedWindows.Cast<Window>().LastOrDefault(window=>window.IsVisible)??this;target.Activate();
+            if(opened&&ready)UsageOpen();
         }finally{reopeningWindow=false;}
     }
     [DllImport("user32.dll",EntryPoint="IsWindowVisible")]

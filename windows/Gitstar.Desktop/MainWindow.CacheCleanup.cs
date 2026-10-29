@@ -17,6 +17,7 @@ public partial class MainWindow
         if(module==CacheModule.InstalledApps){installed.Clear();installedFresh=false;installedScan=null;}
         if(module==CacheModule.MyProjects){myProjects.Clear();projectVersions.Clear();releaseDirectoryStates.Clear();projectStates.Clear();projectsSynced=null;selectedProject=null;}
         if(module==CacheModule.FinishedTasks)operations.RemoveAll(operation=>CacheRules.Finished(operation));
+        if(module==CacheModule.Rankings){rankingGeneration++;rankingRequest?.Cancel();rankingData=null;}
         PlanUpdates();Display();
     }
     private void CacheCleanupDialog(Window? owner=null,string? previewPath=null)

@@ -17,14 +17,14 @@ public static class LocalCacheFiles
 }
 public static class CacheCleanupService
 {
-    public static readonly CacheModule[] Modules=[CacheModule.RecentUpdates,CacheModule.InstalledApps,CacheModule.MyProjects,CacheModule.Avatars,CacheModule.FinishedTasks];
+    public static readonly CacheModule[] Modules=[CacheModule.RecentUpdates,CacheModule.InstalledApps,CacheModule.MyProjects,CacheModule.Rankings,CacheModule.Avatars,CacheModule.FinishedTasks];
     public static List<CacheSummary> Summaries(LocalStore store,string account)
     {
         var sizes=store.DocumentSizes();var result=new List<CacheSummary>();
-        foreach(var module in new[]{CacheModule.RecentUpdates,CacheModule.InstalledApps,CacheModule.MyProjects}){
+        foreach(var module in new[]{CacheModule.RecentUpdates,CacheModule.InstalledApps,CacheModule.MyProjects,CacheModule.Rankings}){
             var keys=CacheRules.Keys(account,module);var documents=sizes.Where(item=>CacheRules.Matches(item.Key,keys)).ToArray();
-            var name=module switch{CacheModule.RecentUpdates=>"最近更新",CacheModule.InstalledApps=>"本机可更新",_=>"我的项目"};
-            var description=module switch{CacheModule.RecentUpdates=>"仓库、版本日志、GitHub 分组及网络缓存；本地关注和分组配置保留。",CacheModule.InstalledApps=>"本机扫描结果；软件绑定、便携软件与忽略设置保留。",_=>"项目列表、版本列表和源码检查结果；源码关联与自动发布配置保留。"};
+            var name=module switch{CacheModule.RecentUpdates=>"最近更新",CacheModule.InstalledApps=>"本机可更新",CacheModule.Rankings=>"排行榜",_=>"我的项目"};
+            var description=module switch{CacheModule.RecentUpdates=>"仓库、版本日志、GitHub 分组及网络缓存；本地关注和分组配置保留。",CacheModule.InstalledApps=>"本机扫描结果；软件绑定、便携软件与忽略设置保留。",CacheModule.Rankings=>"本机共享的公开榜单缓存；关注、Star、分组和使用统计保留。",_=>"项目列表、版本列表和源码检查结果；源码关联与自动发布配置保留。"};
             result.Add(new(module,name,description,documents.Sum(item=>item.Value),documents.Length));
         }
         try{var files=LocalCacheFiles.AvatarFiles(store.Root);result.Add(new(CacheModule.Avatars,"作者头像","共享头像文件与内存缓存，下次浏览时按需加载。",files.Sum(file=>file.Length),files.Count));}catch(Exception ex)when(ex is IOException or UnauthorizedAccessException){result.Add(new(CacheModule.Avatars,"作者头像",ex.Message,-1,0));}

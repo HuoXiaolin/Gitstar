@@ -1,7 +1,7 @@
 namespace Gitstar.Core;
 
 [Flags]
-public enum CacheModule { None=0, RecentUpdates=1, InstalledApps=2, MyProjects=4, Avatars=8, FinishedTasks=16 }
+public enum CacheModule { None=0, RecentUpdates=1, InstalledApps=2, MyProjects=4, Avatars=8, FinishedTasks=16, Rankings=32 }
 public record CacheKeys(string[] Exact,string[] Prefixes);
 public static class CacheRules
 {
@@ -13,6 +13,7 @@ public static class CacheRules
             CacheModule.RecentUpdates=>new([root+"/repos",root+"/groups",root+"/releases"],[root+"/http-releases/"]),
             CacheModule.InstalledApps=>new([root+"/installed",root+"/matched-releases"],[]),
             CacheModule.MyProjects=>new([root+"/my-projects",root+"/my-projects/versions",root+"/my-projects/release-status",root+"/my-projects/synced"],[]),
+            CacheModule.Rankings=>new([],["rankings/v1/"]),
             _=>new([],[])
         };
     }

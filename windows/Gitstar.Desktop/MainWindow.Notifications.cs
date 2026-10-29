@@ -28,7 +28,7 @@ public partial class MainWindow
             if(!exit&&account==settings.Account){noticeRetryAfter=DateTimeOffset.UtcNow.AddMinutes(15);NotificationsButton.ToolTip="GitHub 消息暂未同步："+error.Message;}
         }finally{noticeChecking=false;}
     }
-    private void Notifications_Click(object sender,RoutedEventArgs e)=>NotificationDialog();
+    private void Notifications_Click(object sender,RoutedEventArgs e){UseFeature(UsageFeature.Notifications);NotificationDialog();}
     private void NotificationDialog(string? previewPath=null)
     {
         var f=new Form(this,"GitHub 消息",940,690);var account=settings.Account;var client=api;

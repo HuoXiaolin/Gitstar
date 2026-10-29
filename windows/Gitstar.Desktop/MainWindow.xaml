@@ -116,25 +116,26 @@
         <Button Padding="12,6" Content="设置" Click="Settings_Click" Style="{StaticResource TertiaryButton}" />
         <Button Padding="12,6" Content="{Binding Account}" Click="Login_Click" Background="{DynamicResource AccentSoft}" Foreground="{DynamicResource AccentInk}" BorderThickness="0" Margin="0" Style="{StaticResource NavButton}" />
       </StackPanel>
-      <StackPanel Orientation="Horizontal" Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="20,0,20,0">
-        <Button Padding="13,9" x:Name="RecentButton" Click="Recent_Click" Style="{StaticResource NavButton}">
+      <StackPanel Orientation="Horizontal" Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="12,0,12,0">
+        <Button Padding="10,9" x:Name="RecentButton" Click="Recent_Click" Style="{StaticResource NavButton}">
           <StackPanel Orientation="Horizontal">
             <TextBlock FontFamily="Segoe MDL2 Assets" Text="" FontSize="13" Margin="0,1,8,0" VerticalAlignment="Center" />
             <TextBlock Text="最近更新" />
           </StackPanel>
         </Button>
-        <Button Padding="13,9" x:Name="LocalButton" Click="Local_Click" Style="{StaticResource NavButton}">
+        <Button Padding="10,9" x:Name="LocalButton" Click="Local_Click" Style="{StaticResource NavButton}">
           <StackPanel Orientation="Horizontal">
             <TextBlock FontFamily="Segoe MDL2 Assets" Text="" FontSize="13" Margin="0,1,8,0" VerticalAlignment="Center" />
             <TextBlock Text="本机可更新" />
           </StackPanel>
         </Button>
-        <Button Padding="13,9" x:Name="ProjectsButton" Click="Projects_Click" Style="{StaticResource NavButton}">
+        <Button Padding="10,9" x:Name="ProjectsButton" Click="Projects_Click" Style="{StaticResource NavButton}">
           <StackPanel Orientation="Horizontal">
             <TextBlock FontFamily="Segoe MDL2 Assets" Text="" FontSize="13" Margin="0,1,8,0" VerticalAlignment="Center" />
             <TextBlock Text="我的项目" />
           </StackPanel>
         </Button>
+        <Button Padding="10,9" x:Name="RankingsButton" Click="Rankings_Click" Style="{StaticResource NavButton}"><StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE9D9;" FontSize="13" Margin="0,1,8,0" VerticalAlignment="Center"/><TextBlock Text="排行榜"/></StackPanel></Button>
       </StackPanel>
     </Grid>
     <Grid x:Name="PageHeaderRow" Grid.Row="1" Margin="0,14,0,12">
@@ -472,6 +473,7 @@
         </Grid>
       </DockPanel>
     </Grid>
+    <Grid x:Name="RankingsHost" Grid.Row="2" Grid.RowSpan="2" Visibility="Collapsed"/>
     <Grid x:Name="ProjectsHost" Grid.Row="2" Grid.RowSpan="2" Visibility="Collapsed">
       <Grid.RowDefinitions>
         <RowDefinition Height="Auto" />

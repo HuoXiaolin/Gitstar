@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Threading;
@@ -36,7 +36,7 @@ public partial class MainWindow
         if(backgroundViewsReleased)return;
         backgroundSelections.UnionWith(model.Cards.Where(card=>card.IsSelected).Select(card=>(card.Repository,card.Release.Id)));
         backgroundViewsReleased=true;
-        model.Cards.Clear();
+        model.Cards.Clear();rankingCards?.Children.Clear();
         renderingProjects=true;try{model.Projects.Clear();ProjectDetails.Children.Clear();}finally{renderingProjects=false;}
         AvatarCache.SuspendDecoded();
         if(installedScan is {IsCompleted:true})installedScan=null;

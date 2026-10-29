@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using Microsoft.Win32;
@@ -85,7 +85,7 @@ public partial class MainWindow
             var prior=installed.Select(app=>app.Id.Equals(selected.Id,StringComparison.OrdinalIgnoreCase)?selected:app).ToArray();var snapshot=binding.Snapshot();var portable=settings.PortableApps.ToArray();
             var detected=await Task.Run(()=>WindowsServices.ScanMatched([snapshot],portable,prior));
             SetInstalled(prior.Where(app=>InstalledVersion.Find([app],binding.AppId)==null).Concat(detected).ToList());
-            Save();PlanUpdates();Display();model.Status="已保存软件匹配与版本来源，并重新核对实际安装版本。";f.Close();
+            Save();UseFeature(UsageFeature.SoftwareBinding);PlanUpdates();Display();model.Status="已保存软件匹配与版本来源，并重新核对实际安装版本。";f.Close();
         },true);f.Action("取消",()=>{f.Close();return Task.CompletedTask;});if(previewPath!=null)f.RenderPreview(previewPath);f.ShowDialog();
     }
 }
