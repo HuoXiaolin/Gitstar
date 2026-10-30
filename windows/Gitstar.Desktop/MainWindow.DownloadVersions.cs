@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
 
@@ -15,7 +15,7 @@ public partial class MainWindow
         var selectionText=new TextBlock{Name="CurrentPackageSelection",Text="尚未选择文件",VerticalAlignment=VerticalAlignment.Center,TextTrimming=TextTrimming.CharacterEllipsis};NameScope.SetNameScope(f,new NameScope());f.RegisterName(selectionText.Name,selectionText);
         var selectionRow=new Grid();selectionRow.ColumnDefinitions.Add(new(){Width=GridLength.Auto});selectionRow.ColumnDefinitions.Add(new());selectionRow.Children.Add(selectionLabel);Grid.SetColumn(selectionText,1);selectionRow.Children.Add(selectionText);
         var selectionBox=new Border{Child=selectionRow,Padding=new Thickness(12,10,12,10),Margin=new Thickness(18,0,18,4),BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(8)};selectionBox.SetResourceReference(Border.BackgroundProperty,"Surface");selectionBox.SetResourceReference(Border.BorderBrushProperty,"Edge");
-        var layout=(Grid)f.Content;layout.RowDefinitions.Insert(2,new(){Height=GridLength.Auto});Grid.SetRow(f.Buttons,3);Grid.SetRow(selectionBox,2);layout.Children.Add(selectionBox);
+        f.FixedSummary(selectionBox);
         selectionBox.MouseLeftButtonUp+=(_,_)=>{var details=new Form(f,"当前选择的下载文件",700,480);details.Label(selectionText.ToolTip as string??selectionText.Text);details.Action("关闭",()=>{details.Close();return Task.CompletedTask;});details.ShowDialog();};
         using var lifetime=new CancellationTokenSource();var closed=false;f.Closed+=(_,_)=>{closed=true;lifetime.Cancel();};
         var channel=ChannelFilter.SelectedIndex;var known=new List<Release>{card.Release};var current=card.Release;Release? latest=null;

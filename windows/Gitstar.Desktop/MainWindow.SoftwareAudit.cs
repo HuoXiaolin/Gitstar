@@ -43,7 +43,7 @@ public partial class MainWindow
                     Inline(buttons,"选择主程序",()=>{Ensure(row);var picker=new OpenFileDialog{Filter="应用程序|*.exe",Title="选择此软件实际使用的主程序"};if(picker.ShowDialog(f)==true){var app=WindowsServices.DescribePortable(picker.FileName,row.Name);row.Candidates.RemoveAll(item=>item.ExecutablePath.Equals(app.ExecutablePath,StringComparison.OrdinalIgnoreCase));row.Candidates.Insert(0,app);targets[row.Binding]=app;Render();}return Task.CompletedTask;});
                     Inline(buttons,"删除记录",()=>Remove([row]));
                 }
-                var card=new Border{Child=panel,Padding=new Thickness(14),Margin=new Thickness(0,0,0,10),CornerRadius=new CornerRadius(10),BorderThickness=new Thickness(1)};card.SetResourceReference(BackgroundProperty,"Surface");card.SetResourceReference(Border.BorderBrushProperty,"Edge");list.Children.Add(card);
+                var card=new Border{Child=panel,Padding=new Thickness(0,12,0,12),Margin=new Thickness(0),CornerRadius=new CornerRadius(0),BorderThickness=new Thickness(0,0,0,1)};card.SetResourceReference(BackgroundProperty,"Surface");card.SetResourceReference(Border.BorderBrushProperty,"Edge");list.Children.Add(card);
             }
             if(visible.Length==0)list.Children.Add(ProjectText(rows.Count==0?"没有需要核对的软件关联。":"没有需要处理的异常记录。",13,true));
         }

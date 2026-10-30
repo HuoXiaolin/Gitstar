@@ -6,7 +6,7 @@
 
 Gitstar 是一款 Windows 桌面应用，把 GitHub 关注项目、本机软件更新和自己的项目发布放进同一个工作台。你可以按分组看看收藏的软件出了什么新版本，为电脑上的软件下载更新，也可以提交自己的源码、管理安装包与发布说明。
 
-当前版本：**2.0.7** · 作者：[HuoXiaolin](https://github.com/HuoXiaolin) · [下载发行版](https://github.com/HuoXiaolin/Gitstar/releases)
+当前版本：**2.0.9** · 作者：[HuoXiaolin](https://github.com/HuoXiaolin) · [下载发行版](https://github.com/HuoXiaolin/Gitstar/releases)
 
 [最近一次更新](CHANGELOG.md) · [历史更新日志](CHANGELOG_HISTORY.md)
 

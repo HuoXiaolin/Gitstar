@@ -45,7 +45,7 @@ public partial class MainWindow
                     if(DialogMessage.Show(f,$"删除 GitHub 上的附件？\n\n{expected.Project.FullName} · {expected.Version.Tag}\n{selected.Name}\n\n此操作不能撤销。版本和本地文件保留。","删除附件",MessageBoxButton.OKCancel)!=MessageBoxResult.OK)return;
                     SetBusy(true);try{await Execute("发布包管理",expected.Project.FullName+" · 删除 "+selected.Name,async ct=>{var op=currentOperation.Value!;op.Repository=expected.Project.FullName;op.Tag=expected.Version.Tag;op.RemoteId=expected.Version.Id;SaveOperations();var updated=await api.DeleteReleaseAsset(expected,selected,ct);current=updated;RememberReleaseInventory(updated);op.Results.Add("成功：已删除附件 "+selected.Name);if(!closed)Render();},resources:["repo:"+expected.Project.FullName]);}finally{SetBusy(false);}
                 });delete.SetResourceReference(Control.ForegroundProperty,"DangerInk");commands.Add(delete);
-                var card=new Border{CornerRadius=new CornerRadius(10),BorderThickness=new Thickness(1),Padding=new Thickness(14),Margin=new Thickness(0,0,0,10),Child=row};card.SetResourceReference(Border.BorderBrushProperty,"Edge");card.SetResourceReference(Border.BackgroundProperty,"Surface");f.Fields.Children.Add(card);
+                var card=new Border{CornerRadius=new CornerRadius(0),BorderThickness=new Thickness(0,0,0,1),Padding=new Thickness(0,12,0,12),Margin=new Thickness(0),Child=row};card.SetResourceReference(Border.BorderBrushProperty,"Edge");card.SetResourceReference(Border.BackgroundProperty,"Surface");f.Fields.Children.Add(card);
             }
             f.Label("删除只影响 GitHub 发布内容，本地安装包与源码保留。再次同步并发布时，会按配置重新上传本地附件。");SetBusy(modifying);
         }

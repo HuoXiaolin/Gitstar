@@ -8,7 +8,7 @@ public partial class MainWindow
     private StackPanel FollowSection(Panel parent,string title)
     {
         var content=new StackPanel();var heading=ProjectText(title,16);heading.FontWeight=FontWeights.SemiBold;content.Children.Add(heading);
-        var border=new Border{Child=content,Padding=new Thickness(16),Margin=new Thickness(0,0,0,12),CornerRadius=new CornerRadius(12),BorderThickness=new Thickness(1)};border.SetResourceReference(Border.BackgroundProperty,"Surface");border.SetResourceReference(Border.BorderBrushProperty,"Edge");parent.Children.Add(border);return content;
+        var border=new Border{Child=content,Padding=new Thickness(0,12,0,12),Margin=new Thickness(0),CornerRadius=new CornerRadius(0),BorderThickness=new Thickness(0,0,0,1)};border.SetResourceReference(Border.BackgroundProperty,"Surface");border.SetResourceReference(Border.BorderBrushProperty,"Edge");parent.Children.Add(border);return content;
     }
     private void FollowManagementDialog(string repo,string? previewPath=null)
     {

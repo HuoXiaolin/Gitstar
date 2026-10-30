@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using Microsoft.Win32;
@@ -215,7 +215,7 @@ public partial class MainWindow
     private void EditProjectDialog(ManagedProject p,string? previewPath=null,RepositoryOptions? options=null)
     {
         options??=new(p,RepositorySettings.Features.ToDictionary(f=>f.Key,f=>f.Key is "has_issues" or "has_wiki" or "has_projects" or "allow_merge_commit" or "allow_squash_merge" or "allow_rebase_merge"));
-        var original=options;var f=new Form(this,"项目设置",840,830);var anchors=new Dictionary<string,FrameworkElement>();void Section(string title){f.Section(title);var heading=(TextBlock)f.Fields.Children[f.Fields.Children.Count-1];if(settings.Dark)heading.Foreground=new SolidColorBrush(Color.FromRgb(170,156,255));anchors[title]=heading;}f.Label(p.FullName+" · 当前为"+p.Visibility+" · "+p.Access);Section("项目资料");var description=f.Text("项目说明",p.Description);var homepage=f.Text("项目主页",p.Homepage);description.IsReadOnly=homepage.IsReadOnly=p.Archived;
+        var original=options;var f=new Form(this,"项目设置",840,830);var anchors=new Dictionary<string,FrameworkElement>();void Section(string title){f.Section(title);var heading=(TextBlock)f.Fields.Children[f.Fields.Children.Count-1];anchors[title]=heading;}f.Label(p.FullName+" · 当前为"+p.Visibility+" · "+p.Access);Section("项目资料");var description=f.Text("项目说明",p.Description);var homepage=f.Text("项目主页",p.Homepage);description.IsReadOnly=homepage.IsReadOnly=p.Archived;
         Section("访问与分支");var visibilityNames=new List<string>{"公开 · 所有人可查看","私有 · 仅授权用户可访问"};if(p.RepoVisibility=="internal")visibilityNames.Add("内部 · 企业成员可查看");var visibility=f.Select("仓库可见性",visibilityNames,p.RepoVisibility=="internal"?2:p.Private?1:0);
         var canChange=p.CanAdmin&&!p.Archived&&!p.Fork&&p.RepoVisibility!="internal";visibility.IsEnabled=canChange;
         f.Label(p.Fork?"Fork 的可见性由仓库网络管理，请到 GitHub 设置中处理。":p.RepoVisibility=="internal"?"此仓库为企业内部可见性，请到 GitHub 设置中处理。":"更改可见性需管理员权限，也可能受组织策略限制。");
@@ -247,9 +247,8 @@ public partial class MainWindow
             if(effects.Count>0){var confirm=new Form(f,"确认项目设置变更",660,560);confirm.Label(p.FullName+"\n\n"+string.Join("\n\n",effects));var name=confirm.Text("输入完整仓库名称以确认","");var approved=false;confirm.Action("取消",()=>ProjectDialog(confirm.Close));confirm.Action("确认变更",()=>{if(!name.Text.Trim().Equals(p.FullName,StringComparison.Ordinal))throw new IOException("仓库名称不匹配。");approved=true;confirm.Close();return Task.CompletedTask;},true);confirm.ShowDialog();if(!approved)return;}
             f.Close();await Execute("项目管理",p.FullName,async ct=>{var updated=await api.UpdateProjectOptions(original,d,h,selectedBranch,requestedPrivate,archive,features,ct);myProjects.RemoveAll(x=>x.FullName==p.FullName);myProjects.Add(updated);SaveProjects();RenderProjects();model.Status="项目设置已保存："+updated.FullName+" · "+updated.Visibility+" · "+updated.Access;},resources:["repo:"+p.FullName]);
         },true);
-        void Jump(FrameworkElement anchor){var scroller=((Grid)f.Content).Children.OfType<Border>().Select(b=>b.Child).OfType<ScrollViewer>().First();scroller.ScrollToVerticalOffset(anchor.TransformToAncestor(f.Fields).Transform(new Point(0,0)).Y);}
-        var navigation=new WrapPanel{Margin=new Thickness(18,10,18,0)};foreach(var anchor in anchors){var b=new Button{Content=anchor.Key,Padding=new Thickness(12,6,12,6),Margin=new Thickness(0,0,8,4)};b.Click+=(_,_)=>Jump(anchor.Value);navigation.Children.Add(b);}var layout=(Grid)f.Content;foreach(UIElement child in layout.Children)if(Grid.GetRow(child)>0)Grid.SetRow(child,Grid.GetRow(child)+1);layout.RowDefinitions.Insert(1,new RowDefinition{Height=GridLength.Auto});Grid.SetRow(navigation,1);layout.Children.Add(navigation);
-        if(previewPath!=null){if(Environment.GetCommandLineArgs().Contains("--settings-delete"))f.ContentRendered+=(_,_)=>Jump(anchors["删除项目"]);else if(Environment.GetCommandLineArgs().Contains("--settings-bottom"))f.ContentRendered+=(_,_)=>Jump(anchors["Pull Request 与合并"]);f.RenderPreview(previewPath);}f.ShowDialog();
+        f.Action("取消",()=>{f.Close();return Task.CompletedTask;}).IsCancel=true;f.EnableEditGuard();
+        f.SectionNavigation(previewPath!=null&&Environment.GetCommandLineArgs().Contains("--settings-delete")?"删除项目":previewPath!=null&&Environment.GetCommandLineArgs().Contains("--settings-bottom")?"Pull Request 与合并":null);if(previewPath!=null)f.RenderPreview(previewPath);f.ShowDialog();
     }
     private void LinkProjectDialog(ManagedProject p)
     {
