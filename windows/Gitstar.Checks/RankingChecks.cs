@@ -1,4 +1,4 @@
-﻿using Gitstar.Core;
+using Gitstar.Core;
 using Gitstar.Desktop;
 using System.IO;
 using System.Net;
@@ -27,6 +27,7 @@ internal static class RankingChecks
         check(result.Items[0].Created!=null&&result.Items[0].Repository.Description.StartsWith("Repository introduction")&&result.More,"ranking API retains introductions and creation date with pagination");
         result=await api.Rankings(RankingKind.Popular,0,2,"",CancellationToken.None);check(result.Items[0].Position==26&&!result.More&&calls.Last().Query.Contains("page=2"),"popular pagination uses stable ordinal offsets and total count");
         await api.Rankings(RankingKind.Search,0,1,"editor tools",CancellationToken.None);check(calls.Last().Query.Contains("in:name,description")&&!calls.Last().Query.Contains("sort=stars"),"global project search uses relevance and keyword matching rather than presenting a fake trending ranking");
+        await api.Rankings(RankingKind.Search,2,2,"outside ranking",CancellationToken.None);var global=calls.Last();check(global.Path=="/search/repositories"&&global.Query.Contains("page=2")&&!new[]{"stars:","created:","archived:","fork:false"}.Any(global.Query.Contains),"GitHub search fetches remote paginated results independently of ranking period, stars, archive and fork filters");
         total=2000;result=await api.Rankings(RankingKind.Popular,0,40,"",CancellationToken.None);check(!result.More&&result.Total==2000,"ranking pagination stops at GitHub's first one thousand searchable results");
         var before=calls.Count;rejected=false;try{await api.Rankings(RankingKind.Popular,0,41,"",CancellationToken.None);}catch(IOException){rejected=true;}check(rejected&&calls.Count==before,"invalid ranking pages fail before network requests");
         check(calls.All(call=>call.Method==HttpMethod.Get&&!call.Path.Contains("releases")),"ranking browsing performs only reads and never fetches release changelogs");

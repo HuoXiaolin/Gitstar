@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Net;
 using System.Text.RegularExpressions;
 namespace Gitstar.Core;
@@ -15,6 +15,7 @@ public static class RepositoryRankings
         if(kind==RankingKind.New)return query+" created:>="+now.UtcDateTime.Date.AddDays(-NewDays(period)).ToString("yyyy-MM-dd",CultureInfo.InvariantCulture);
         if(kind==RankingKind.Popular)return query;
         if(kind!=RankingKind.Search)throw new IOException("该榜单使用 GitHub 趋势页。");
+        query="is:public";
         text=text.Trim();if(text.Length<2||text.Length>120)throw new IOException("请输入 2 至 120 个字符的项目关键词。");
         var repo=Rules.RepositoryName(text);if(Rules.ValidRepository(repo))return query+" repo:"+repo;
         var terms=text.Split((char[]?)null,StringSplitOptions.RemoveEmptyEntries);if(terms.Length>15)throw new IOException("搜索关键词过多，请精简后重试。");
