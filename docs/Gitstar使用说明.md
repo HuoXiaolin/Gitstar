@@ -1,4 +1,4 @@
-# Gitstar 2.0.9 · Windows x64 使用说明
+# Gitstar 2.0.10 · Windows x64 使用说明
 
 这是第一版可运行的 WPF 应用。已接入真实 GitHub API；尚未使用你的账号完成 OAuth、私有仓库、源码推送和版本发布验收。
 

@@ -307,7 +307,7 @@ public partial class MainWindow : Window
                 var replaceSame=false;var previousPackage=packages.FirstOrDefault(p=>p.Path.Equals(downloadTarget,StringComparison.OrdinalIgnoreCase)&&PackageRules.SameVersion(p,release,asset));
                 if(previousPackage!=null&&await PackageFiles.Matches(previousPackage,ct)){
                     state.Stage("处理同版本安装包");var decision=settings.SameVersionDownload;
-                    if(decision==0){var duplicate=new Form(this,"同版本安装包已存在",640,420);duplicate.Label(card.Repository+" · "+release.Tag+"\n\n"+downloadTarget+"\n\n选择重新下载并替换，或跳过本次下载和安装。旧文件会保留到新文件校验成功。");duplicate.Action("跳过",()=>{decision=2;duplicate.Close();return Task.CompletedTask;}).IsCancel=true;duplicate.Action("重新下载并替换",()=>{decision=1;duplicate.Close();return Task.CompletedTask;},true);duplicate.ShowDialog();if(decision==0)decision=2;}
+                    if(decision==0)decision=await ConfirmDownloadAction(card.Repository+" · "+release.Tag,downloadTarget,"同版本文件已存在，新文件校验成功后才会替换。","重新下载","跳过",ct)?1:2;
                     if(decision==2){state.Finish("已跳过下载");state.Detail=downloadTarget;operation.Results.Add("已存在同版本安装包，跳过下载和安装。");model.Status="已跳过同版本安装包："+asset.Name;return;}replaceSame=true;
                 }
                 // Download continuations run on the UI context; report directly to avoid queued percentages overwriting later stages.
@@ -318,13 +318,15 @@ public partial class MainWindow : Window
                 if(path.EndsWith(".exe",StringComparison.OrdinalIgnoreCase)){state.Stage("检测安装包架构");var platform=await Task.Run(()=>InstallerCompatibility.InspectExe(path,Environment.Is64BitOperatingSystem),ct);if(!platform.Compatible){state.Finish("安装包架构不兼容");state.Detail=platform.Name+" 与当前 Windows 不兼容；安装包已保存，未启动安装器。";throw new IOException(state.Detail);}state.Detail=platform.Name+" · 与当前 Windows 兼容";}
                 if(path.EndsWith(".msi",StringComparison.OrdinalIgnoreCase)){state.Stage("检测安装包架构");var platform=await Task.Run(()=>WindowsServices.MsiPlatform(path),ct);if(!Rules.IsCompatibleMsiTemplate(platform,Environment.Is64BitOperatingSystem)){state.Finish("安装包架构不兼容");state.Detail="MSI 平台："+platform+"；安装包已保存，未启动安装器。";throw new IOException(state.Detail);}}
                 if(PortableUpdateRules.ReplaceFiles(card.Update!.App,path)) {
+                    state.Stage("等待替换确认");
+                    if(!await ConfirmDownloadAction(card.Title+" · "+release.Tag,path,"便携新版已下载，可继续查看替换选项。","处理替换","仅保留文件",ct)){state.Finish("安装包已下载");state.Detail=path;return;}
                     string? extracted=null;
                     if(path.EndsWith(".zip",StringComparison.OrdinalIgnoreCase)){state.Stage("解压中");extracted=await Task.Run(()=>WindowsServices.ExtractPortable(path),ct);}
                     state.Finish("替换后核对版本",true);state.Detail=extracted??path;model.Status="便携新版已下载，请关闭旧版后替换程序文件；完成后核对版本。";
                     await PortableUpdateDialog(card,path,extracted,ct:ct);
                 }else{
                     state.Stage("等待安装确认");
-                    if(DialogMessage.Show(this,"安装包已校验。现在打开安装器？由你完成安装步骤，退出后自动检测实际版本。","Gitstar",MessageBoxButton.YesNo)!=MessageBoxResult.Yes){state.Finish("安装包已下载");state.Detail=path;return;}
+                    if(!await ConfirmDownloadAction(card.Title+" · "+release.Tag,path,"安装包已校验。安装器退出后会检测实际版本。","打开安装器","仅保留文件",ct)){state.Finish("安装包已下载");state.Detail=path;return;}
                     ct.ThrowIfCancellationRequested();var process=Process.Start(new ProcessStartInfo(path){UseShellExecute=true});
                     if(process==null){state.Finish("重新检测版本",true);state.Detail="无法跟踪安装器，请完成安装后重新检测。";return;}
                     state.Stage("安装器运行中");state.Detail="请在安装器中完成操作；安装器未提供可读取的百分比。";model.Status=state.Detail;
@@ -555,6 +557,7 @@ public partial class MainWindow : Window
     public async void RenderSmoke(string path,bool cards=false,bool local=false,bool dark=false,bool firstGroup=false,bool matching=false,bool settingsPreview=false,bool avatars=false,bool progressPreview=false,bool groupPreview=false,bool addPreview=false,bool batchPreview=false,bool tasksPreview=false,bool projectsPreview=false,bool sourcePreview=false,bool createPreview=false,bool projectSettingsPreview=false,bool workspacePreview=false,bool publishPreview=false,bool automationPreview=false)
     {
         settings.Dark=dark;ApplyTheme();
+        if(Environment.GetCommandLineArgs().Contains("--download-decisions")){await DownloadDecisionSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--dialog-ui")){await DialogDesignSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--software-audit")){SoftwareAuditDialog(this,path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--download-settings-notice")){DownloadSettingsNoticeSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
