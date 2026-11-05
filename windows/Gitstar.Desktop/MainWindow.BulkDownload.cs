@@ -85,7 +85,7 @@ public partial class MainWindow
             await RepositoryChecks.Run(Enumerable.Range(0,items.Length).Select(i=>i.ToString()).ToArray(),async(index,token)=>{
                 var item=items[int.Parse(index)];var target=PackageTarget(item.Release,item.Asset,root);var state=new TransferState();var result="待处理";
                 await Execute("下载",item.Release.Repository+" · "+item.Release.Tag+" · "+item.Asset.Name,async ct=>{
-                    var operation=currentOperation.Value!;operation.Repository=item.Release.Repository;operation.Tag=item.Release.Tag;operation.File=target+".partial";
+                    var operation=currentOperation.Value!;operation.Repository=item.Release.Repository;operation.Tag=item.Release.Tag;operation.File=target;
                     ct.ThrowIfCancellationRequested();
                     state.Stage("核对已有安装包");var previous=packages.FirstOrDefault(p=>p.Path.Equals(target,StringComparison.OrdinalIgnoreCase)&&PackageRules.SameVersion(p,item.Release,item.Asset));var replace=false;
                     if(previous!=null&&await PackageFiles.Matches(previous,ct)){if(duplicatePolicy!=1){var existingIndex=packages.IndexOf(previous);if(existingIndex>=0){packages[existingIndex]=previous with{RetainForBatch=true};SavePackages();}state.Finish("已跳过");result="跳过";operation.Results.Add("同版本文件已存在，按本批设置跳过并保留。");return;}replace=true;}

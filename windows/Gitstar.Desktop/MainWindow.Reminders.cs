@@ -26,7 +26,25 @@ public partial class MainWindow
         File.WriteAllText(Path.ChangeExtension(path,".reminders.json"),JsonSerializer.Serialize(new{RestrictedUpdatesHidden=hidden,RestoreOneRefreshesCacheAndPersists=restored,RestoreAllRefreshesCache=allRestored,ManagementEntryVisible=RemindersButton.Visibility==Visibility.Visible}));
         if(!hidden||!restored||!allRestored||RemindersButton.Visibility!=Visibility.Visible)throw new IOException("Reminder restoration regression");
         installed.Add(new("fixture/normal","示例截图工具","1.0",""));settings.Bindings.Add(new(){AppId="fixture/normal",Repository="example/capture"});
+        if(Environment.GetCommandLineArgs().Contains("--software-layout"))installed[3]=installed[3] with{Name="示例便携桌面软件 Portable Desktop Edition",Version="2.1.0-preview.20261105",ExecutablePath=@"D:\Applications\ExampleDesktopEdition\Application.exe"};
         if(Environment.GetCommandLineArgs().Contains("--software-editor")){EditSoftwareBinding(this,settings.Bindings[0],path);return;}
         ReminderDialog(path);
+    }
+    private static Task SoftwareManagementLayoutSmoke(Form form,string path,Func<object> inspect)
+    {
+        var complete=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        form.ContentRendered+=async(_,_)=>{
+            try{
+                var reports=new List<object>();
+                foreach(var width in new[]{940d,560d,940d,560d}){
+                    form.Width=width;await form.Dispatcher.InvokeAsync(()=>{},System.Windows.Threading.DispatcherPriority.ApplicationIdle);form.UpdateLayout();reports.Add(inspect());
+                }
+                File.WriteAllText(Path.ChangeExtension(path,".software-layout.json"),JsonSerializer.Serialize(reports));
+                var root=(FrameworkElement)form.Content;var bitmap=new System.Windows.Media.Imaging.RenderTargetBitmap((int)root.ActualWidth,(int)root.ActualHeight,96,96,PixelFormats.Pbgra32);bitmap.Render(root);var encoder=new System.Windows.Media.Imaging.PngBitmapEncoder();encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));using(var output=File.Create(path))encoder.Save(output);
+                complete.SetResult();
+            }catch(Exception error){complete.SetException(error);}
+            finally{form.Close();}
+        };
+        return complete.Task;
     }
 }

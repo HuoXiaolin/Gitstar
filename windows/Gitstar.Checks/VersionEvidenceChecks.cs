@@ -34,7 +34,22 @@ internal static class VersionEvidenceChecks
         File.WriteAllText(json,"{\"version\":\"9.0.0\"}");File.WriteAllText(text,"2.0.0");
         evidence=InstalledVersion.Resolve("ExampleEditor","1.0",[WindowsServices.ReadApplicationVersion(program)],path,true);
         check(evidence.Version=="未知"&&evidence.NeedsReview&&evidence.Details.Contains("9.0.0")&&evidence.Details.Contains("2.0.0"),"conflicting application declarations remain unresolved instead of selecting the first or largest");
+        File.WriteAllText(json,"{\"version\":\"2.0.0\"}");File.WriteAllText(text,"v2.0");
+        evidence=InstalledVersion.Resolve("ExampleEditor","1.0",[WindowsServices.ReadApplicationVersion(program)],path,true);
+        check(evidence.Version=="2.0.0"&&!evidence.NeedsReview&&evidence.Details.Contains("2.0.0"),"equivalent numeric declarations do not create a false version conflict");
+        File.WriteAllText(json,"{\"version\":\"2.0.0-beta.1+build\"}");File.WriteAllText(text,"2.0-beta.1");
+        check(!WindowsServices.ReadApplicationVersion(program).ApplicationDeclarationsConflict,"equivalent prerelease declarations ignore padding and build metadata");
+        File.WriteAllText(text,"2.0.0-BETA.1");
+        check(WindowsServices.ReadApplicationVersion(program).ApplicationDeclarationsConflict,"distinct prerelease identifiers are not conflated by case-insensitive text matching");
         File.Delete(json);File.Delete(text);
+        foreach(var sharedRoot in new[]{Path.GetPathRoot(root)!,@"\\example-server\example-share\"}){
+            var atRoot=program with{Path=Path.Combine(sharedRoot,"ExampleEditor.exe")};var reads=new List<string>();
+            string? Declaration(string candidate){reads.Add(candidate);return Path.GetFileName(candidate).Equals("version.json",StringComparison.OrdinalIgnoreCase)?"{\"version\":\"99.0\"}":null;}
+            var rootEvidence=InstalledVersion.Resolve("ExampleEditor","9.0",[WindowsServices.ReadApplicationVersion(atRoot,Declaration)],atRoot.Path,true);
+            check(rootEvidence.Version=="1.0.0"&&reads.All(candidate=>Path.GetFileName(candidate).Equals("package.json",StringComparison.OrdinalIgnoreCase)),"shared root ignores anonymous version declarations without reading unrelated files: "+sharedRoot);
+            var named=WindowsServices.ReadApplicationVersion(atRoot,candidate=>Path.GetFileName(candidate)=="package.json"?"{\"name\":\"example-editor\",\"version\":\"3.1\"}":null);
+            check(named.ApplicationVersion=="3.1"&&!named.ApplicationDeclarationsConflict,"identity-matched package declaration remains usable for root-level executables: "+sharedRoot);
+        }
         var confirmation=WindowsServices.ConfirmInstalledVersion("5.6.7",path);
         var binding=new Binding{AppId="example",Repository="example/editor",ExecutablePath=path,ConfirmedVersion=confirmation.Version,ConfirmedVersionPath=confirmation.Path,ConfirmedVersionHash=confirmation.Hash};
         var app=new InstalledApp("example","ExampleEditor","1.0.0",folder,ExecutablePath:path){VersionDetails="程序产品版本：1.0.0"};

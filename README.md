@@ -6,7 +6,7 @@
 
 Gitstar 是一款 Windows 桌面应用，把 GitHub 关注项目、本机软件更新和自己的项目发布放进同一个工作台。你可以按分组看看收藏的软件出了什么新版本，为电脑上的软件下载更新，也可以提交自己的源码、管理安装包与发布说明。
 
-当前版本：**2.0.10** · 作者：[HuoXiaolin](https://github.com/HuoXiaolin) · [下载发行版](https://github.com/HuoXiaolin/Gitstar/releases)
+当前版本：**2.1.0** · 作者：[HuoXiaolin](https://github.com/HuoXiaolin) · [下载发行版](https://github.com/HuoXiaolin/Gitstar/releases)
 
 [最近一次更新](CHANGELOG.md) · [历史更新日志](CHANGELOG_HISTORY.md)
 
@@ -72,6 +72,10 @@ Gitstar 是一款 Windows 桌面应用，把 GitHub 关注项目、本机软件�
 
 浅色与深色主题、托盘后台运行、开机静默启动、可调整频率的自动检查，以及可暂停、继续或取消的任务管理。设置中还能查看本地数据位置，按模块清理缓存和记录。
 
+“任务”实时加入新任务，并显示下载和上传进度。多个安装确认集中到“下载待处理”列表，也可从任务窗口返回逐项处理。
+
+四个模块使用各自的主题色。主导航、筛选栏与弹窗会根据窗口宽度调整排列，长文字自动换行，任务和下载待处理项支持逐项操作。
+
 ## 功能截图
 
 以下截图由 **2.0.0 的隔离演示模式**生成，仓库、软件、版本及 Stars 等均为测试数据，仅用于展示功能。点击图片可查看原图。
@@ -117,7 +121,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File windows/build.ps1 -Dotne
 
 本项目的开发目录为 `D:\Agant\github-update`；构建后，最新精简源码同步到 `D:\Agant\Github_Source\Gitstar`，发行文件输出到 `D:\Agant\Github_Releases\Gitstar`。可通过 `-SourceRoot` 和 `-OutputRoot` 自定义输出位置。
 
-通过 `windows/build.ps1` 生成安装包时，按北京时间的自然日判断，每天首次成功打包将第三段版本号加 1，例如 `2.0.0 → 2.0.1`，当天再次打包保持不变。版本号和最后成功打包日期一起保存在 `windows/Directory.Build.props`，清理构建缓存不会重复加号。构建失败、缺少安装器编译器或只运行 `dotnet build/publish` 时不递增。程序及安装包使用同一版本，Windows 数字文件版本对应为 `2.0.1.0`。
+通过 `windows/build.ps1` 生成安装包时，按北京时间的自然日判断，每天首次成功打包递增一次版本号，例如 `2.0.0 → 2.0.1`，第三段达到 9 后进位为 `2.1.0`，当天再次打包保持不变。已有 `2.0.10` 在下一次递增时归入 `2.1.0`。版本号和最后成功打包日期一起保存在 `windows/Directory.Build.props`，清理构建缓存不会重复加号。构建失败、缺少安装器编译器或只运行 `dotnet build/publish` 时不递增。程序及安装包使用同一版本，Windows 数字文件版本对应为 `2.1.0.0`。
 
 可运行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File windows/check-build-version.ps1`，用隔离的编译器和安装器替身核对日期、失败重试、版本同步及并发锁规则；此检查不会重新生成正式安装包。
 

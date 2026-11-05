@@ -17,10 +17,12 @@ public static class CredentialStorage
 public sealed partial class GitHubClient
 {
     private GitHubCredential? credential;
+    private readonly object credentialSync=new();
+    private long credentialRevision;
     private readonly SemaphoreSlim refreshGate=new(1,1);
-    public GitHubCredential Credentials=>credential??new(Token);
+    public GitHubCredential Credentials{get{lock(credentialSync)return credential??new(token);}}
     public Action<GitHubCredential>? CredentialsChanged {get;set;}
-    public void SetCredentials(GitHubCredential auth){Token=auth.AccessToken;credential=auth;if(auth.Scope.Length>0)oauthScopes=auth.Scope.Split([',',' '],StringSplitOptions.TrimEntries|StringSplitOptions.RemoveEmptyEntries);}
+    public void SetCredentials(GitHubCredential auth){lock(credentialSync){token=auth.AccessToken;credential=auth;credentialRevision++;oauthScopes=auth.Scope.Length>0?auth.Scope.Split([',',' '],StringSplitOptions.TrimEntries|StringSplitOptions.RemoveEmptyEntries):null;}}
     private static GitHubCredential ParseCredential(JsonElement data,string clientId)
     {
         var now=DateTimeOffset.UtcNow;
@@ -37,16 +39,22 @@ public sealed partial class GitHubClient
     }
     public async Task EnsureFreshToken(CancellationToken ct=default)
     {
-        bool Due()=>credential?.ExpiresAt is {} expiry && expiry<=DateTimeOffset.UtcNow.AddMinutes(2);
+        bool Due(){lock(credentialSync)return credential?.ExpiresAt is {} expiry && expiry<=DateTimeOffset.UtcNow.AddMinutes(2);}
         if(!Due())return;
         await refreshGate.WaitAsync(ct);
         try{
-            if(!Due())return;var previous=credential!;
+            GitHubCredential previous;long revision;lock(credentialSync){if(!Due())return;previous=credential!;revision=credentialRevision;}
             if(previous.RefreshToken.Length==0 || previous.RefreshExpiresAt<=DateTimeOffset.UtcNow)throw new IOException("旧授权已到期且没有可用的续期令牌，请在设置重新授权一次。新版会保存续期令牌，之后自动续期。");
             var appId=previous.ClientId.Length>0?previous.ClientId:clientId;
             var result=await OAuthPost("oauth/access_token",new(){{"client_id",appId},{"grant_type","refresh_token"},{"refresh_token",previous.RefreshToken}},ct);
+            lock(credentialSync)if(credentialRevision!=revision)return;
             if(result.TryGetProperty("error",out var error)){var code=error.GetString();throw new IOException(code is "bad_refresh_token" or "invalid_grant"?"GitHub 续期授权已失效，请在设置重新授权。":"GitHub 续期暂未完成，已保留凭据，请稍后重试。");}
-            var next=ParseCredential(result,appId);if(next.Scope.Length==0)next=next with{Scope=previous.Scope};SetCredentials(next);CredentialsChanged?.Invoke(next);
+            var next=ParseCredential(result,appId);if(next.Scope.Length==0)next=next with{Scope=previous.Scope};
+            lock(credentialSync){
+                // Logout or a different authorization invalidates responses already in flight.
+                // Persistence stays inside the same boundary, before a later logout clears storage.
+                if(credentialRevision!=revision)return;ct.ThrowIfCancellationRequested();SetCredentials(next);CredentialsChanged?.Invoke(next);
+            }
         }finally{refreshGate.Release();}
     }
 }

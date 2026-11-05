@@ -31,6 +31,7 @@ public sealed partial class GitHubClient
         progress?.Invoke("核对远程附件："+name);
         if(prior.Length==1&&await AutomationAssetMatches(repo,prior[0],size,sha,ct,verified,progress))return false;
         var tempName="gitstar-pending-"+sha[..16].ToLowerInvariant()+"-"+name;var pending=assets.FirstOrDefault(asset=>S(asset,"name")==tempName);
+        if(pending.ValueKind!=JsonValueKind.Undefined&&S(pending,"state")!="uploaded")throw new IOException($"检测到尚未完成的临时附件：{tempName}（状态：{(S(pending,"state").Length>0?S(pending,"state"):"未知")}）。如果其他位置仍在上传，请先等待。确认上传失败后，请到“管理发布包”核对并删除这条失败残留，再重试。此附件未重传，未删除对应的正式附件或临时附件。");
         if(pending.ValueKind==JsonValueKind.Undefined){progress?.Invoke("上传附件："+name+" · "+(size/1024d/1024d).ToString("0.0")+" MB");pending=await UploadAutomationAsset(repo,releaseId,path,tempName,ct,uploadProgress);}
         progress?.Invoke("GitHub 已接收，核对附件："+name);
         if(!await AutomationAssetMatches(repo,pending,size,sha,ct,verified,progress))throw new IOException("远程安装包摘要不一致，旧安装包已保留。");
@@ -61,6 +62,19 @@ public sealed partial class GitHubClient
         var key=repo.ToLowerInvariant()+"/"+asset.GetProperty("id").GetInt64()+"/"+size+"/"+sha.ToUpperInvariant();
         if(verified?.Contains(key)==true)return true;
         progress?.Invoke("远端未提供摘要，下载核验："+S(asset,"name")+" · "+(size/1024d/1024d).ToString("0.0")+" MB");
-        using var response=await AssetResponse(repo,new(asset.GetProperty("id").GetInt64(),S(asset,"name"),size,"",null),ct);using var input=await response.Content.ReadAsStreamAsync(ct);using var hash=IncrementalHash.CreateHash(HashAlgorithmName.SHA256);var buffer=new byte[81920];long total=0;int read;while((read=await input.ReadAsync(buffer,ct))>0){total+=read;if(total>size)return false;hash.AppendData(buffer,0,read);}var matches=total==size&&Convert.ToHexString(hash.GetHashAndReset()).Equals(sha,StringComparison.OrdinalIgnoreCase);if(matches)verified?.Add(key);return matches;
+        using var response=await AssetResponse(repo,new(asset.GetProperty("id").GetInt64(),S(asset,"name"),size,"",null),ct);using var input=await response.Content.ReadAsStreamAsync(ct);
+        var clock=Stopwatch.StartNew();var lastReport=TimeSpan.Zero;
+        void Report(long total){if(total!=size&&clock.Elapsed-lastReport<TimeSpan.FromSeconds(1))return;lastReport=clock.Elapsed;progress?.Invoke($"下载核验：{S(asset,"name")} · {total/1048576d:0.0} / {size/1048576d:0.0} MB · 已用 {clock.Elapsed.TotalSeconds:0} 秒");}
+        var matches=await VerifyAutomationAssetStream(input,size,sha,ct,Report);if(matches)verified?.Add(key);return matches;
+    }
+    internal static async Task<bool> VerifyAutomationAssetStream(Stream input,long size,string sha,CancellationToken ct,Action<long>? progress=null,TimeSpan? idleTimeout=null)
+    {
+        // ResponseHeadersRead ends HttpClient's timeout at the headers. Bound each body
+        // read separately so a silent server cannot keep publication waiting forever.
+        var idle=idleTimeout??TimeSpan.FromSeconds(30);using var deadline=CancellationTokenSource.CreateLinkedTokenSource(ct);using var hash=IncrementalHash.CreateHash(HashAlgorithmName.SHA256);var buffer=new byte[81920];long total=0;
+        try{
+            while(true){deadline.CancelAfter(idle);var read=await input.ReadAsync(buffer,deadline.Token);deadline.CancelAfter(Timeout.InfiniteTimeSpan);ct.ThrowIfCancellationRequested();if(read==0)break;total+=read;if(total>size)return false;hash.AppendData(buffer,0,read);progress?.Invoke(total);}
+            return total==size&&Convert.ToHexString(hash.GetHashAndReset()).Equals(sha,StringComparison.OrdinalIgnoreCase);
+        }catch(OperationCanceledException error)when(!ct.IsCancellationRequested){throw new IOException($"远端附件核验连续 {idle.TotalSeconds:0} 秒未收到数据，请检查网络后重试。已核验 {total/1048576d:0.0} / {size/1048576d:0.0} MB，本次核验未完成。",error);}
     }
 }

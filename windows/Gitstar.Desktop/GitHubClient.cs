@@ -14,7 +14,7 @@ public sealed partial class GitHubClient : IDisposable
     private string token="";
     private string[]? oauthScopes;
     public const string OAuthScopes="repo user workflow delete_repo";
-    public string Token { get=>token;set{if(token!=value){oauthScopes=null;credential=null;}token=value;} }
+    public string Token { get{lock(credentialSync)return token;}set{lock(credentialSync){if(token!=value){oauthScopes=null;credential=null;credentialRevision++;}token=value;}} }
     public GitHubClient(Settings settings,HttpMessageHandler? transport=null)
     {
         clientId=settings.ClientId;
@@ -28,13 +28,14 @@ public sealed partial class GitHubClient : IDisposable
     private async Task<JsonElement> Request(string url, HttpMethod? method=null, object? body=null, CancellationToken ct=default,Action<JsonElement>? consume=null,string? etag=null,Action<string,bool>? cacheResult=null,bool fresh=false,string? modifiedSince=null,Action<HttpResponseMessage>? headers=null)
     {
         await EnsureFreshToken(ct);
+        string requestToken;long requestCredentialRevision;lock(credentialSync){requestToken=token;requestCredentialRevision=credentialRevision;}
         using var msg = new HttpRequestMessage(method ?? HttpMethod.Get, url.StartsWith("https://",StringComparison.Ordinal) ? url : "https://api.github.com/" + url);
         if (msg.RequestUri!.Host is not ("api.github.com" or "uploads.github.com")) throw new ArgumentException("无效的 GitHub API 主机。");
         msg.Headers.Accept.ParseAdd("application/vnd.github+json"); msg.Headers.Add("X-GitHub-Api-Version","2022-11-28");
         if(etag!=null && EntityTagHeaderValue.TryParse(etag,out var tag))msg.Headers.IfNoneMatch.Add(tag);
         if(modifiedSince!=null)msg.Headers.TryAddWithoutValidation("If-Modified-Since",modifiedSince);
         if(fresh)msg.Headers.CacheControl=new CacheControlHeaderValue{NoCache=true,NoStore=true};
-        if (Token.Length > 0) msg.Headers.Authorization = new AuthenticationHeaderValue("Bearer",Token);
+        if (requestToken.Length > 0) msg.Headers.Authorization = new AuthenticationHeaderValue("Bearer",requestToken);
         if (body != null) msg.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8,"application/json");
         else if(msg.Method==HttpMethod.Put)msg.Content=new ByteArrayContent([]);
         using var deadline=CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -43,7 +44,7 @@ public sealed partial class GitHubClient : IDisposable
         try{received=await http.SendAsync(msg,HttpCompletionOption.ResponseHeadersRead,deadline.Token);}catch(OperationCanceledException ex)when(!ct.IsCancellationRequested){throw new IOException("GitHub 请求超时，请检查网络或代理后重试。",ex);}
         using var response = received;
         headers?.Invoke(response);
-        if(response.Headers.TryGetValues("X-OAuth-Scopes",out var scopes))oauthScopes=string.Join(",",scopes).Split(',',StringSplitOptions.TrimEntries|StringSplitOptions.RemoveEmptyEntries);
+        if(response.Headers.TryGetValues("X-OAuth-Scopes",out var scopes)){lock(credentialSync)if(credentialRevision==requestCredentialRevision)oauthScopes=string.Join(",",scopes).Split(',',StringSplitOptions.TrimEntries|StringSplitOptions.RemoveEmptyEntries);}
         if(response.StatusCode==HttpStatusCode.NotModified && msg.Headers.IfNoneMatch.Count>0){cacheResult?.Invoke(etag!,true);return default;}
         if(response.StatusCode==HttpStatusCode.NotModified&&modifiedSince!=null)return default;
         if (!response.IsSuccessStatusCode) {

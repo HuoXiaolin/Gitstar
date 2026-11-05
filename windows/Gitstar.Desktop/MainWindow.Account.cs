@@ -20,8 +20,8 @@ public partial class MainWindow
             if(!Current())throw new IOException("账号已改变，请重新打开账号信息。");
             if(busy||batchPublishing)throw new IOException("请先等待当前任务完成，再退出登录。");
             if(DialogMessage.Show(f,$"退出 {account}？此账号缓存与配置会留在本机。","退出登录",MessageBoxButton.OKCancel)!=MessageBoxResult.OK)return Task.CompletedTask;
-            store.Set("profile/"+account,settings);CredentialStorage.Clear(store);var old=settings;
-            settings=new Settings{ClientId=old.ClientId,Proxy=old.Proxy,DirectConnection=old.DirectConnection,Startup=old.Startup,Dark=old.Dark,DownloadFolder=old.DownloadFolder,RecentSort=old.RecentSort,ProjectsSort=old.ProjectsSort};client.Token="";Save();SwitchOperations();LoadCache();RebuildGroups();AccountLabel();PlanUpdates();Display();f.Close();return Task.CompletedTask;
+            store.Set("profile/"+account,settings);client.Token="";CredentialStorage.Clear(store);var old=settings;
+            settings=new Settings{ClientId=old.ClientId,Proxy=old.Proxy,DirectConnection=old.DirectConnection,Startup=old.Startup,Dark=old.Dark,DownloadFolder=old.DownloadFolder,RecentSort=old.RecentSort,ProjectsSort=old.ProjectsSort};Save();SwitchOperations();LoadCache();RebuildGroups();AccountLabel();PlanUpdates();Display();f.Close();return Task.CompletedTask;
         });
         f.Action("重新获取授权",()=>{if(!Current())throw new IOException("账号已改变，请重新打开账号信息。");if(busy||batchPublishing)throw new IOException("请先等待当前任务完成，再重新获取授权。");f.Close();AuthorizeGitHub();return Task.CompletedTask;},true);
         f.Closed+=(_,_)=>{closed=true;lifetime.Cancel();};

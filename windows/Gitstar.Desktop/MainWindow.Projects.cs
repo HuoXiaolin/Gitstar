@@ -64,7 +64,6 @@ public partial class MainWindow
     {
         LeaveRankings();UseFeature(UsageFeature.ProjectsPage);
         projectsPage=true;model.SelectionMode=false;UpdatesToolbar.Visibility=UpdatesContent.Visibility=Visibility.Collapsed;ProjectsHost.Visibility=Visibility.Visible;
-        RecentButton.Background=LocalButton.Background=(Brush)Resources["Surface"];RecentButton.Foreground=LocalButton.Foreground=(Brush)Resources["Ink"];
         SetPageAccent(2);
         model.Title="我的项目工作台";model.Subtitle="管理仓库与本地源码，提交变更，发布正式版与测试版。";RenderProjects();
     }
@@ -106,13 +105,14 @@ public partial class MainWindow
     private Grid ProjectAddressRow(ManagedProject project)
     {
         var row=new Grid{Margin=new Thickness(0,0,0,8)};row.ColumnDefinitions.Add(new());row.ColumnDefinitions.Add(new(){Width=GridLength.Auto});
+        row.RowDefinitions.Add(new(){Height=GridLength.Auto});row.RowDefinitions.Add(new(){Height=GridLength.Auto});
         var left=new DockPanel{HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,12,0)};row.Children.Add(left);
         var actions=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(4,0,0,0)};DockPanel.SetDock(actions,Dock.Right);left.Children.Add(actions);
         foreach(var copy in new[]{true,false}){
             var title=copy?"复制项目地址":"打开项目主页";var button=new Button{Tag=project,ToolTip=title,Style=(Style)FindResource("ProjectAddressButton")};System.Windows.Automation.AutomationProperties.SetName(button,title);
             var icon=new System.Windows.Shapes.Path{Data=Geometry.Parse(copy?"M 5,2 L 14,2 L 14,11 M 2,5 L 11,5 L 11,14 L 2,14 Z":"M 8,2 L 14,2 L 14,8 M 14,2 L 7,9 M 5,3 L 2,3 L 2,14 L 13,14 L 13,11"),StrokeThickness=1.5,StrokeLineJoin=PenLineJoin.Round,Stretch=Stretch.Uniform,Width=13,Height=13};icon.SetBinding(System.Windows.Shapes.Shape.StrokeProperty,new System.Windows.Data.Binding("Foreground"){Source=button});button.Content=icon;if(copy)button.Click+=CopyProjectAddress_Click;else button.Click+=ProjectHome_Click;actions.Children.Add(button);
         }
-        var metadata=new TextBlock{Text=project.Visibility+"   ·   "+project.Access+"   ·   默认分支 "+project.DefaultBranch,FontSize=11,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(10,0,0,0)};metadata.SetResourceReference(TextBlock.ForegroundProperty,"Muted");actions.Children.Add(metadata);
+        var metadata=new TextBlock{Text=project.Visibility+"   ·   "+project.Access+"   ·   默认分支 "+project.DefaultBranch,ToolTip=project.DefaultBranch,TextTrimming=TextTrimming.CharacterEllipsis,FontSize=11,Margin=new Thickness(0,6,0,0)};metadata.SetResourceReference(TextBlock.ForegroundProperty,"Muted");Grid.SetRow(metadata,1);Grid.SetColumnSpan(metadata,2);row.Children.Add(metadata);
         var address=new TextBlock{Text=project.FullName,ToolTip=project.FullName,TextTrimming=TextTrimming.CharacterEllipsis,FontSize=12,VerticalAlignment=VerticalAlignment.Center};address.SetResourceReference(TextBlock.ForegroundProperty,"Muted");left.Children.Add(address);
         var facts=new RepositoryFacts{Repository=project.FullName,Metadata=project.Metadata,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(facts,1);row.Children.Add(facts);return row;
     }
@@ -169,6 +169,11 @@ public partial class MainWindow
             ProjectAction(actions,"日志",()=>ProjectDialog(()=>Form.Notes(this,p.Name+" · "+version.Tag,version.Body)));
             ProjectAction(actions,"管理发布包",()=>OpenReleaseManager(p,version),enabled:api.Token.Length>0);
             if(version.Draft){ProjectAction(actions,"核实状态",async()=>{await VerifyProjectVersion(p,version);},enabled:api.Token.Length>0);ProjectAction(actions,"编辑草稿",()=>OpenDraftAction(p,version,true),enabled:writable);ProjectAction(actions,"继续发布",()=>OpenDraftAction(p,version,false),enabled:writable);}
+            // Draft actions must not consume the entire information column at narrower window sizes.
+            row.RowDefinitions.Add(new(){Height=GridLength.Auto});row.RowDefinitions.Add(new(){Height=GridLength.Auto});
+            Grid.SetColumnSpan(labels,2);Grid.SetColumn(actions,0);Grid.SetColumnSpan(actions,2);Grid.SetRow(actions,1);
+            actions.HorizontalAlignment=HorizontalAlignment.Left;
+            foreach(var label in labels.Children.OfType<TextBlock>())label.Margin=new Thickness(0,0,0,5);
             versions.Children.Add(row);
         }
         var recent=operations.Where(o=>o.Repository.Equals(p.FullName,StringComparison.OrdinalIgnoreCase) || o.Description.StartsWith(p.FullName,StringComparison.OrdinalIgnoreCase)).OrderByDescending(o=>o.Updated).Take(4).ToArray();

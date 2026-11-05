@@ -31,17 +31,27 @@ public static partial class WindowsServices
         return app with{VersionNeedsReview=app.VersionNeedsReview||!selectedIsRunning,VersionDetails=app.VersionDetails+(selectedIsRunning?"\n另有运行副本，当前按已配置且正在运行的位置记录：\n":"\n检测到另一个运行副本，请核对实际安装位置：\n")+string.Join("\n",other.Select(program=>program.Path+" · "+(InstalledVersion.NormalizeVersion(program.ApplicationVersion.Length>0?program.ApplicationVersion:program.ProductVersion))))};
     }
     private static string IdentityName(string value)=>new string(value.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
-    internal static ProgramVersion ReadApplicationVersion(ProgramVersion program)
+    private static string? ReadApplicationDeclaration(string path)
+    {
+        if(!File.Exists(path)||(File.GetAttributes(path)&FileAttributes.ReparsePoint)!=0||new FileInfo(path).Length>64*1024)return null;
+        return File.ReadAllText(path);
+    }
+    internal static ProgramVersion ReadApplicationVersion(ProgramVersion program)=>ReadApplicationVersion(program,ReadApplicationDeclaration);
+    internal static ProgramVersion ReadApplicationVersion(ProgramVersion program,Func<string,string?> readDeclaration)
     {
         var folder=Path.GetDirectoryName(program.Path);if(folder==null)return program;
+        var fullFolder=Path.GetFullPath(folder);var sharedRoot=fullFolder.TrimEnd('\\','/').Equals(Path.GetPathRoot(fullFolder)?.TrimEnd('\\','/'),StringComparison.OrdinalIgnoreCase);
         var declarations=new List<(string Version,string Source)>();
         // Read only small, local application declarations. Never search dependency trees,
         // infer versions from arbitrary binary strings, or launch unknown programs.
         foreach(var relative in new[]{"version.json","VERSION","version.txt",Path.Combine("resources","app","package.json"),"package.json"}){
+            // A drive/share root can hold independent applications. Anonymous files
+            // there cannot identify which EXE they describe; named packages still can.
+            if(sharedRoot&&!relative.EndsWith("package.json",StringComparison.OrdinalIgnoreCase))continue;
             var path=Path.Combine(folder,relative);
             try{
-                if(!File.Exists(path)||(File.GetAttributes(path)&FileAttributes.ReparsePoint)!=0||new FileInfo(path).Length>64*1024)continue;
-                var text=File.ReadAllText(path).Trim();var version="";
+                var content=readDeclaration(path);if(content==null)continue;
+                var text=content.Trim();var version="";
                 if(path.EndsWith(".json",StringComparison.OrdinalIgnoreCase)){
                     using var document=JsonDocument.Parse(text);var root=document.RootElement;if(root.ValueKind!=JsonValueKind.Object)continue;
                     if(relative.EndsWith("package.json",StringComparison.OrdinalIgnoreCase)){
@@ -56,7 +66,7 @@ public static partial class WindowsServices
             }catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or JsonException){}
         }
         if(declarations.Count==0)return program;
-        return program with{ApplicationVersion=declarations[0].Version,ApplicationVersionSource=declarations[0].Source,ApplicationDeclarationsConflict=declarations.Select(item=>item.Version).Distinct(StringComparer.OrdinalIgnoreCase).Count()>1,ApplicationDeclarations=string.Join("\n",declarations.Select(item=>item.Source+"："+item.Version))};
+        return program with{ApplicationVersion=declarations[0].Version,ApplicationVersionSource=declarations[0].Source,ApplicationDeclarationsConflict=declarations.Any(item=>Rules.CompareVersions(item.Version,declarations[0].Version)!=0),ApplicationDeclarations=string.Join("\n",declarations.Select(item=>item.Source+"："+item.Version))};
     }
     internal static (string Version,string Path,string Hash) ConfirmInstalledVersion(string version,string program)
     {

@@ -51,24 +51,44 @@ public static partial class WindowsServices
         Directory.CreateDirectory(destination); archive.ExtractToDirectory(destination,false); return destination;
     }
     public static string DownloadPath(Release release,Asset asset,string root)=>Path.Combine(Path.GetFullPath(root),PackageRules.OriginalFileName(asset.Name));
+    internal static string ValidateDownloadTarget(string path,string root)
+    {
+        path=Path.GetFullPath(path);
+        var parent=Path.GetDirectoryName(path);
+        // TrimEndingDirectorySeparator retains a volume/share root; TrimEnd turns C:\ into C:.
+        if(parent==null||!Path.TrimEndingDirectorySeparator(parent).Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(root)),StringComparison.OrdinalIgnoreCase))
+            throw new IOException("安装包目标必须直接位于下载目录。");
+        return path;
+    }
     public static async Task<string> Download(GitHubClient api,Release release,Asset asset,string root,Action<long,long> progress,CancellationToken ct,Action? verifying=null,Func<CancellationToken,Task<bool>>? replaceManaged=null,bool forceDownload=false,string? targetPath=null)
     {
-        var path=targetPath??DownloadPath(release,asset,root);var expectedRoot=Path.GetFullPath(root);if(!Path.GetDirectoryName(Path.GetFullPath(path))!.Equals(expectedRoot.TrimEnd(Path.DirectorySeparatorChar),StringComparison.OrdinalIgnoreCase))throw new IOException("安装包目标必须直接位于下载目录。");Directory.CreateDirectory(expectedRoot);
+        ct.ThrowIfCancellationRequested();
+        var expectedRoot=Path.GetFullPath(root);var path=ValidateDownloadTarget(targetPath??DownloadPath(release,asset,root),expectedRoot);Directory.CreateDirectory(expectedRoot);
         if(File.Exists(path)) { verifying?.Invoke();if(!forceDownload&&await Verify(path,asset,ct))return path;if(replaceManaged==null || !await replaceManaged(ct))throw new IOException("保存目录中已存在同名文件："+Path.GetFileName(path)+"。未覆盖，请选择其他目录或先移走原文件。"); }
-        var partial=path+".partial";
-        // Partial files are not installed; retry restarts the stream instead of trusting stale ranges.
-        using(var response=await api.AssetResponse(release.Repository,asset,ct)) {
-            await using var input=await response.Content.ReadAsStreamAsync(ct); await using var output=new FileStream(partial,FileMode.Create,FileAccess.Write,FileShare.Read,65536,true);
-            var buffer=new byte[65536]; long count=0; int n;
-            while((n=await input.ReadAsync(buffer,ct))>0) { count+=n; if(count>asset.Size)throw new IOException("下载体积超过 GitHub 声明值。"); await output.WriteAsync(buffer.AsMemory(0,n),ct); progress(count,asset.Size); }
+        var partial=Path.Combine(expectedRoot,".gitstar-download-"+Guid.NewGuid().ToString("N")+".partial");var ownsPartial=false;
+        // The temporary name is independent of the attachment name. An author may publish A.partial
+        // while A is downloading, and existing files must never be treated as our scratch storage.
+        try{
+            using(var response=await api.AssetResponse(release.Repository,asset,ct)) {
+                await using var input=await response.Content.ReadAsStreamAsync(ct);
+                await using var output=new FileStream(partial,FileMode.CreateNew,FileAccess.Write,FileShare.Read,65536,true);ownsPartial=true;
+                var buffer=new byte[65536]; long count=0; int n;
+                while((n=await input.ReadAsync(buffer,ct))>0) { count+=n; if(count>asset.Size)throw new IOException("下载体积超过 GitHub 声明值。"); await output.WriteAsync(buffer.AsMemory(0,n),ct); progress(count,asset.Size); }
+            }
+            verifying?.Invoke();if(!await VerifyDownload(partial,asset,ct,allowSizeOnly:true))throw new IOException("安装包大小或 SHA-256 校验失败，未启动安装器。");
+            ct.ThrowIfCancellationRequested();
+            if(File.Exists(path)){if(replaceManaged==null || !await replaceManaged(ct))throw new IOException("旧安装包已变化，未替换，请重新核对同名文件。");ct.ThrowIfCancellationRequested();File.Move(partial,path,true);}else File.Move(partial,path,false);return path;
+        }finally{
+            // Retry already starts from the beginning. Only clean up a file created by this attempt.
+            if(ownsPartial)try{File.Delete(partial);}catch(IOException){}catch(UnauthorizedAccessException){}
         }
-        verifying?.Invoke();if(!await Verify(partial,asset,ct))throw new IOException("安装包大小或 SHA-256 校验失败，未启动安装器。");
-        if(File.Exists(path)){if(replaceManaged==null || !await replaceManaged(ct))throw new IOException("旧安装包已变化，未替换；新文件保留在临时路径。");File.Move(partial,path,true);}else File.Move(partial,path,false);return path;
     }
-    public static async Task<bool> Verify(string path,Asset asset,CancellationToken ct)
+    public static Task<bool> Verify(string path,Asset asset,CancellationToken ct)=>VerifyDownload(path,asset,ct,allowSizeOnly:false);
+    private static async Task<bool> VerifyDownload(string path,Asset asset,CancellationToken ct,bool allowSizeOnly)
     {
+        ct.ThrowIfCancellationRequested();
         if(new FileInfo(path).Length!=asset.Size)return false;
-        if(string.IsNullOrEmpty(asset.Digest))return path.EndsWith(".partial",StringComparison.Ordinal); // Existing files without a digest cannot safely be reused.
+        if(string.IsNullOrEmpty(asset.Digest))return allowSizeOnly; // Only a freshly downloaded stream can use size-only verification.
         if(!asset.Digest.StartsWith("sha256:",StringComparison.OrdinalIgnoreCase))throw new IOException("该安装包的摘要算法暂不支持。");
         await using var stream=File.OpenRead(path); var hash=Convert.ToHexString(await SHA256.HashDataAsync(stream,ct)); return hash.Equals(asset.Digest[7..],StringComparison.OrdinalIgnoreCase);
     }

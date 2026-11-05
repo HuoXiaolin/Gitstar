@@ -49,7 +49,10 @@ internal static class InstalledIdentityChecks
         check(zedSettings.Bindings.Count==1&&InstalledVersion.Find(repair.Apps,prefix+"zed-old")?.Version==actualVersion,"path-based legacy recovery removes duplicate associations and preserves completion lookup");
         var missing=zedBinding.Snapshot();missing.ExecutablePath=Path.Combine(folder,"Missing.exe");
         detected=WindowsServices.ScanInventory([new(registry)],[missing],[],[],true);
-        check(detected.Single().Version=="未知","missing selected main program never borrows the registered or target-release version");
+        check(detected.Single().Version=="未知"&&detected.Single().VersionNeedsReview,"missing selected main program is flagged for review without borrowing a registered or release version");
+        var missingLocation=registry with{Id=prefix+"missing-location",Location=Path.Combine(folder,"missing-folder")};
+        var invalidLocation=WindowsServices.ScanInventory([new(missingLocation)],[],[],[],false).Single();
+        check(invalidLocation.Version=="未知"&&invalidLocation.VersionNeedsReview,"a missing registered installation directory appears in the version-review filter");
         var unregistered=zedBinding.Snapshot();unregistered.AppId=prefix+"unregistered";
         detected=WindowsServices.ScanInventory([],[unregistered],[],[],true);
         check(detected.Single().Version==actualVersion,"a saved executable can be verified after its old registration disappears even without a cached snapshot");

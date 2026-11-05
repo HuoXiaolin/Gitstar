@@ -30,6 +30,28 @@ static class DownloadPreferencesChecks
             check(PackageRules.SameVersion(package,release with{Tag="1.0.0.0"},asset),"same-version policy compares version numbers and asset ownership");
             check(!PackageRules.SameVersion(package,release with{Repository="owner/other"},asset)&&!PackageRules.SameVersion(package,release with{Tag="2.0.0"},asset),"same-version setting cannot authorize replacing another repository or version");
         }
+        check(WindowsServices.ValidateDownloadTarget(@"C:\setup.exe",@"C:\")==@"C:\setup.exe"&&WindowsServices.ValidateDownloadTarget(@"\\example\share\setup.exe",@"\\example\share\")==@"\\example\share\setup.exe","download target validation accepts volume and UNC share roots without converting them to relative paths");
+        var outsideRejected=false;try{WindowsServices.ValidateDownloadTarget(Path.Combine(folder,"nested","setup.exe"),folder);}catch(IOException){outsideRejected=true;}
+        check(outsideRejected&&WindowsServices.ValidateDownloadTarget(target,folder+Path.DirectorySeparatorChar)==target,"flat download validation accepts a trailing separator and still rejects nested targets");
+        var collisionAsset=asset with{Id=33,Name="notes.json"};var collisionTarget=WindowsServices.DownloadPath(release,collisionAsset,folder);var unrelatedPartial=collisionTarget+".partial";File.WriteAllText(unrelatedPartial,"user-owned companion file");
+        using(var safeClient=new GitHubClient(new(),new FakeHttp((_,_)=>Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK){Content=new ByteArrayContent(bytes)})))){
+            await WindowsServices.Download(safeClient,release,collisionAsset,folder,(_,_)=>{},CancellationToken.None);
+            check(File.ReadAllText(unrelatedPartial)=="user-owned companion file"&&File.ReadAllBytes(collisionTarget).SequenceEqual(bytes),"download preserves an existing attachment-name.partial file instead of truncating it as scratch storage");
+            var noDigest=asset with{Id=34,Name="published.partial",Digest=null};var noDigestPath=WindowsServices.DownloadPath(release,noDigest,folder);File.WriteAllBytes(noDigestPath,bytes);
+            var refused=false;try{await WindowsServices.Download(safeClient,release,noDigest,folder,(_,_)=>{},CancellationToken.None);}catch(IOException){refused=true;}
+            check(refused&&!await WindowsServices.Verify(noDigestPath,noDigest,CancellationToken.None)&&File.ReadAllBytes(noDigestPath).SequenceEqual(bytes),"an existing .partial attachment without a digest is not trusted or overwritten solely because of its suffix");
+            noDigest=noDigest with{Name="fresh-no-digest.json"};var fresh=await WindowsServices.Download(safeClient,release,noDigest,folder,(_,_)=>{},CancellationToken.None);
+            check(File.ReadAllBytes(fresh).SequenceEqual(bytes),"freshly downloaded files without a digest retain explicit size-only verification support");
+            using var cancelled=new CancellationTokenSource();var cancelAsset=asset with{Id=35,Name="cancelled.json"};var cancelledAsRequested=false;
+            try{await WindowsServices.Download(safeClient,release,cancelAsset,folder,(_,_)=>cancelled.Cancel(),cancelled.Token);}catch(OperationCanceledException){cancelledAsRequested=true;}
+            check(cancelledAsRequested&&!File.Exists(WindowsServices.DownloadPath(release,cancelAsset,folder))&&!Directory.EnumerateFiles(folder,".gitstar-download-*.partial").Any()&&File.ReadAllText(unrelatedPartial)=="user-owned companion file","download cancellation removes only its own scratch file and preserves neighboring user files");
+            using var beforeCommit=new CancellationTokenSource();var stoppedAsset=asset with{Id=36,Name="cancel-before-commit.json"};var stopped=false;
+            try{await WindowsServices.Download(safeClient,release,stoppedAsset,folder,(_,_)=>{},beforeCommit.Token,verifying:()=>beforeCommit.Cancel());}catch(OperationCanceledException){stopped=true;}
+            check(stopped&&!File.Exists(WindowsServices.DownloadPath(release,stoppedAsset,folder))&&!Directory.EnumerateFiles(folder,".gitstar-download-*.partial").Any(),"cancellation between transfer and verification does not publish a completed file or leave scratch data");
+            var bad=asset with{Id=37,Name="bad-digest.json",Digest="sha256:"+new string('0',64)};var badRejected=false;
+            try{await WindowsServices.Download(safeClient,release,bad,folder,(_,_)=>{},CancellationToken.None);}catch(IOException){badRejected=true;}
+            check(badRejected&&!File.Exists(WindowsServices.DownloadPath(release,bad,folder))&&!Directory.EnumerateFiles(folder,".gitstar-download-*.partial").Any(),"failed digest verification cleans this attempt's scratch data without producing a final file");
+        }
         var settings=new Settings{DownloadFolder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),"Downloads","Gitstar"),SameVersionDownload=99};PathPreferences.Migrate(settings);
         check(settings.DownloadFolder.EndsWith("Gitstar_Download")&&settings.SameVersionDownload==0,"legacy default download location migrates to Gitstar_Download and invalid policy resets to ask");
         var custom=new Settings{DownloadFolder=folder,SameVersionDownload=2};PathPreferences.Migrate(custom);check(custom.DownloadFolder==folder&&custom.SameVersionDownload==2,"custom download folders and skip setting survive preference migration");

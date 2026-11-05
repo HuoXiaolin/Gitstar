@@ -86,7 +86,7 @@
       </Style>
     </ResourceDictionary>
   </Window.Resources>
-  <Grid Margin="26,10,26,18">
+  <Grid x:Name="MainLayout" Margin="24,12,24,16">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
@@ -95,6 +95,7 @@
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
     <Grid x:Name="BrandRow">
+      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="*" />
@@ -107,16 +108,16 @@
           <TextBlock Text="收藏 · 发现 · 更新" Foreground="{DynamicResource Muted}" FontSize="10" Margin="0,1,0,0" />
         </StackPanel>
       </StackPanel>
-      <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+      <StackPanel x:Name="AccountActions" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
         <Grid>
           <Button x:Name="NotificationsButton" Padding="12,6" Content="消息" Click="Notifications_Click" Style="{StaticResource TertiaryButton}" ToolTip="GitHub 消息"/>
           <Ellipse x:Name="NotificationsDot" Width="6" Height="6" Fill="#E5485D" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,3,5,0" Visibility="Collapsed" IsHitTestVisible="False"/>
         </Grid>
         <Button Padding="12,6" Content="任务" Click="Tasks_Click" Style="{StaticResource TertiaryButton}" />
         <Button Padding="12,6" Content="设置" Click="Settings_Click" Style="{StaticResource TertiaryButton}" />
-        <Button Padding="12,6" Content="{Binding Account}" Click="Login_Click" Background="{DynamicResource AccentSoft}" Foreground="{DynamicResource AccentInk}" BorderThickness="0" Margin="0" Style="{StaticResource NavButton}" />
+        <Button Padding="12,6" MaxWidth="150" ToolTip="{Binding Account}" Click="Login_Click" Background="{DynamicResource AccentSoft}" Foreground="{DynamicResource AccentInk}" BorderThickness="0" Margin="0" Style="{StaticResource NavButton}"><TextBlock Text="{Binding Account}" TextTrimming="CharacterEllipsis"/></Button>
       </StackPanel>
-      <StackPanel Orientation="Horizontal" Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="12,0,12,0">
+      <StackPanel x:Name="ModuleNavigation" Orientation="Horizontal" Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="12,0,12,0">
         <Button Padding="10,9" x:Name="RecentButton" Click="Recent_Click" Style="{StaticResource NavButton}">
           <StackPanel Orientation="Horizontal">
             <TextBlock FontFamily="Segoe MDL2 Assets" Text="" FontSize="13" Margin="0,1,8,0" VerticalAlignment="Center" />
@@ -147,14 +148,15 @@
         <TextBlock Text="{Binding Title}" FontSize="25" FontWeight="SemiBold" Margin="0,0,0,4" />
         <TextBlock Text="{Binding Subtitle}" Foreground="{DynamicResource Muted}" FontSize="12" TextWrapping="Wrap" />
       </StackPanel>
-      <Border x:Name="CountPanel" Grid.Column="1" CornerRadius="12" Padding="18,12" VerticalAlignment="Center" Margin="18,0,0,0" Background="{DynamicResource AccentSoft}" BorderThickness="0">
+      <Border x:Name="CountPanel" Grid.Column="1" CornerRadius="10" Padding="16,9" VerticalAlignment="Center" Margin="18,0,0,0" Background="{DynamicResource AccentSoft}" BorderThickness="0">
         <StackPanel>
           <TextBlock x:Name="CheckFrequencyLabel" Text="{Binding CountCaption}" Foreground="{DynamicResource AccentInk}" FontSize="11" />
-          <TextBlock Text="{Binding Count}" Foreground="{DynamicResource AccentInk}" FontSize="24" FontWeight="SemiBold" Margin="0,3,0,0" Typography.NumeralAlignment="Tabular" />
+          <TextBlock Text="{Binding Count}" Foreground="{DynamicResource AccentInk}" FontSize="22" FontWeight="SemiBold" Margin="0,3,0,0" Typography.NumeralAlignment="Tabular" />
         </StackPanel>
       </Border>
     </Grid>
-    <Grid x:Name="UpdatesToolbar" Grid.Row="2" Margin="0,0,0,18">
+    <Grid x:Name="UpdatesToolbar" Grid.Row="2" Margin="0,0,0,14">
+      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="Auto" />
@@ -162,7 +164,7 @@
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
-      <Grid Margin="0,0,12,0">
+      <Grid x:Name="UpdateSearchHost" Margin="0,0,12,0">
         <TextBox x:Name="Search" TextChanged="Filter_Changed" ToolTip="搜索仓库、软件、版本" />
         <TextBlock Text="搜索仓库、软件、版本" Foreground="{DynamicResource Muted}" VerticalAlignment="Center" Margin="13,0,0,0" IsHitTestVisible="False">
           <TextBlock.Style>
@@ -187,7 +189,7 @@
         <ComboBoxItem Content="按发布时间" />
         <ComboBoxItem Content="按更新时间" />
       </ComboBox>
-      <StackPanel Grid.Column="4" Orientation="Horizontal">
+      <StackPanel x:Name="UpdateActions" Grid.Column="4" Orientation="Horizontal">
         <Button x:Name="BulkDownloadButton" Content="批量下载" Click="BulkDownload_Click" />
         <Button x:Name="BatchButton" Content="关注管理" Click="BatchManage_Click" />
         <Button x:Name="RemindersButton" Content="软件管理" Click="Reminders_Click" Visibility="Collapsed" />
@@ -351,7 +353,7 @@
                         <local:RepositoryFacts Grid.Column="1" Repository="{Binding Repository}" Metadata="{Binding Metadata}" HorizontalAlignment="Right" VerticalAlignment="Center" />
                       </Grid>
                       <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,0,20,0">
-                        <StackPanel Orientation="Horizontal">
+                        <WrapPanel>
                           <Border CornerRadius="4" Padding="7,3">
                             <Border.Style>
                               <Style TargetType="Border">
@@ -376,9 +378,9 @@
                               </TextBlock.Style>
                             </TextBlock>
                           </Border>
-                          <TextBlock Text="{Binding Version}" ToolTip="{Binding VersionEvidence}" FontWeight="SemiBold" Margin="10,3,14,0" Typography.NumeralAlignment="Tabular" />
-                            <TextBlock Text="{Binding Date}" ToolTip="{Binding DateHint}" Foreground="{DynamicResource Muted}" FontSize="11" Margin="0,1,0,0" />
-                        </StackPanel>
+                          <TextBlock Text="{Binding Version}" ToolTip="{Binding VersionEvidence}" FontWeight="SemiBold" Margin="10,3,12,4" MaxWidth="240" TextWrapping="Wrap" Typography.NumeralAlignment="Tabular" />
+                            <TextBlock Text="{Binding Date}" ToolTip="{Binding DateHint}" Foreground="{DynamicResource Muted}" FontSize="11" Margin="0,3,0,4" />
+                        </WrapPanel>
                         <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" FontSize="12" LineHeight="18" LineStackingStrategy="BlockLineHeight" Foreground="{DynamicResource Muted}" Margin="0,10,0,0" MaxHeight="54">
                           <TextBlock.Style>
                             <Style TargetType="TextBlock">
@@ -479,13 +481,14 @@
         <RowDefinition Height="Auto" />
         <RowDefinition Height="*" />
       </Grid.RowDefinitions>
-      <Grid Margin="0,0,0,14">
+      <Grid x:Name="ProjectsToolbar" Margin="0,0,0,14">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
           <ColumnDefinition />
           <ColumnDefinition Width="Auto" />
           <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
-        <Grid Margin="0,0,12,0">
+        <Grid x:Name="ProjectSearchHost" Margin="0,0,12,0">
           <TextBox x:Name="ProjectSearch" TextChanged="ProjectFilter_Changed" ToolTip="搜索项目名称与说明" />
           <TextBlock Text="搜索我的项目" Foreground="{DynamicResource Muted}" VerticalAlignment="Center" Margin="13,0,0,0" IsHitTestVisible="False">
             <TextBlock.Style>
@@ -506,7 +509,7 @@
           <ComboBoxItem Content="私有项目" />
           <ComboBoxItem Content="已关联本地" />
         </ComboBox>
-          <WrapPanel Grid.Column="2">
+          <WrapPanel x:Name="ProjectToolbarActions" Grid.Column="2">
             <ComboBox x:Name="ProjectSort" SelectedIndex="1" SelectionChanged="ProjectSort_Changed" Margin="0,0,12,0" ToolTip="发布时间：项目中最近发布的 Release；更新时间：GitHub 仓库的 updated_at。缺少发布时间的项目排在末尾，切换不联网。">
               <ComboBoxItem Content="按发布时间" />
               <ComboBoxItem Content="按更新时间" />

@@ -25,8 +25,11 @@ function Get-InstallerVersionPlan {
     $increment=$BuildInstaller -and $lastDate -ne $today
     $version=$current
     if($increment){
-        if($parts[2] -eq 65535){throw 'Patch version exhausted; set the next major/minor version explicitly'}
-        $version='{0}.{1}.{2}' -f $parts[0],$parts[1],($parts[2]+1)
+        # The user's release convention rolls the third part after 9. Migrate legacy 2.0.10 on the next build.
+        if($parts[2] -ge 9){
+            if($parts[1] -eq 65535){throw 'Minor version exhausted; set the next major version explicitly'}
+            $version='{0}.{1}.0' -f $parts[0],($parts[1]+1)
+        }else{$version='{0}.{1}.{2}' -f $parts[0],$parts[1],($parts[2]+1)}
     }
     [pscustomobject]@{
         PropsPath=[IO.Path]::GetFullPath($PropsPath)

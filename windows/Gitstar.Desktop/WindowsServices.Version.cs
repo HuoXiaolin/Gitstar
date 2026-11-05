@@ -6,6 +6,12 @@ namespace Gitstar.Desktop;
 public static partial class WindowsServices
 {
     internal record RegisteredProgram(InstalledApp App,string Icon="",string Uninstall="");
+    internal static bool IsSystemComponent(object? value)=>value switch{
+        int number=>number==1,
+        long number=>number==1,
+        string text=>int.TryParse(text,System.Globalization.NumberStyles.Integer,System.Globalization.CultureInfo.InvariantCulture,out var number)&&number==1,
+        _=>false
+    };
     private static List<RegisteredProgram> RegisteredPrograms(Action<string>? warning=null)
     {
         var list=new List<RegisteredProgram>();
@@ -15,7 +21,9 @@ public static partial class WindowsServices
                 if(uninstall==null)continue;
                 foreach(var key in uninstall.GetSubKeyNames())try{
                     using var entry=uninstall.OpenSubKey(key);var name=entry?.GetValue("DisplayName") as string;
-                    if(string.IsNullOrWhiteSpace(name)||Convert.ToInt32(entry?.GetValue("SystemComponent")??0)==1)continue;
+                    // Uninstall entries are written by third-party installers. A malformed
+                    // optional flag must not abort discovery of unrelated applications.
+                    if(string.IsNullOrWhiteSpace(name)||IsSystemComponent(entry?.GetValue("SystemComponent")))continue;
                     var hint=new[]{"URLInfoAbout","URLUpdateInfo","HelpLink"}.Select(field=>AppMatcher.GitHubRepository(entry?.GetValue(field) as string??"")).FirstOrDefault(value=>value.Length>0)??"";
                     var icon=entry?.GetValue("DisplayIcon") as string??"";var candidate=ProgramPath(icon);
                     if(warning!=null&&candidate.StartsWith(@"\\",StringComparison.Ordinal)){warning("网络主程序位置暂不自动核对。");candidate="";}
@@ -68,7 +76,7 @@ public static partial class WindowsServices
     }
     private static InstalledApp DetectVersion(InstalledApp app,string icon,string uninstall,Dictionary<string,ProgramVersion?> cache)
     {
-        if(app.ExecutablePath.Length>0&&!File.Exists(app.ExecutablePath))return app with{Version="未知",VersionSource="指定安装位置的主程序不存在或无法访问，请核对路径",RegisteredVersion=app.RegisteredVersion.Length>0?app.RegisteredVersion:app.Version};
+        if(app.ExecutablePath.Length>0&&!File.Exists(app.ExecutablePath))return app with{Version="未知",VersionSource="指定安装位置的主程序不存在或无法访问，请核对路径",RegisteredVersion=app.RegisteredVersion.Length>0?app.RegisteredVersion:app.Version,VersionNeedsReview=true};
         var paths=new HashSet<string>(StringComparer.OrdinalIgnoreCase);var preferred=app.ExecutablePath.Length>0?app.ExecutablePath:ProgramPath(icon);
         if(preferred.Length>0)paths.Add(preferred);
         var location=Environment.ExpandEnvironmentVariables(app.Location.Trim().Trim('"'));
@@ -86,8 +94,8 @@ public static partial class WindowsServices
         var declared=app.Portable?app.Version:app.RegisteredVersion.Length>0?app.RegisteredVersion:app.Version;
         var iconIsProgram=preferred.Length>0 && !preferred.StartsWith(Environment.GetFolderPath(Environment.SpecialFolder.Windows)+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase);
         var evidence=InstalledVersion.Resolve(app.Name,declared,paths.Select(p=>cache.GetValueOrDefault(p)).OfType<ProgramVersion>(),preferred,app.ExecutablePath.Length>0 || iconIsProgram);
-        if(evidence.Path.Length==0 && location.Length>0 && !Directory.Exists(location))evidence=new("未知","登记安装路径已失效，需确认当前主程序","");
-        else if(evidence.Path.Length==0&&app.ExecutablePath.Length>0)evidence=new("未知","原安装位置的主程序缺失或无法读取版本，需核对路径","");
+        if(evidence.Path.Length==0 && location.Length>0 && !Directory.Exists(location))evidence=new("未知","登记安装路径已失效，需确认当前主程序",""){NeedsReview=true};
+        else if(evidence.Path.Length==0&&app.ExecutablePath.Length>0)evidence=new("未知","原安装位置的主程序缺失或无法读取版本，需核对路径",""){NeedsReview=true};
         return app with{Version=evidence.Version,ExecutablePath=evidence.Path,VersionSource=evidence.Source,RegisteredVersion=declared,VersionDetails=evidence.Details,VersionNeedsReview=evidence.NeedsReview};
     }
     private static List<InstalledApp> MergeInstallRecords(IEnumerable<InstalledApp> source)

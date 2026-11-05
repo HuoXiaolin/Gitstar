@@ -6,15 +6,30 @@ namespace Gitstar.Desktop;
 public partial class MainWindow
 {
     private Form? downloadDecisions;
+    private sealed record DownloadDecisionRow(Grid Layout,StackPanel Details,WrapPanel Actions,Button Accept,Button Skip);
+
+    private static void UpdateDownloadDecisionCount(Form form)
+    {
+        if(form.Tag is TextBlock count)count.Text=$"{form.Fields.Children.Count} 项待处理";
+    }
 
     private async Task DownloadDecisionSmoke(string path)
     {
+        using(var alreadyCanceled=new CancellationTokenSource()){
+            alreadyCanceled.Cancel();
+            try{
+                await ConfirmDownloadAction("example/canceled", "Canceled.exe", "已停止", "打开安装器", "跳过", alreadyCanceled.Token);
+                throw new IOException("An already canceled task opened a confirmation.");
+            }catch(OperationCanceledException){}
+            if(downloadDecisions!=null)throw new IOException("An already canceled task created a pending window.");
+        }
         using var cancel = new CancellationTokenSource();
         var install = ConfirmDownloadAction("example/editor · v2.4.0", "EditorSetup.exe",
             "安装包已校验", "打开安装器", "仅保留文件", CancellationToken.None);
         var canceled = ConfirmDownloadAction("example/reader · v1.8.0", "Reader.msi",
             "安装包已校验", "打开安装器", "仅保留文件", cancel.Token);
         var form = downloadDecisions ?? throw new IOException("Download list did not open.");
+        if(Environment.GetCommandLineArgs().Contains("--narrow"))form.Width=560;
         var duplicate = ConfirmDownloadAction("example/sync · v3.1.0", "SyncSetup.exe",
             "同版本文件已存在，新文件校验成功后才会替换。", "重新下载", "跳过", CancellationToken.None);
         if (!ReferenceEquals(form, downloadDecisions) || form.Fields.Children.Count != 3)
@@ -27,6 +42,15 @@ public partial class MainWindow
             "便携新版已下载，可继续查看替换选项。", "处理替换", "仅保留文件", CancellationToken.None);
         await Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
         form.UpdateLayout();
+        var narrow=form.ActualWidth<680;
+        foreach(var item in form.Fields.Children.OfType<Border>()){
+            var row=(DownloadDecisionRow)item.Tag;
+            var bounds=row.Actions.TransformToAncestor(row.Layout).TransformBounds(new Rect(row.Actions.RenderSize));
+            if(bounds.Left < -1||bounds.Right>row.Layout.ActualWidth+1||row.Details.ActualWidth<150||Grid.GetRow(row.Actions)!=(narrow?1:0))
+                throw new IOException("Download decisions do not fit the responsive row layout.");
+        }
+        if((form.Tag as TextBlock)?.Text!=$"{form.Fields.Children.Count} 项待处理")throw new IOException("Pending count differs from the displayed rows.");
+        File.WriteAllText(Path.ChangeExtension(path,".download-decisions-layout.json"),JsonSerializer.Serialize(new{Width=form.ActualWidth,Narrow=narrow,Rows=form.Fields.Children.Count,InlineActions=!narrow,PendingCountAccurate=true}));
         var root = (FrameworkElement)form.Content;
         var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(
             (int)root.ActualWidth, (int)root.ActualHeight, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
@@ -35,14 +59,22 @@ public partial class MainWindow
         encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
         using (var output = File.Create(path)) encoder.Save(output);
 
-        var first = (StackPanel)((Border)form.Fields.Children[0]).Child;
-        var actions = (WrapPanel)first.Children[first.Children.Count - 1];
-        ((Button)actions.Children[1]).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        var first = (DownloadDecisionRow)((Border)form.Fields.Children[0]).Tag;
+        first.Accept.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         if (!await install || duplicate.IsCompleted || portable.IsCompleted || form.Fields.Children.Count != 2)
             throw new IOException("One row affected another download confirmation.");
         form.Close();
         if (await duplicate || await portable || downloadDecisions != null)
             throw new IOException("Closing must skip the remaining confirmations.");
+
+        var next=ConfirmDownloadAction("example/reopened", "Next.exe", "安装包已校验", "打开安装器", "仅保留文件", CancellationToken.None);
+        var reopened=downloadDecisions??throw new IOException("A new download did not reopen the pending list.");
+        if(ReferenceEquals(reopened,form)||reopened.Fields.Children.Count!=1)
+            throw new IOException("The reopened pending list reused closed rows.");
+        var only=(DownloadDecisionRow)((Border)reopened.Fields.Children[0]).Tag;
+        only.Skip.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        if(await next||downloadDecisions!=null)
+            throw new IOException("Skipping the last item must close the reopened pending list.");
     }
 
     private async Task<bool> ConfirmDownloadAction(
@@ -54,6 +86,7 @@ public partial class MainWindow
         if (form == null)
         {
             form = new Form(this, "下载待处理", 780, 460) { ShowInTaskbar = false };
+            var count=new TextBlock{FontSize=13,VerticalAlignment=VerticalAlignment.Center};count.SetResourceReference(TextBlock.ForegroundProperty,"AccentInk");form.HeaderActions.Children.Add(count);form.Tag=count;
             form.Footnote("关闭列表会跳过剩余确认，已下载的文件会保留。");
             form.Action("关闭列表", () =>
             {
@@ -65,10 +98,11 @@ public partial class MainWindow
         }
 
         var result = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var details = new StackPanel();
+        var layout=new Grid();layout.ColumnDefinitions.Add(new(){Width=new GridLength(1,GridUnitType.Star)});layout.ColumnDefinitions.Add(new(){Width=GridLength.Auto});layout.RowDefinitions.Add(new(){Height=GridLength.Auto});layout.RowDefinitions.Add(new(){Height=GridLength.Auto});
+        var details = new StackPanel{Margin=new Thickness(0,0,16,0)};layout.Children.Add(details);
         details.Children.Add(new TextBlock
         {
-            Text = project, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap
+            Text = project, FontSize=14,FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap
         });
         var file = new TextBlock
         {
@@ -78,35 +112,42 @@ public partial class MainWindow
         details.Children.Add(file);
         var description = new TextBlock
         {
-            Text = status, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0)
+            Text = status,FontSize=12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0)
         };
         description.SetResourceReference(TextBlock.ForegroundProperty, "Muted");
         details.Children.Add(description);
 
-        var actions = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
-        details.Children.Add(actions);
-        void AddChoice(string label, bool accept)
+        var actions = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Center };
+        Grid.SetColumn(actions,1);layout.Children.Add(actions);
+        Button AddChoice(string label, bool accept)
         {
-            var button = new Button { Content = label, Margin = new Thickness(8, 4, 0, 0) };
+            var button = new Button { Content = label,Padding=new Thickness(10,5,10,5),MinHeight=32, Margin = new Thickness(8, 3, 0, 3) };
+            if(accept){button.SetResourceReference(Control.ForegroundProperty,"AccentInk");button.SetResourceReference(Control.BorderBrushProperty,"Accent");}
+            else{button.SetResourceReference(StyleProperty,"TertiaryButton");button.SetResourceReference(Control.ForegroundProperty,"Ink");}
             button.Click += (_, _) =>
             {
                 actions.IsEnabled = false;
                 result.TrySetResult(accept);
             };
             actions.Children.Add(button);
+            return button;
         }
-        AddChoice(skip, false);
-        AddChoice(confirm, true);
+        var skipButton=AddChoice(skip, false);
+        var acceptButton=AddChoice(confirm, true);
         var row = new Border
         {
-            Child = details, Padding = new Thickness(0, 10, 0, 10),
+            Child = layout,Tag=new DownloadDecisionRow(layout,details,actions,acceptButton,skipButton), Padding = new Thickness(0, 14, 0, 14),
             BorderThickness = new Thickness(0, 0, 0, 1)
         };
         row.SetResourceReference(Border.BorderBrushProperty, "Edge");
+        void ArrangeRow(){var narrow=form.ActualWidth>0&&form.ActualWidth<680;Grid.SetColumnSpan(details,narrow?2:1);details.Margin=new Thickness(0,0,narrow?0:16,0);Grid.SetColumn(actions,narrow?0:1);Grid.SetColumnSpan(actions,narrow?2:1);Grid.SetRow(actions,narrow?1:0);actions.Margin=new Thickness(0,narrow?8:0,0,0);}
+        void OnSizeChanged(object sender,SizeChangedEventArgs args)=>ArrangeRow();
+        form.SizeChanged+=OnSizeChanged;ArrangeRow();
 
         void OnClosed(object? sender, EventArgs args) => result.TrySetResult(false);
         form.Closed += OnClosed;
         form.Fields.Children.Add(row);
+        UpdateDownloadDecisionCount(form);
         try
         {
             if (isNew) form.Show();
@@ -117,7 +158,9 @@ public partial class MainWindow
         finally
         {
             form.Closed -= OnClosed;
+            form.SizeChanged-=OnSizeChanged;
             form.Fields.Children.Remove(row);
+            UpdateDownloadDecisionCount(form);
             if (ReferenceEquals(downloadDecisions, form) && form.Fields.Children.Count == 0)
                 form.Close();
         }

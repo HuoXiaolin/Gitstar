@@ -5,6 +5,8 @@ internal static class SoftwareDiscoveryChecks
 {
     public static void Run(Action<bool,string> check,string root)
     {
+        check(WindowsServices.IsSystemComponent(1)&&WindowsServices.IsSystemComponent(1L)&&WindowsServices.IsSystemComponent(" 1 "),"system component flags accept normal registry integer and numeric-string representations");
+        check(!WindowsServices.IsSystemComponent(null)&&!WindowsServices.IsSystemComponent(0)&&!WindowsServices.IsSystemComponent("invalid")&&!WindowsServices.IsSystemComponent(long.MaxValue)&&!WindowsServices.IsSystemComponent(new byte[]{1}),"malformed optional registry flags cannot abort software discovery");
         var programs=Path.Combine(root,"user-programs");var app=Path.Combine(programs,"Editor");var nested=Path.Combine(programs,"Client","app-2.0");var ignored=Path.Combine(programs,"Other","cache","deep");
         foreach(var folder in new[]{app,nested,ignored})Directory.CreateDirectory(folder);
         var main=Path.Combine(app,"Editor.exe");File.Copy(Environment.ProcessPath!,main);File.Copy(main,Path.Combine(app,"Update.exe"));File.Copy(main,Path.Combine(nested,"Client.exe"));File.Copy(main,Path.Combine(ignored,"Hidden.exe"));

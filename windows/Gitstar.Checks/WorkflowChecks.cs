@@ -8,6 +8,12 @@ static class WorkflowChecks
 {
     public static async Task Run(Action<bool,string> check,string root)
     {
+        var coordinator=new TaskCoordinator();
+        using(var running=coordinator.Start("same-task",["repo:original"])){
+            await running.WaitAsync();var duplicate=false;try{coordinator.Start("same-task",["repo:leaked"]);}catch(ArgumentException){duplicate=true;}
+            check(duplicate&&coordinator.Count==1&&!coordinator.Uses("repo:leaked")&&coordinator.Uses("repo:original"),"duplicate task ID is rejected without leaking resource claims or disturbing the running task");
+        }
+        check(coordinator.Count==0&&!coordinator.Uses("repo:original"),"original task resources remain releasable after rejected duplicate registration");
         var original=new ManagedProject("owner/repo","",false,"main",true,true,false,DateTimeOffset.Now,Id:10);
         check(ProjectRules.InvalidatedProjects([original],[original with{Description="edited",FullName="OWNER/REPO"}]).Length==0,"repository metadata and casing changes preserve identity-matched caches");
         check(ProjectRules.InvalidatedProjects([original],[original with{Id=11}]).SequenceEqual(new[]{"owner/repo"}),"same-name recreated repository invalidates old release and workspace state caches");

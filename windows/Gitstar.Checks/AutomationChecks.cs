@@ -57,6 +57,12 @@ static class AutomationChecks
             server.Add("app.zip",Encoding.UTF8.GetBytes("old"));var failed=false;try{await ProjectAutomationService.Run(config,api,Path.Combine(root,"stage"),Upload,Progress,CancellationToken.None);}catch(IOException){failed=true;}
             check(failed&&server.Deletes==0&&server.Assets.Values.Single().Name=="app.zip","failed replacement upload preserves existing published installer");
         }
+        using(var server=new AutomationServer{Exists=true,Draft=false})using(var api=new GitHubClient(new(),server.Handler)){
+            var sha=Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(Path.Combine(release,"app.zip"))));var pendingName="gitstar-pending-"+sha[..16].ToLowerInvariant()+"-app.zip";
+            server.Add("app.zip",Encoding.UTF8.GetBytes("old"));server.Add(pendingName,[]);var pending=server.Assets.Values.Last();server.Assets[pending.Id]=pending with{State="starter"};var message="";
+            try{await ProjectAutomationService.Run(config,api,Path.Combine(root,"stage"),Upload,Progress,CancellationToken.None);}catch(IOException error){message=error.Message;}
+            check(message.Contains(pendingName)&&message.Contains("starter")&&message.Contains("管理发布包")&&message.Contains("其他位置")&&server.Deletes==0&&server.Uploads==0&&server.Publishes==0&&server.Assets.Count==2&&server.Assets[pending.Id].State=="starter","incomplete pending upload reports actionable recovery while preserving old and temporary assets without uploading again");
+        }
         using(var server=new AutomationServer{Exists=true,CorruptUpload=true})using(var api=new GitHubClient(new(),server.Handler)){
             server.Add("app.zip",Encoding.UTF8.GetBytes("old"));var failed=false;try{await ProjectAutomationService.Run(config,api,Path.Combine(root,"stage"),Upload,Progress,CancellationToken.None);}catch(IOException){failed=true;}
             check(failed&&server.Deletes==0&&server.Assets.Values.Any(a=>a.Name=="app.zip"),"remote digest mismatch prevents removal of old installer");
@@ -113,11 +119,11 @@ static class AutomationChecks
     }
     private sealed class AutomationServer:IDisposable
     {
-        public sealed record Item(long Id,string Name,byte[] Data,string? Digest);
+        public sealed record Item(long Id,string Name,byte[] Data,string? Digest,string State="uploaded");
         public readonly Dictionary<long,Item> Assets=[];public readonly List<string> Events=[];public readonly HttpMessageHandler Handler;public bool Exists,Draft=true,Immutable,FailUpload,CorruptUpload,FailCreateResponse,NoDigest,NormalizeNames;public string Tag="1.0.0.0",ReleaseName="",Notes="";public int Creates,Uploads,Deletes,Publishes,Downloads;public CancellationTokenSource? CancelAfterDelete;private long next=10;
         public AutomationServer()=>Handler=new FakeHttp(Respond);
         public void Add(string name,byte[] bytes)=>Assets[++next]=new(next,name,bytes,"sha256:"+Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant());
-        private object Asset(Item item)=>new{id=item.Id,name=item.Name,size=item.Data.Length,state="uploaded",digest=NoDigest?null:item.Digest};
+        private object Asset(Item item)=>new{id=item.Id,name=item.Name,size=item.Data.Length,state=item.State,digest=NoDigest?null:item.Digest};
         private object Release()=>new{id=100,tag_name=Tag,name=ReleaseName.Length>0?ReleaseName:Tag,body=Notes,draft=Draft,prerelease=false,immutable=Immutable,assets=Assets.Values.Select(Asset).ToArray(),target_commitish="original-commit"};
         private static HttpResponseMessage Json(object value,HttpStatusCode status=HttpStatusCode.OK)=>new(status){Content=new StringContent(JsonSerializer.Serialize(value))};
         private async Task<HttpResponseMessage> Respond(HttpRequestMessage request,CancellationToken ct)

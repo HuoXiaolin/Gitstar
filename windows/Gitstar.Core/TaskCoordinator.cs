@@ -13,8 +13,10 @@ public sealed class TaskCoordinator
     public bool Uses(string resource){lock(sync)return gates.TryGetValue(resource,out var gate)&&gate.References>0;}
     public Run Start(string id,IEnumerable<string> resources)
     {
+        var keys=resources.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();
         lock(sync){
-            var claims=resources.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).Select(key=>{
+            if(runs.ContainsKey(id))throw new ArgumentException("此任务已在运行。",nameof(id));
+            var claims=keys.Select(key=>{
                 if(!gates.TryGetValue(key,out var gate))gates[key]=gate=new();gate.References++;return (key,gate);
             }).ToArray();
             var run=new Run(this,id,claims);runs.Add(id,run);return run;

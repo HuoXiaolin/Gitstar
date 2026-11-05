@@ -97,6 +97,13 @@ exit 0
     Assert-VersionThrows {Complete-InstallerVersion -Plan $stalePlan -ProjectRoot $fixture} 'Version source changed'
     [IO.File]::WriteAllText($propsPath,'<Project><PropertyGroup><Version>1.0.0</Version><LastInstallerBuildDate>invalid</LastInstallerBuildDate></PropertyGroup></Project>')
     Assert-VersionThrows {Get-InstallerVersionPlan -PropsPath $propsPath} 'Invalid LastInstallerBuildDate'
+    foreach($case in @(@('2.0.8','2.0.9'),@('2.0.9','2.1.0'),@('2.0.10','2.1.0'),@('2.1.0','2.1.1'))){
+        [IO.File]::WriteAllText($propsPath,('<Project><PropertyGroup><Version>{0}</Version></PropertyGroup></Project>' -f $case[0]))
+        Assert-VersionRule ((Get-InstallerVersionPlan -PropsPath $propsPath -BuildDate $today).Version -eq $case[1]) "Patch rollover: $($case[0]) -> $($case[1])"
+        Assert-VersionRule ((Get-InstallerVersionPlan -PropsPath $propsPath -BuildDate $today -BuildInstaller $false).Version -eq $case[0]) 'Test-only builds do not consume rollover'
+    }
+    [IO.File]::WriteAllText($propsPath,('<Project><PropertyGroup><Version>2.0.9</Version><LastInstallerBuildDate>{0}</LastInstallerBuildDate></PropertyGroup></Project>' -f $today.ToString('yyyy-MM-dd')))
+    Assert-VersionRule ((Get-InstallerVersionPlan -PropsPath $propsPath -BuildDate $today).Version -eq '2.0.9') 'Rollover still waits for a new successful packaging day'
     Write-Output "All $checks installer version checks passed (isolated compiler/installer fixtures)."
 }finally{
     $resolved=[IO.Path]::GetFullPath($testRoot)
