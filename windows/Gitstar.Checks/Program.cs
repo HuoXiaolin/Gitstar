@@ -249,6 +249,7 @@ await NotificationChecks.Run(Check);
 await RepositoryIssueChecks.Run(Check);
 await UploadProgressChecks.Run(Check,root);
 DownloadDefaultsChecks.Run(Check);
+DownloadSelectionChecks.Run(Check);
 SoftwareAuditChecks.Run(Check,root);
 SoftwareDiscoveryChecks.Run(Check,root);
 SoftwareInventoryChecks.Run(Check,root);

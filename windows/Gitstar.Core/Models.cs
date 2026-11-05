@@ -45,6 +45,7 @@ public class Settings
     public List<FollowHistoryEntry> FollowHistory {get;set;}=[];
     public int BulkDownloadDays {get;set;}=7;
     public List<string> BulkDownloadExtensions {get;set;}=[".exe",".msi",".zip"];
+    public List<DownloadSelectionPreference> DownloadSelections {get;set;}=[];
     public UpdateSort RecentSort {get;set;}
     public UpdateSort ProjectsSort {get;set;}=UpdateSort.RepositoryUpdated;
     public int SameVersionDownload {get;set;}
