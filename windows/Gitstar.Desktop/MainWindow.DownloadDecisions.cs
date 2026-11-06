@@ -82,21 +82,8 @@ public partial class MainWindow
     {
         ct.ThrowIfCancellationRequested();
         if(exit||quitting)throw new OperationCanceledException("Gitstar 正在退出。");
-        var form = downloadDecisions;
-        var isNew = form == null;
-        if (form == null)
-        {
-            form = new Form(this, "下载待处理", 780, 460) { ShowInTaskbar = false };
-            var count=new TextBlock{FontSize=13,VerticalAlignment=VerticalAlignment.Center};count.SetResourceReference(TextBlock.ForegroundProperty,"AccentInk");form.HeaderActions.Children.Add(count);form.Tag=count;
-            form.Footnote("关闭列表会跳过剩余确认，已下载的文件会保留。");
-            form.Action("关闭列表", () =>
-            {
-                form.Close();
-                return Task.CompletedTask;
-            });
-            form.Closed += (_, _) => downloadDecisions = null;
-            downloadDecisions = form;
-        }
+        var form = GetDownloadDecisionForm();
+        var isNew = !form.IsVisible;
 
         var result = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var layout=new Grid();layout.ColumnDefinitions.Add(new(){Width=new GridLength(1,GridUnitType.Star)});layout.ColumnDefinitions.Add(new(){Width=GridLength.Auto});layout.RowDefinitions.Add(new(){Height=GridLength.Auto});layout.RowDefinitions.Add(new(){Height=GridLength.Auto});
@@ -149,6 +136,7 @@ public partial class MainWindow
         form.Closed += OnClosed;
         form.Fields.Children.Add(row);
         UpdateDownloadDecisionCount(form);
+        UpdatePendingDownloadBadge();
         try
         {
             if (isNew) form.Show();
@@ -162,6 +150,7 @@ public partial class MainWindow
             form.SizeChanged-=OnSizeChanged;
             form.Fields.Children.Remove(row);
             UpdateDownloadDecisionCount(form);
+            UpdatePendingDownloadBadge();
             if (ReferenceEquals(downloadDecisions, form) && form.Fields.Children.Count == 0)
                 form.Close();
         }

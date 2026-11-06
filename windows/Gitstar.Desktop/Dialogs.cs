@@ -94,6 +94,11 @@ public sealed class Form : Window
     public void FixedSummary(UIElement content){var index=Grid.GetRow(footer);layout.RowDefinitions.Insert(index,new(){Height=GridLength.Auto});Grid.SetRow(footer,index+1);Grid.SetRow(content,index);layout.Children.Add(content);}
     public TextBox Value(string label,string value){var row=new Grid{Margin=new Thickness(0,0,0,10)};row.ColumnDefinitions.Add(new(){Width=new GridLength(108)});row.ColumnDefinitions.Add(new());row.Children.Add(new TextBlock{Text=label,TextWrapping=TextWrapping.Wrap,LineHeight=18,Margin=new Thickness(0,5,10,0),VerticalAlignment=VerticalAlignment.Top,FontSize=12});var text=new TextBox{Text=value,ToolTip=value,IsReadOnly=true,BorderThickness=new Thickness(0),MinHeight=30,Padding=new Thickness(6,4,6,4),Background=Brushes.Transparent};Grid.SetColumn(text,1);row.Children.Add(text);Fields.Children.Add(row);return text;}
     public void HeaderAction(Button button){Buttons.Children.Remove(button);button.Margin=new Thickness(8,0,0,0);HeaderActions.Children.Add(button);updateChrome?.Invoke();}
+    public void FitField(FrameworkElement field,double minimum=130)
+    {
+        void Fit(){if(scroll.ActualHeight<=0)return;var other=Fields.Children.OfType<FrameworkElement>().Where(child=>child!=field&&child.Visibility!=Visibility.Collapsed).Sum(child=>child.DesiredSize.Height);var height=Math.Floor(Math.Max(minimum,scroll.ActualHeight-other-field.Margin.Top-field.Margin.Bottom-4));if(double.IsNaN(field.Height)||Math.Abs(field.Height-height)>1)field.Height=height;}
+        scroll.SizeChanged+=(_,_)=>Fit();Fields.LayoutUpdated+=(_,_)=>Fit();
+    }
     public void NavigateSection(string title)=>navigate?.Invoke(title);
     internal bool HasUnsavedChanges=>editBaseline!=null&&editBaseline.Any(entry=>entry.Value!=EditValue(entry.Key));
     internal string SelectedSection=>selectedSection;

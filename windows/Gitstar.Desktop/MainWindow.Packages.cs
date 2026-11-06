@@ -23,7 +23,7 @@ public partial class MainWindow
         string digest;if(asset.Digest?.StartsWith("sha256:",StringComparison.OrdinalIgnoreCase)==true)digest=asset.Digest[7..];else{await using var stream=File.OpenRead(path);digest=Convert.ToHexString(await SHA256.HashDataAsync(stream,ct));}
         var family=PackageRules.Family(asset.Name);
         if(path.EndsWith(".msi",StringComparison.OrdinalIgnoreCase)){try{var platform=WindowsServices.MsiPlatform(path).Split(';')[0].Trim().ToLowerInvariant();family="windows/"+(platform=="intel"?"x86":platform);}catch(IOException){}}
-        packages.RemoveAll(p=>p.Path.Equals(path,StringComparison.OrdinalIgnoreCase));packages.Add(new(release.Repository,release.Id,release.Tag,release.Prerelease,release.Published,asset.Name,Path.GetFullPath(path),Path.GetFullPath(root),asset.Size,digest,family){RetainForBatch=retainForBatch});SavePackages();
+        packages.RemoveAll(p=>p.Path.Equals(path,StringComparison.OrdinalIgnoreCase));packages.Add(new(release.Repository,release.Id,release.Tag,release.Prerelease,release.Published,asset.Name,Path.GetFullPath(path),Path.GetFullPath(root),asset.Size,digest,family){RetainForBatch=retainForBatch,DownloadedAt=DateTimeOffset.Now});SavePackages();RefreshPackageManager?.Invoke();
     }
     private async Task<bool> DeleteRecordedPackage(DownloadedPackage package,bool allowCurrent=false)
     {
@@ -35,7 +35,7 @@ public partial class MainWindow
                 if(exit||quitting || (!allowCurrent && taskCoordinator.Uses("file:"+package.Path)))return false;File.Delete(package.Path);
             }catch(Exception ex)when(ex is IOException or UnauthorizedAccessException){model.Status="安装包清理未完成："+ex.Message;return false;}
         }
-        packages.RemoveAll(p=>p.Path.Equals(package.Path,StringComparison.OrdinalIgnoreCase));SavePackages();return true;
+        packages.RemoveAll(p=>p.Path.Equals(package.Path,StringComparison.OrdinalIgnoreCase));SavePackages();RefreshPackageManager?.Invoke();return true;
     }
     private async Task CleanupOldPackages()
     {

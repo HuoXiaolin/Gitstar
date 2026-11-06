@@ -73,6 +73,7 @@ public class Settings
 public record DownloadedPackage(string Repository,long ReleaseId,string Tag,bool Prerelease,DateTimeOffset Published,string AssetName,string Path,string Root,long Size,string Sha256,string Family,bool Prompted=false)
 {
     public bool RetainForBatch {get;init;}
+    public DateTimeOffset? DownloadedAt {get;init;}
 }
 public record UpdateCandidate(InstalledApp App, Binding Binding, Release Release, Asset? Asset);
 public class Operation

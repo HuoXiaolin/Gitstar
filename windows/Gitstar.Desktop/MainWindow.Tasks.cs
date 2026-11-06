@@ -35,17 +35,15 @@ public partial class MainWindow
         emptyHint.SetResourceReference(TextBlock.ForegroundProperty,"Muted");empty.Children.Add(emptyHint);form.Fields.Children.Add(empty);
         var pending = form.Action("下载待处理", () =>
         {
-            if (downloadDecisions is {} decisions)
-            {
-                form.Close();
-                if (decisions.WindowState == WindowState.Minimized) decisions.WindowState = WindowState.Normal;
-                decisions.Activate();
-            }
+            form.Close();OpenDownloadDecisionList();
             return Task.CompletedTask;
         });
         form.HeaderAction(pending);
+        pending.Name="PendingDownloadsEntry";
         pending.SetResourceReference(Control.ForegroundProperty,"AccentInk");
         pending.SetResourceReference(Control.BorderBrushProperty,"Accent");
+        var packagesEntry=form.Action("安装包管理",()=>{form.Close();PackageManagerDialog();return Task.CompletedTask;});
+        packagesEntry.Name="PackageManagerEntry";packagesEntry.ToolTip="当前保存规则："+PackageStorageRule;form.HeaderAction(packagesEntry);
         Button? pauseAll=null;
 
         string DetailsText(Operation op)=>$"{op.Kind} · {op.Description}\n记录时间  {op.Updated:yyyy-MM-dd HH:mm:ss}\n\n{op.State}"
@@ -129,7 +127,7 @@ public partial class MainWindow
                 rows.Add(operation.Id, row);
                 list.Children.Add(row.View);
             }
-            var pendingCount = downloadDecisions?.Fields.Children.Count ?? 0;
+            var pendingCount = PendingDownloadCount;
             pending.Content = $"下载待处理（{pendingCount}）";
             pending.IsEnabled = pendingCount > 0;
             pending.Visibility=pendingCount>0?Visibility.Visible:Visibility.Collapsed;

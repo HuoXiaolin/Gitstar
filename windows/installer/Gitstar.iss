@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "2.1.1"
+  #define AppVersion "2.1.2"
 #endif
 #ifndef ReleaseRoot
   #define ReleaseRoot "D:\Agant\Github_Releases\Gitstar"

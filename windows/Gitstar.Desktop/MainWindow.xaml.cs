@@ -112,7 +112,7 @@ public partial class MainWindow : Window
     private void LoadCache() {
         PathPreferences.Migrate(settings);store.Set("settings",settings);repositories=store.Get(CacheKey+"/repos",new List<Repository>());recentCacheCleared=store.Get(CacheKey+"/recent-cleared",false);
         var saved=store.Get(CacheKey+"/releases",new List<Release>()).Concat(store.Get(CacheKey+"/matched-releases",new List<Release>())).GroupBy(release=>(release.Repository.ToLowerInvariant(),release.Id)).Select(group=>group.First());releases=ReleaseRetention.Compact(saved,settings.Bindings);
-        groups=store.Get(CacheKey+"/groups",new List<StarGroup>());packages=store.Get(PackagesKey,new List<DownloadedPackage>());var cachedApps=store.Get(CacheKey+"/installed",new InstalledSnapshot(DateTimeOffset.MinValue,[])).Apps;installed=InstalledSnapshot.Capture(InstalledIdentity.Reconcile(settings,cachedApps).Apps,settings.Bindings).Apps;store.Set("settings",settings);installedFresh=false;LoadProjects();
+        groups=store.Get(CacheKey+"/groups",new List<StarGroup>());packages=store.Get(PackagesKey,new List<DownloadedPackage>());var cachedApps=store.Get(CacheKey+"/installed",new InstalledSnapshot(DateTimeOffset.MinValue,[])).Apps;installed=InstalledSnapshot.Capture(InstalledIdentity.Reconcile(settings,cachedApps).Apps,settings.Bindings).Apps;store.Set("settings",settings);installedFresh=false;LoadProjects();LoadPendingInstallations();
     }
     private void SaveCache() {releases=ReleaseRetention.Compact(releases,settings.Bindings);PruneTransfers();var bound=settings.Bindings.Select(binding=>binding.Repository).ToHashSet(StringComparer.OrdinalIgnoreCase);store.Set(CacheKey+"/repos",repositories);store.Set(CacheKey+"/releases",recentCacheCleared?new List<Release>():releases);store.Set(CacheKey+"/matched-releases",releases.Where(release=>bound.Contains(release.Repository)).ToList());store.Set(CacheKey+"/groups",groups);store.Set(CacheKey+"/recent-cleared",recentCacheCleared);}
     private void PruneTransfers()
@@ -146,6 +146,7 @@ public partial class MainWindow : Window
             if(Rules.CompareVersions(Rules.VersionTag(r,b),app.Version)>0)updates.Add(new(app,b,r,Rules.SelectAsset(r,b)));
         }
         if(tray!=null){tray.Text=$"Gitstar · {updates.Count} 个软件可更新";var old=tray.Icon;tray.Icon=TrayBadge.Create(updates.Count>0);old?.Dispose();}
+        ReconcilePendingInstallations();
     }
     private void Display()
     {
@@ -210,7 +211,7 @@ public partial class MainWindow : Window
             void Progress()=>model.Status=$"正在检查 {completed}/{names.Count} · {active.Count} 个并行 · 已用 {clock.Elapsed.TotalSeconds:0} 秒 · "+string.Join(" / ",active);
             try{await RepositoryChecks.Run(names,async(name,token)=>{
                 active.Add(name);Progress();
-                try{var known=repositories.FirstOrDefault(r=>r.FullName.Equals(name,StringComparison.OrdinalIgnoreCase));if(known==null||(!matchedOnly&&(!known.Starred||api.Token.Length==0))){var fresh=await api.Repo(name,token);if(known!=null)repositories.Remove(known);repositories.Add(fresh with{Starred=known?.Starred??false});}else if(matchedOnly){try{var fresh=await api.Repo(name,token);repositories.Remove(known);repositories.Add(fresh with{Starred=known.Starred});}catch(Exception ex)when(ex is IOException or System.Net.Http.HttpRequestException){warnings.Add(name+"：仓库卡片信息未刷新，保留上次数据。"+ex.Message);}}var found=await api.Releases(name,token,settings.Bindings);releases.RemoveAll(r=>r.Repository.Equals(name,StringComparison.OrdinalIgnoreCase));releases.AddRange(found);}
+                try{var known=repositories.FirstOrDefault(r=>r.FullName.Equals(name,StringComparison.OrdinalIgnoreCase));if(known==null||(!matchedOnly&&(!known.Starred||api.Token.Length==0))){var fresh=await api.Repo(name,token);if(known!=null)repositories.Remove(known);repositories.Add(fresh with{Starred=known?.Starred??false});}else if(matchedOnly){try{var fresh=await api.Repo(name,token);repositories.Remove(known);repositories.Add(fresh with{Starred=known.Starred});}catch(Exception ex)when(ex is IOException or System.Net.Http.HttpRequestException){warnings.Add(name+"：仓库卡片信息未刷新，保留上次数据。"+ex.Message);}}var releaseCheckStarted=DateTimeOffset.UtcNow;var found=await api.Releases(name,token,settings.Bindings);releases.RemoveAll(r=>r.Repository.Equals(name,StringComparison.OrdinalIgnoreCase));releases.AddRange(found);ReconcilePendingInstallations(name,found,releaseCheckStarted);}
                 catch(Exception e)when(e is not OperationCanceledException && e is not GitHubRateLimitException){warnings.Add(name+"："+e.Message);}
                 finally{active.Remove(name);completed++;Progress();if(clock.Elapsed-savedAt>=TimeSpan.FromSeconds(5)){SaveCache();savedAt=clock.Elapsed;}}
             },ct);}finally{SaveCache();}
@@ -292,10 +293,15 @@ public partial class MainWindow : Window
     private async void Download_Click(object sender,RoutedEventArgs e)
     {
         if((sender as Button)?.Tag is not Card card)return;
+        await DownloadCard(card);
+    }
+    private async Task DownloadCard(Card card,bool bypassPending=false)
+    {
         if(card.Transfer.Active)return;
         if(quitting)return;
         if(card.Update!=null && !installedFresh){await ScanMatchedAsync();PlanUpdates();Display();if(!updates.Any(u=>u.App.Id==card.Update.App.Id && u.Release.Id==card.Release.Id)){model.Status="已复检当前版本，此软件已不需要该更新。";return;}}
         if(card.Transfer.NeedsDetection){await ScanMatchedAsync();PlanUpdates();card.Transfer.Finish("");Display();model.Status="已重新检测实际版本；未完成的更新仍保留在列表。";return;}
+        if(!bypassPending&&card.Update!=null&&pendingInstallations.Any(item=>item.Package.Repository.Equals(card.Repository,StringComparison.OrdinalIgnoreCase)&&item.Package.ReleaseId==card.Release.Id&&PendingInstallationRules.CurrentBinding(item,settings.Bindings,installed)?.AppId==card.Update.App.Id)){OpenDownloadDecisionList();return;}
         var selection=await ChoosePackage(card);if(selection==null)return;var release=selection.Release;var install=card.Update!=null;
         if(!ConfirmDownloadSettings(selection.Root,selection.Historical))return;
         var purpose=DownloadSelectionRules.Purpose(install,card.Update?.App.Portable==true);var downloadedAssets=new List<Asset>();
@@ -307,6 +313,7 @@ public partial class MainWindow : Window
                 var progressAt=DateTime.MinValue;
                 var replaceSame=false;var previousPackage=packages.FirstOrDefault(p=>p.Path.Equals(downloadTarget,StringComparison.OrdinalIgnoreCase)&&PackageRules.SameVersion(p,release,asset));
                 if(previousPackage!=null&&await PackageFiles.Matches(previousPackage,ct)){
+                    if(install&&!bypassPending){AddPendingInstallation(card,release,downloadTarget);OpenDownloadDecisionList();return;}
                     state.Stage("处理同版本安装包");var decision=settings.SameVersionDownload;
                     if(decision==0)decision=await ConfirmDownloadAction(card.Repository+" · "+release.Tag,downloadTarget,"同版本文件已存在，新文件校验成功后才会替换。","重新下载","跳过",ct)?1:2;
                     if(decision==2){state.Finish("已跳过下载");state.Detail=downloadTarget;operation.Results.Add("已存在同版本安装包，跳过下载和安装。");model.Status="已跳过同版本安装包："+asset.Name;return;}replaceSame=true;
@@ -319,21 +326,7 @@ public partial class MainWindow : Window
                 if(!install){savedCount++;state.Finish("已保存文件");state.Detail=$"{savedCount}/{selection.Assets.Count} · {path}";return;}
                 if(path.EndsWith(".exe",StringComparison.OrdinalIgnoreCase)){state.Stage("检测安装包架构");var platform=await Task.Run(()=>InstallerCompatibility.InspectExe(path,Environment.Is64BitOperatingSystem),ct);if(!platform.Compatible){state.Finish("安装包架构不兼容");state.Detail=platform.Name+" 与当前 Windows 不兼容；安装包已保存，未启动安装器。";throw new IOException(state.Detail);}state.Detail=platform.Name+" · 与当前 Windows 兼容";}
                 if(path.EndsWith(".msi",StringComparison.OrdinalIgnoreCase)){state.Stage("检测安装包架构");var platform=await Task.Run(()=>WindowsServices.MsiPlatform(path),ct);if(!Rules.IsCompatibleMsiTemplate(platform,Environment.Is64BitOperatingSystem)){state.Finish("安装包架构不兼容");state.Detail="MSI 平台："+platform+"；安装包已保存，未启动安装器。";throw new IOException(state.Detail);}}
-                if(PortableUpdateRules.ReplaceFiles(card.Update!.App,path)) {
-                    state.Stage("等待替换确认");
-                    if(!await ConfirmDownloadAction(card.Title+" · "+release.Tag,path,"便携新版已下载，可继续查看替换选项。","处理替换","仅保留文件",ct)){state.Finish("安装包已下载");state.Detail=path;return;}
-                    string? extracted=null;
-                    if(path.EndsWith(".zip",StringComparison.OrdinalIgnoreCase)){state.Stage("解压中");extracted=await Task.Run(()=>WindowsServices.ExtractPortable(path),ct);}
-                    state.Finish("替换后核对版本",true);state.Detail=extracted??path;model.Status="便携新版已下载，请关闭旧版后替换程序文件；完成后核对版本。";
-                    await PortableUpdateDialog(card,path,extracted,ct:ct);
-                }else{
-                    state.Stage("等待安装确认");
-                    if(!await ConfirmDownloadAction(card.Title+" · "+release.Tag,path,"安装包已校验。安装器退出后会检测实际版本。","打开安装器","仅保留文件",ct)){state.Finish("安装包已下载");state.Detail=path;return;}
-                    ct.ThrowIfCancellationRequested();var process=Process.Start(new ProcessStartInfo(path){UseShellExecute=true});
-                    if(process==null){state.Finish("重新检测版本",true);state.Detail="无法跟踪安装器，请完成安装后重新检测。";return;}
-                    state.Stage("安装器运行中");state.Detail="请在安装器中完成操作；安装器未提供可读取的百分比。";model.Status=state.Detail;
-                    await ObserveInstaller(process,card,settings.Account,ct,path);
-                }
+                AddPendingInstallation(card,release,path);model.Status="安装包已保存，可从下载待处理列表继续安装。";OpenDownloadDecisionList();
             }catch(OperationCanceledException){stopDownloads=true;if(!state.NeedsDetection){state.Finish("重新下载");state.Detail="下载已停止，后续文件不再下载。已保存文件保留。";}throw;}
             catch(Exception ex){stopDownloads=true;if(state.Label!="安装包架构不兼容")state.Finish("重试下载");state.Detail=ex.Message;throw;}
         },resources:new[]{"file:"+downloadTarget}.Concat(install?new[]{"app:"+card.Update!.App.Id}:Array.Empty<string>()).ToArray(),transfer:card.Transfer);
@@ -443,6 +436,8 @@ public partial class MainWindow : Window
         var reauthorize=f.Action("重新授权 GitHub",()=>{if(ActiveRequests())throw new IOException("当前有任务正在使用授权，请在任务结束后重新授权。其他设置仍可查看或保存。");settings.ClientId=client.Text.Trim();Save();f.Close();AuthorizeGitHub();return Task.CompletedTask;});
         var exportConfig=f.Action("导出公共配置",()=>{var d=new SaveFileDialog {Filter="JSON|*.json",FileName="Gitstar-settings.json"};if(d.ShowDialog(f)==true){var publicRepos=repositories.Where(r=>!r.Private).Select(r=>r.FullName).ToHashSet(StringComparer.OrdinalIgnoreCase);var payload=new {schemaVersion=1,repositories=settings.ExtraRepositories.Where(publicRepos.Contains).ToArray(),groups=settings.LocalGroups.Select(g=>g with {Repositories=g.Repositories.Where(publicRepos.Contains).ToList()}).Where(g=>g.Repositories.Count>0).ToArray()};File.WriteAllText(d.FileName,JsonSerializer.Serialize(payload,new JsonSerializerOptions {WriteIndented=true}));}return Task.CompletedTask;});
         var importGroups=f.Action("导入分组",()=>{var d=new OpenFileDialog {Filter="JSON|*.json"};if(d.ShowDialog(f)!=true)return Task.CompletedTask;using var doc=JsonDocument.Parse(File.ReadAllText(d.FileName));if(doc.RootElement.GetProperty("schemaVersion").GetInt32()!=1)throw new IOException("不支持的配置版本。");var incoming=JsonSerializer.Deserialize<List<StarGroup>>(doc.RootElement.GetProperty("groups").GetRawText())??[];if(incoming.Any(g=>g.Repositories.Any(r=>!Rules.ValidRepository(r))))throw new IOException("分组中的仓库格式无效。");if(DialogMessage.Show(f,$"导入 {incoming.Count} 个分组？会作为独立本地分组保留。","Gitstar",MessageBoxButton.OKCancel)==MessageBoxResult.OK){foreach(var g in incoming)settings.LocalGroups.Add(g with {Id=Guid.NewGuid().ToString("N"),Source="导入"});Save();RebuildGroups();}return Task.CompletedTask;});
+        var managePackages=f.Action("管理已下载安装包",()=>{var before=(settings.KeepLatestPackages,settings.DeleteInstalledPackages,settings.PromptInstalledPackageCleanup,settings.DownloadFolder);PackageManagerDialog(f);if(before!=(settings.KeepLatestPackages,settings.DeleteInstalledPackages,settings.PromptInstalledPackageCleanup,settings.DownloadFolder)){keepLatest.IsChecked=settings.KeepLatestPackages;autoDelete.IsChecked=settings.DeleteInstalledPackages;promptDelete.IsChecked=settings.PromptInstalledPackageCleanup;folder.Text=settings.DownloadFolder;}return Task.CompletedTask;});managePackages.Name="PackageManagerEntry";managePackages.ToolTip="当前保存规则："+PackageStorageRule;
+        f.SectionActions("安装包管理",managePackages);
         f.SectionActions("GitHub 账号与授权",reauthorize);f.SectionActions("关注列表",exportConfig,importGroups);
         f.Action("保存设置",()=>{
             if(proxy.Text.Trim().Length>0 && (!Uri.TryCreate(proxy.Text.Trim(),UriKind.Absolute,out var u)||u.Scheme is not ("http" or "https" or "socks5")||u.UserInfo.Length>0))throw new ArgumentException("代理请输入 http、https 或 socks5 地址，不能包含密码。");
@@ -548,6 +543,8 @@ public partial class MainWindow : Window
         if(Environment.GetCommandLineArgs().Contains("--software-audit")){SoftwareAuditDialog(this,path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--download-settings-notice")){DownloadSettingsNoticeSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--download-selection")){await DownloadSelectionSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
+        if(Environment.GetCommandLineArgs().Contains("--pending-installations")){await PendingInstallationsSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
+        if(Environment.GetCommandLineArgs().Contains("--package-manager")){await PackageManagerSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--upload-progress")){var state=new TransferState();state.Stage("上传中 42%",false);state.Percentage=42;state.Detail=new ReleaseUploadProgress("Example-Setup-x64.exe",7800000,18500000,TimeSpan.FromSeconds(25),false,TimeSpan.Zero).Detail;automaticPublishing["example/Gitstar"]=state;}
         if(Environment.GetCommandLineArgs().Contains("--account-info")){settings.Account="example-user";AccountDialog(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--notification-dot"))NotificationsDot.Visibility=Visibility.Visible;
