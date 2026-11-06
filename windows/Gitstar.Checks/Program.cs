@@ -250,6 +250,7 @@ await RepositoryIssueChecks.Run(Check);
 await UploadProgressChecks.Run(Check,root);
 DownloadDefaultsChecks.Run(Check);
 DownloadSelectionChecks.Run(Check);
+await ShutdownChecks.Run(Check,root);
 SoftwareAuditChecks.Run(Check,root);
 SoftwareDiscoveryChecks.Run(Check,root);
 SoftwareInventoryChecks.Run(Check,root);

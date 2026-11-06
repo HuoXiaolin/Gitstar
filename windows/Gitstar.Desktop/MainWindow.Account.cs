@@ -24,7 +24,7 @@ public partial class MainWindow
             settings=new Settings{ClientId=old.ClientId,Proxy=old.Proxy,DirectConnection=old.DirectConnection,Startup=old.Startup,Dark=old.Dark,DownloadFolder=old.DownloadFolder,RecentSort=old.RecentSort,ProjectsSort=old.ProjectsSort};Save();SwitchOperations();LoadCache();RebuildGroups();AccountLabel();PlanUpdates();Display();f.Close();return Task.CompletedTask;
         });
         f.Action("重新获取授权",()=>{if(!Current())throw new IOException("账号已改变，请重新打开账号信息。");if(busy||batchPublishing)throw new IOException("请先等待当前任务完成，再重新获取授权。");f.Close();AuthorizeGitHub();return Task.CompletedTask;},true);
-        f.Closed+=(_,_)=>{closed=true;lifetime.Cancel();};
+        f.Closed+=(_,_)=>{closed=true;ApplicationExit.Cancel(lifetime);};
         if(previewPath==null)f.Loaded+=async(_,_)=>{
             try{var info=await client.AccountInformation(lifetime.Token);if(!Current())return;details.Text=info.Login.Equals(account,StringComparison.OrdinalIgnoreCase)?$"显示名称：{(info.Name.Length>0?info.Name:info.Login)}\n账号类型：{info.Type}\n公开仓库：{info.PublicRepositories}   ·   关注者：{info.Followers}"+(info.Bio.Length>0?"\n简介："+info.Bio:""):"授权账号与本地记录不一致，请重新获取授权。";UpdateAuthorization();}
             catch(OperationCanceledException){}catch(Exception error)when(error is IOException or HttpRequestException or JsonException or ObjectDisposedException){if(Current())details.Text="暂时无法读取账号资料："+error.Message;}

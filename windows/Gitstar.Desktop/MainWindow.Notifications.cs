@@ -74,7 +74,7 @@ public partial class MainWindow
             catch(OperationCanceledException){}catch(Exception error)when(error is IOException or HttpRequestException or ObjectDisposedException or JsonException){if(Current()&&!selected.IsCancellationRequested)body.Text=item.Title+"\n\n预览暂不可用："+error.Message+"\n\n可在浏览器查看完整消息。";}
         };
         list.MouseDoubleClick+=(_,_)=>{if(list.SelectedItem is ListBoxItem&&Current()&&open.IsEnabled)open.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));};
-        f.Closed+=(_,_)=>{closed=true;lifetime.Cancel();preview?.Cancel();preview?.Dispose();};
+        f.Closed+=(_,_)=>{closed=true;ApplicationExit.Cancel(lifetime);ApplicationExit.Cancel(preview);preview?.Dispose();};
         if(previewPath==null)f.Loaded+=async(_,_)=>await Load(1);
         else{
             if(Environment.GetCommandLineArgs().Contains("--repository-issues"))source.SelectedIndex=1;

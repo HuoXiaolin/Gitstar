@@ -13,15 +13,18 @@ public static class Program
         using var activation=new AppActivation(smoke?AppActivation.SmokeScope:null);
         if(!activation.IsPrimary&&!smoke){if(!startInTray)activation.NotifyPrimary();return;}
         var app=new Application {ShutdownMode=ShutdownMode.OnExplicitShutdown};
-        app.DispatcherUnhandledException+=(_,e)=>{if(smoke){File.WriteAllText(Path.ChangeExtension(args.ElementAtOrDefault(1)??"Gitstar-preview.png",".error.txt"),e.Exception.ToString());Environment.ExitCode=1;app.Shutdown(1);}else MessageBox.Show(e.Exception.Message,"Gitstar",MessageBoxButton.OK,MessageBoxImage.Error);e.Handled=true;};
+        MainWindow? sessionWindow=null;
+        app.SessionEnding+=(_,e)=>{ApplicationExit.BeginSessionEnding();sessionWindow?.BeginSessionEnding();e.Cancel=false;};
+        app.Exit+=(_,_)=>sessionWindow?.ApplicationExited();
+        app.DispatcherUnhandledException+=(_,e)=>{if(smoke){File.WriteAllText(Path.ChangeExtension(args.ElementAtOrDefault(1)??"Gitstar-preview.png",".error.txt"),e.Exception.ToString());Environment.ExitCode=1;app.Shutdown(1);}else if(!ApplicationExit.IsExiting)MessageBox.Show(e.Exception.Message,"Gitstar",MessageBoxButton.OK,MessageBoxImage.Error);e.Handled=true;};
         try {
-            var window=new MainWindow(smoke);app.MainWindow=window;
-            var registered=ThreadPool.RegisterWaitForSingleObject(activation.Signal,(_,_)=>app.Dispatcher.BeginInvoke(window.ReceiveActivation),null,Timeout.Infinite,false);
+            var window=new MainWindow(smoke);sessionWindow=window;app.MainWindow=window;
+            var registered=ThreadPool.RegisterWaitForSingleObject(activation.Signal,(_,_)=>{if(ApplicationExit.IsExiting)return;try{app.Dispatcher.BeginInvoke(window.ReceiveActivation);}catch(InvalidOperationException)when(ApplicationExit.IsExiting){}},null,Timeout.Infinite,false);
             if(smoke&&!startInTray)window.Loaded+=(_,_)=>window.Dispatcher.BeginInvoke(()=>window.RenderSmoke(args.ElementAtOrDefault(1)??"Gitstar-preview.png",args.Contains("--cards"),args.Contains("--local"),args.Contains("--dark"),args.Contains("--first-group"),args.Contains("--matching"),args.Contains("--settings"),args.Contains("--avatars"),args.Contains("--progress"),args.Contains("--group-edit"),args.Contains("--add-project"),args.Contains("--batch-select"),args.Contains("--tasks"),args.Contains("--projects"),args.Contains("--project-source"),args.Contains("--project-create"),args.Contains("--project-settings"),args.Contains("--workspace-repair"),args.Contains("--project-publish"),args.Contains("--project-automation")),DispatcherPriority.ApplicationIdle);
-            if(startInTray){window.ShowInTaskbar=false;app.Dispatcher.BeginInvoke(async()=>{await window.InitializeSessionAsync();if(smoke)await window.StartupTraySmoke(args.ElementAtOrDefault(1)??"Gitstar-startup.png");});app.Run();}
+            if(startInTray){window.ShowInTaskbar=false;app.Dispatcher.BeginInvoke(async()=>{await window.InitializeSessionAsync();if(smoke){if(args.Contains("--session-shutdown"))await window.SessionShutdownSmoke(args.ElementAtOrDefault(1)??"Gitstar-shutdown.json");else await window.StartupTraySmoke(args.ElementAtOrDefault(1)??"Gitstar-startup.png");}});app.Run();}
             else app.Run(window);
             registered.Unregister(null);
-        }catch(Exception e){File.WriteAllText(Path.Combine(Path.GetTempPath(),"Gitstar-startup-error.txt"),e.ToString());if(!smoke)MessageBox.Show("Gitstar 无法启动："+e.Message,"Gitstar");Environment.ExitCode=1;}
+        }catch(Exception e){if(!ApplicationExit.IsSessionEnding||smoke){File.WriteAllText(Path.Combine(Path.GetTempPath(),"Gitstar-startup-error.txt"),e.ToString());if(!smoke)MessageBox.Show("Gitstar 无法启动："+e.Message,"Gitstar");Environment.ExitCode=1;}}
     }
 }
 

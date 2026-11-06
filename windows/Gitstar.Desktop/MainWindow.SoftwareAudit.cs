@@ -59,7 +59,7 @@ public partial class MainWindow
             finally{working=false;if(!closed){foreach(var command in commands)command.IsEnabled=true;all.IsEnabled=abnormal.IsEnabled=true;}}
         }
         f.Action("重新核对",Scan);f.Action("修复所选",()=>Repair(Visible().Where(row=>selected.Contains(row.Binding)).ToArray()));f.Action("删除所选记录",()=>Remove(Visible().Where(row=>selected.Contains(row.Binding)).ToArray()));f.Action("关闭",()=>{f.Close();return Task.CompletedTask;});
-        abnormal.Click+=(_,_)=>{selected.Clear();all.IsChecked=false;Render();};all.Click+=(_,_)=>{if(all.IsChecked==true)selected.UnionWith(Visible().Select(row=>row.Binding));else selected.Clear();Render();};f.Closed+=(_,_)=>{closed=true;lifetime.Cancel();};
+        abnormal.Click+=(_,_)=>{selected.Clear();all.IsChecked=false;Render();};all.Click+=(_,_)=>{if(all.IsChecked==true)selected.UnionWith(Visible().Select(row=>row.Binding));else selected.Clear();Render();};f.Closed+=(_,_)=>{closed=true;ApplicationExit.Cancel(lifetime);};
         if(previewPath==null)f.Loaded+=async(_,_)=>await Scan();else{
             var a=new Binding{AppId="example-old",AppName="示例编辑器",Repository="example/editor",ExecutablePath=@"D:\Apps\OldEditor\Editor.exe"};var b=new Binding{AppId="example-gone",AppName="示例工具",Repository="example/tool",ExecutablePath=@"D:\Apps\Tool\Tool.exe"};
             rows=[new(a,a.AppName,a.ExecutablePath,SoftwareAuditState.Repairable,"找到新的安装位置，请核对后选择修复。",[new("example-new",a.AppName,"2.0.0",@"D:\Apps\Editor",ExecutablePath:@"D:\Apps\Editor\Editor.exe")]),new(b,b.AppName,b.ExecutablePath,SoftwareAuditState.Missing,"原程序与对应安装登记均未找到，可修复位置或删除记录。",[])];targets[a]=rows[0].Candidates[0];Render();summary.Text="核对 2 项 · 可修复 1 · 疑似卸载 1";f.RenderPreview(previewPath);

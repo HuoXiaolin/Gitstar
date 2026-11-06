@@ -50,7 +50,7 @@ public sealed class Form : Window
             HeaderActions.Margin=new Thickness(0,headerStacked&&HeaderActions.Children.Count>0?10:0,0,0);heading.Margin=new Thickness(0,0,headerStacked?0:16,0);
         };
         Loaded+=(_,_)=>{OrganizeActions();updateChrome();};SizeChanged+=(_,_)=>updateChrome();Buttons.SizeChanged+=(_,_)=>updateChrome();HeaderActions.SizeChanged+=(_,_)=>updateChrome();
-        Closing+=(_,e)=>{if(editBaseline!=null&&!committing&&editBaseline.Any(entry=>entry.Value!=EditValue(entry.Key))&&DialogMessage.Show(this,"有尚未保存的修改。关闭后将放弃这些修改，是否继续？","放弃未保存的修改",MessageBoxButton.OKCancel)!=MessageBoxResult.OK)e.Cancel=true;};
+        Closing+=(_,e)=>{if(!ApplicationExit.IsExiting&&editBaseline!=null&&!committing&&editBaseline.Any(entry=>entry.Value!=EditValue(entry.Key))&&DialogMessage.Show(this,"有尚未保存的修改。关闭后将放弃这些修改，是否继续？","放弃未保存的修改",MessageBoxButton.OKCancel)!=MessageBoxResult.OK)e.Cancel=true;};
     }
     public TextBox Text(string label,string value="",bool multiline=false)
     {
@@ -87,7 +87,7 @@ public sealed class Form : Window
     {
         var b=new Button {Content=label,Tag=action,Padding=new Thickness(13,7,13,7),Margin=new Thickness(8,4,0,0)};
         if(primary){primaryActions.Add(b);b.SetResourceReference(BackgroundProperty,"Accent");b.Foreground=Brushes.White;b.BorderThickness=new Thickness(0);}
-        b.Click+=async(_,_)=>{b.IsEnabled=false;committing=primary||label.StartsWith("保存",StringComparison.Ordinal)||label.StartsWith("重新授权",StringComparison.Ordinal);try{await action();}catch(OperationCanceledException){DialogMessage.Show(this,"操作已暂停，可从任务记录核实进度。","Gitstar");}catch(Exception e){DialogMessage.Show(this,e.Message,"操作未完成",MessageBoxButton.OK,MessageBoxImage.Warning);}finally{committing=false;b.IsEnabled=true;}};
+        b.Click+=async(_,_)=>{if(ApplicationExit.IsExiting)return;b.IsEnabled=false;committing=primary||label.StartsWith("保存",StringComparison.Ordinal)||label.StartsWith("重新授权",StringComparison.Ordinal);try{await action();}catch(OperationCanceledException){if(!ApplicationExit.IsExiting)DialogMessage.Show(this,"操作已暂停，可从任务记录核实进度。","Gitstar");}catch(Exception e){if(!ApplicationExit.IsExiting)DialogMessage.Show(this,e.Message,"操作未完成",MessageBoxButton.OK,MessageBoxImage.Warning);}finally{committing=false;b.IsEnabled=true;}};
         Buttons.Children.Add(b);return b;
     }
     public void Footnote(string text){footnote.Text=text;updateChrome?.Invoke();}
@@ -130,6 +130,7 @@ public static class DialogMessage
     public static MessageBoxResult Show(Window owner,string message,string title,MessageBoxButton buttons=MessageBoxButton.OK,MessageBoxImage icon=MessageBoxImage.None)
     {
         var result=buttons==MessageBoxButton.YesNo?MessageBoxResult.No:MessageBoxResult.Cancel;
+        if(ApplicationExit.IsExiting)return result;
         var f=new Form(owner,title,560,message.Length>220?420:message.Length>100?340:270){MinHeight=220};f.Label(message);
         if(buttons is MessageBoxButton.YesNo or MessageBoxButton.OKCancel){var cancel=f.Action(buttons==MessageBoxButton.YesNo?"返回":"取消",()=>{result=buttons==MessageBoxButton.YesNo?MessageBoxResult.No:MessageBoxResult.Cancel;f.Close();return Task.CompletedTask;});cancel.IsCancel=true;cancel.IsDefault=true;}
         var confirm=f.Action(title.Contains("删除")?"确认删除":title.Contains("重置")?"确认重置":buttons==MessageBoxButton.YesNo?"继续":"确定",()=>{result=buttons==MessageBoxButton.YesNo?MessageBoxResult.Yes:MessageBoxResult.OK;f.Close();return Task.CompletedTask;},true);

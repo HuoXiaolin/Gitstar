@@ -8,6 +8,8 @@ public sealed class LocalStore : IDisposable
     public record StorageSize(long Database,long Journal,long Free,long Content);
     private IntPtr db;
     private readonly object gate = new();
+    private volatile bool shuttingDown;
+    public void BeginShutdown()=>shuttingDown=true;
     public string Root { get; }
     public LocalStore(string? root = null)
     {
@@ -19,7 +21,9 @@ public sealed class LocalStore : IDisposable
     private void Exec(string sql) { if (sqlite3_exec(db, sql, IntPtr.Zero, IntPtr.Zero, out var error) != 0) { var msg = Marshal.PtrToStringUTF8(error); sqlite3_free(error); throw new IOException(msg); } }
     public T Get<T>(string key, T fallback)
     {
+        if(shuttingDown)return fallback;
         lock (gate) {
+            if(shuttingDown)return fallback;
             Prepare("SELECT value FROM documents WHERE key=?1", out var s);
             try { Bind(s, 1, key); if (sqlite3_step(s) != 100) return fallback;
                 var bytes=new byte[sqlite3_column_bytes(s,0)];Marshal.Copy(sqlite3_column_text(s,0),bytes,0,bytes.Length);
@@ -29,7 +33,8 @@ public sealed class LocalStore : IDisposable
     }
     public void Set<T>(string key, T value)
     {
-        lock (gate) { Prepare("INSERT INTO documents(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", out var s);
+        if(shuttingDown)return;
+        lock (gate) { if(shuttingDown)return;Prepare("INSERT INTO documents(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", out var s);
             try { Bind(s, 1, key);var bytes=JsonSerializer.SerializeToUtf8Bytes(value);if(sqlite3_bind_text(s,2,bytes,bytes.Length,new IntPtr(-1))!=0)throw new IOException("数据库绑定失败。");if (sqlite3_step(s) != 101) throw new IOException("保存数据失败。"); }
             finally { sqlite3_finalize(s); }
         }
@@ -37,19 +42,21 @@ public sealed class LocalStore : IDisposable
     private void Prepare(string sql, out IntPtr stmt) { if (sqlite3_prepare_v2(db, sql, -1, out stmt, IntPtr.Zero) != 0) throw new IOException("数据库查询失败。"); }
     public Dictionary<string,long> DocumentSizes()
     {
-        lock(gate){Prepare("SELECT key,length(CAST(value AS BLOB)) FROM documents",out var statement);try{var result=new Dictionary<string,long>(StringComparer.Ordinal);int code;while((code=sqlite3_step(statement))==100){var bytes=new byte[sqlite3_column_bytes(statement,0)];Marshal.Copy(sqlite3_column_text(statement,0),bytes,0,bytes.Length);result[Encoding.UTF8.GetString(bytes)]=sqlite3_column_int64(statement,1);}if(code!=101)throw new IOException("读取缓存大小失败。");return result;}finally{sqlite3_finalize(statement);}}
+        if(shuttingDown)return [];
+        lock(gate){if(shuttingDown)return [];Prepare("SELECT key,length(CAST(value AS BLOB)) FROM documents",out var statement);try{var result=new Dictionary<string,long>(StringComparer.Ordinal);int code;while((code=sqlite3_step(statement))==100){var bytes=new byte[sqlite3_column_bytes(statement,0)];Marshal.Copy(sqlite3_column_text(statement,0),bytes,0,bytes.Length);result[Encoding.UTF8.GetString(bytes)]=sqlite3_column_int64(statement,1);}if(code!=101)throw new IOException("读取缓存大小失败。");return result;}finally{sqlite3_finalize(statement);}}
     }
     public void RemoveDocuments(IEnumerable<string> exact,IEnumerable<string> prefixes)
     {
-        lock(gate){Exec("BEGIN IMMEDIATE");try{foreach(var key in exact.Distinct(StringComparer.Ordinal))Delete("DELETE FROM documents WHERE key=?1",key);foreach(var prefix in prefixes.Distinct(StringComparer.Ordinal)){if(prefix.Length==0)throw new ArgumentException("缓存前缀不能为空。");Delete("DELETE FROM documents WHERE substr(key,1,length(?1))=?1",prefix);}Exec("COMMIT");}catch{Exec("ROLLBACK");throw;}}
+        if(shuttingDown)return;
+        lock(gate){if(shuttingDown)return;Exec("BEGIN IMMEDIATE");try{foreach(var key in exact.Distinct(StringComparer.Ordinal))Delete("DELETE FROM documents WHERE key=?1",key);foreach(var prefix in prefixes.Distinct(StringComparer.Ordinal)){if(prefix.Length==0)throw new ArgumentException("缓存前缀不能为空。");Delete("DELETE FROM documents WHERE substr(key,1,length(?1))=?1",prefix);}Exec("COMMIT");}catch{Exec("ROLLBACK");throw;}}
         void Delete(string sql,string key){Prepare(sql,out var statement);try{Bind(statement,1,key);if(sqlite3_step(statement)!=101)throw new IOException("清理缓存记录失败。");}finally{sqlite3_finalize(statement);}}
     }
-    public StorageSize StorageUsage(){lock(gate){long Scalar(string sql){Prepare(sql,out var s);try{if(sqlite3_step(s)!=100)throw new IOException("读取数据库空间失败。");return sqlite3_column_int64(s,0);}finally{sqlite3_finalize(s);}}long Size(string file)=>File.Exists(file)?new FileInfo(file).Length:0;return new(Size(Path.Combine(Root,"gitstar.db")),Size(Path.Combine(Root,"gitstar.db-wal")),Scalar("PRAGMA freelist_count")*Scalar("PRAGMA page_size"),Scalar("SELECT coalesce(sum(length(CAST(value AS BLOB))),0) FROM documents"));}}
-    public void Compact(){lock(gate){Exec("PRAGMA wal_checkpoint(TRUNCATE); PRAGMA auto_vacuum=INCREMENTAL; VACUUM; PRAGMA wal_checkpoint(TRUNCATE);");}}
-    public void ReclaimUnusedSpace(){lock(gate){var size=StorageUsage();if(size.Free>=8*1024*1024&&size.Free>=size.Database/3)Compact();}}
-    public void ReleaseMemory(){lock(gate){if(db!=IntPtr.Zero)Exec("PRAGMA shrink_memory;");}}
+    public StorageSize StorageUsage(){if(shuttingDown)return new(0,0,0,0);lock(gate){if(shuttingDown)return new(0,0,0,0);long Scalar(string sql){Prepare(sql,out var s);try{if(sqlite3_step(s)!=100)throw new IOException("读取数据库空间失败。");return sqlite3_column_int64(s,0);}finally{sqlite3_finalize(s);}}long Size(string file)=>File.Exists(file)?new FileInfo(file).Length:0;return new(Size(Path.Combine(Root,"gitstar.db")),Size(Path.Combine(Root,"gitstar.db-wal")),Scalar("PRAGMA freelist_count")*Scalar("PRAGMA page_size"),Scalar("SELECT coalesce(sum(length(CAST(value AS BLOB))),0) FROM documents"));}}
+    public void Compact(){if(shuttingDown)return;lock(gate){if(!shuttingDown)Exec("PRAGMA wal_checkpoint(TRUNCATE); PRAGMA auto_vacuum=INCREMENTAL; VACUUM; PRAGMA wal_checkpoint(TRUNCATE);");}}
+    public void ReclaimUnusedSpace(){if(shuttingDown)return;lock(gate){if(shuttingDown)return;var size=StorageUsage();if(size.Free>=8*1024*1024&&size.Free>=size.Database/3)Compact();}}
+    public void ReleaseMemory(){if(shuttingDown)return;lock(gate){if(!shuttingDown&&db!=IntPtr.Zero)Exec("PRAGMA shrink_memory;");}}
     private static void Bind(IntPtr s, int i, string v) { var b = Encoding.UTF8.GetBytes(v); if (sqlite3_bind_text(s, i, b, b.Length, new IntPtr(-1)) != 0) throw new IOException("数据库绑定失败。"); }
-    public void Dispose() { lock (gate) { if (db != IntPtr.Zero) { sqlite3_close(db); db = IntPtr.Zero; } } }
+    public void Dispose() { BeginShutdown();lock (gate) { if (db != IntPtr.Zero) { sqlite3_close(db); db = IntPtr.Zero; } } }
     [DllImport("winsqlite3", CallingConvention=CallingConvention.Cdecl)] private static extern int sqlite3_open([MarshalAs(UnmanagedType.LPUTF8Str)] string path, out IntPtr db);
     [DllImport("winsqlite3", CallingConvention=CallingConvention.Cdecl)] private static extern int sqlite3_close(IntPtr db);
     [DllImport("winsqlite3", CallingConvention=CallingConvention.Cdecl)] private static extern int sqlite3_exec(IntPtr db,[MarshalAs(UnmanagedType.LPUTF8Str)] string sql,IntPtr cb,IntPtr arg,out IntPtr error);

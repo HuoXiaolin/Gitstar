@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
 namespace Gitstar.Desktop;
@@ -9,7 +9,7 @@ public partial class MainWindow
     {
         var account=CacheKey;var known=installed.OrderBy(app=>app.Name,StringComparer.OrdinalIgnoreCase).ToArray();
         var f=new Form(this,"添加与关联软件",790,710);f.Label("选择主程序或软件文件夹，再填写 GitHub 仓库即可保存。名称、版本和目录自动读取；多个程序可从列表选择，保存不等待联网扫描。");
-        using var lifetime=new CancellationTokenSource();var closed=false;f.Closed+=(_,_)=>{closed=true;lifetime.Cancel();};
+        using var lifetime=new CancellationTokenSource();var closed=false;f.Closed+=(_,_)=>{closed=true;ApplicationExit.Cancel(lifetime);};
         var mode=f.Select("添加方式",["选择程序（EXE / 快捷方式 / 文件夹）","从本机检测结果中选择"],known.Length>0?1:0);
         var search=f.Text("搜索本机软件（名称或路径）");search.Visibility=Visibility.Collapsed;var searchLabel=(FrameworkElement)f.Fields.Children[f.Fields.Children.IndexOf(search)-1];searchLabel.Visibility=Visibility.Collapsed;
         var existing=f.Select("已安装的软件",known.Select(app=>$"{app.Name} · {app.Version}"),-1);var existingLabel=(FrameworkElement)f.Fields.Children[f.Fields.Children.IndexOf(existing)-1];

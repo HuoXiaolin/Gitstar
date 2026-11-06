@@ -81,6 +81,7 @@ public partial class MainWindow
         string project, string path, string status, string confirm, string skip, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        if(exit||quitting)throw new OperationCanceledException("Gitstar 正在退出。");
         var form = downloadDecisions;
         var isNew = form == null;
         if (form == null)

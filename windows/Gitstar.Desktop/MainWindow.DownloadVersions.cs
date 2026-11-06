@@ -23,7 +23,7 @@ public partial class MainWindow
         var selectionBox=new Border{Child=selectionRow,Padding=new Thickness(12,10,12,10),Margin=new Thickness(18,0,18,4),BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(8)};selectionBox.SetResourceReference(Border.BackgroundProperty,"Surface");selectionBox.SetResourceReference(Border.BorderBrushProperty,"Edge");
         f.FixedSummary(selectionBox);
         selectionBox.MouseLeftButtonUp+=(_,_)=>{var details=new Form(f,"当前选择的下载文件",700,480);details.Label(selectionText.ToolTip as string??selectionText.Text);details.Action("关闭",()=>{details.Close();return Task.CompletedTask;});details.ShowDialog();};
-        using var lifetime=new CancellationTokenSource();var closed=false;f.Closed+=(_,_)=>{closed=true;lifetime.Cancel();};
+        using var lifetime=new CancellationTokenSource();var closed=false;f.Closed+=(_,_)=>{closed=true;ApplicationExit.Cancel(lifetime);};
         var channel=ChannelFilter.SelectedIndex;var known=new List<Release>{card.Release};var current=card.Release;Release? latest=null;
         var version=f.Select("选择版本",[]);
         if(install)((FrameworkElement)f.Fields.Children[f.Fields.Children.Count-2]).Visibility=Visibility.Collapsed;

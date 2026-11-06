@@ -233,15 +233,15 @@ public partial class MainWindow : Window
         if((kind is "自动发布" or "发布" or "源码上传" or "项目删除" or "批量下载" or "发行包读取") && automaticCheckId is {} scanning)taskCoordinator.Pause(scanning);
         var op=new Operation {Kind=kind,Description=description,State="等待执行"};operations.Add(op);
         using var run=taskCoordinator.Start(op.Id,resources??["cache"]);if(transfer!=null)taskTransfers[op.Id]=transfer;SaveOperations();
-        using var parentCancellation=parentToken.Register(()=>{if(parentStopReason?.Invoke()=="取消")taskCoordinator.Cancel(op.Id);else taskCoordinator.Pause(op.Id);});
+        var parentCancellation=parentToken.Register(()=>{if(parentStopReason?.Invoke()=="取消")taskCoordinator.Cancel(op.Id);else taskCoordinator.Pause(op.Id);});
         var previous=currentOperation.Value;currentOperation.Value=op;var started=false;
         if(kind=="检查"){refreshing=true;if(background)automaticCheckId=op.Id;}
         try {await run.WaitAsync();started=true;UseTask(kind,background);op.State="执行中";SaveOperations();var runningStatus=kind+" · "+description+" · 正在处理…";model.Status=runningStatus;await work(run.Token);op.State=op.Results.Any(r=>r.StartsWith("待处理"))?(op.Results.Any(r=>r.StartsWith("成功"))?"部分完成，请核实待处理项":"未完成，请核实待处理项"):"完成";if(model.Status==runningStatus)model.Status=description+" · "+op.State;}        catch(OperationCanceledException){
             var remote=kind is "自动发布" or "发布" or "发布包管理" or "项目删除" or "源码上传" or "Star管理" or "分组管理" or "批量管理" or "项目管理";
             op.State=!started?"已"+run.StopReason+"等待":remote?"已"+run.StopReason+" · 远程结果待核实":run.StopReason=="取消"?"已取消":kind=="下载"?"已暂停（下载重试会重新开始）":"已暂停";
             model.Status=description+" · "+op.State;
-        }        catch(Exception e){op.State=kind is "自动发布" or "发布" or "发布包管理" or "项目删除" or "源码上传" or "Star管理" or "分组管理" or "批量管理" or "项目管理"?"结果待核实："+e.Message:"失败："+e.Message;model.Status=e.Message;if(!background)DialogMessage.Show(this,e.Message,"操作未完成",MessageBoxButton.OK,MessageBoxImage.Warning);}
-        finally{if(started && (kind is "Star管理" or "分组管理" or "批量管理" or "项目管理")){Save();SaveCache();RebuildGroups();PlanUpdates();Display();}op.Updated=DateTimeOffset.Now;taskTransfers.Remove(op.Id);SaveOperations();currentOperation.Value=previous;if(kind=="检查"){refreshing=false;if(automaticCheckId==op.Id){automaticCheckId=null;if(run.Token.IsCancellationRequested)lastAttempt=null;}}run.Dispose();if(settings.KeepLatestPackages && !quitting && !exit)_=Dispatcher.BeginInvoke(async()=>await CleanupOldPackages());}
+        }        catch(Exception e){op.State=kind is "自动发布" or "发布" or "发布包管理" or "项目删除" or "源码上传" or "Star管理" or "分组管理" or "批量管理" or "项目管理"?"结果待核实："+e.Message:"失败："+e.Message;model.Status=e.Message;if(!background&&!quitting)DialogMessage.Show(this,e.Message,"操作未完成",MessageBoxButton.OK,MessageBoxImage.Warning);}
+        finally{if(!ApplicationExit.IsSessionEnding){if(started && (kind is "Star管理" or "分组管理" or "批量管理" or "项目管理")){Save();SaveCache();RebuildGroups();PlanUpdates();Display();}op.Updated=DateTimeOffset.Now;SaveOperations();}taskTransfers.Remove(op.Id);currentOperation.Value=previous;if(kind=="检查"){refreshing=false;if(automaticCheckId==op.Id){automaticCheckId=null;if(run.Token.IsCancellationRequested)lastAttempt=null;}}if(ApplicationExit.IsSessionEnding)parentCancellation.Unregister();else parentCancellation.Dispose();run.Dispose();if(settings.KeepLatestPackages && !quitting && !exit)_=Dispatcher.BeginInvoke(async()=>await CleanupOldPackages());}
         QueueBackgroundMemoryReclaim();
     }
     private void Login_Click(object sender,RoutedEventArgs e)
@@ -265,7 +265,7 @@ public partial class MainWindow : Window
         var code=f.Text("授权码","正在获取…");code.IsReadOnly=true;
         var verificationUrl="https://github.com/login/device";
         f.Action("打开浏览器登录",()=>{WindowsServices.Open(verificationUrl);return Task.CompletedTask;},true);
-        using var loginCancel=new CancellationTokenSource();f.Action("取消",()=>{loginCancel.Cancel();f.Close();return Task.CompletedTask;});f.Closed+=(_,_)=>loginCancel.Cancel();
+        using var loginCancel=new CancellationTokenSource();f.Action("取消",()=>{loginCancel.Cancel();f.Close();return Task.CompletedTask;});f.Closed+=(_,_)=>ApplicationExit.Cancel(loginCancel);
         f.Loaded+=async(_,_)=>{
             try {
                 var authorization=await api.DeviceAuthorization(settings.ClientId,(c,u)=>{code.Text=c;verificationUrl=u;try{Clipboard.SetText(c);}catch(System.Runtime.InteropServices.ExternalException){code.ToolTip="自动复制不可用，请手动复制授权码。";}WindowsServices.Open(verificationUrl);},loginCancel.Token);
@@ -536,14 +536,11 @@ public partial class MainWindow : Window
         f.Action("取消",()=>{f.Close();return Task.CompletedTask;}).IsCancel=true;f.Footnote("附件选择按项目记忆；更新说明在上传时重新读取。");f.SectionNavigation(previewPath!=null&&Environment.GetCommandLineArgs().Contains("--release-notes")?"更新说明":null);publishButton=f.Action("发布更新",()=>Publish(true),true);publishButton.IsEnabled=!reading&&assets.SelectedPaths.Length>0;var saveDraft=f.Action("保存为草稿",()=>Publish(false));f.Buttons.Children.Remove(saveDraft);advanced.Children.Add(saveDraft);if(previewPath!=null){versionHint.Text="应用文件版本：1.0.0.0";File.WriteAllText(Path.ChangeExtension(previewPath,".version.json"),JsonSerializer.Serialize(new{Tag=tag.Text,Directory=releaseFolder.Text,Editable=!tag.IsReadOnly,DraftId=id.Text}));f.RenderPreview(previewPath);}f.ShowDialog();
     }
     private void OnClosing(object? sender,CancelEventArgs e) {if(exit)return;e.Cancel=true;Hide();model.Status="Gitstar 已收起到托盘，后台任务继续运行。";}
-    public async void RequestExit()
-    {
-        if(quitting)return;if(busy){if(DialogMessage.Show(this,"有多个任务可能正在执行。暂停后退出？下载重试会重新开始；发布或推送结果不明会留待核实。","Gitstar",MessageBoxButton.OKCancel)!=MessageBoxResult.OK)return;quitting=true;taskCoordinator.CancelAll();while(busy)await Task.Delay(100);}
-        rankingRequest?.Cancel();exit=true;timer.Stop();backgroundMemoryTimer.Stop();Save();SaveOperations();tray.Visible=false;tray.Dispose();api.Dispose();try{await Task.Run(store.ReclaimUnusedSpace);}catch(IOException){}store.Dispose();Application.Current.Shutdown();
-    }
     public async void RenderSmoke(string path,bool cards=false,bool local=false,bool dark=false,bool firstGroup=false,bool matching=false,bool settingsPreview=false,bool avatars=false,bool progressPreview=false,bool groupPreview=false,bool addPreview=false,bool batchPreview=false,bool tasksPreview=false,bool projectsPreview=false,bool sourcePreview=false,bool createPreview=false,bool projectSettingsPreview=false,bool workspacePreview=false,bool publishPreview=false,bool automationPreview=false)
     {
         settings.Dark=dark;ApplyTheme();
+        if(Environment.GetCommandLineArgs().Contains("--session-shutdown")){await SessionShutdownSmoke(path);return;}
+        if(Environment.GetCommandLineArgs().Contains("--manual-exit")){await ManualExitSmoke(path);return;}
         if(Environment.GetCommandLineArgs().Contains("--layout-compact")){Width=940;Height=740;}
         if(Environment.GetCommandLineArgs().Contains("--layout-check")){settings.Account="example-developer-with-a-long-account";AccountLabel();ArrangeMainLayout();}
         if(Environment.GetCommandLineArgs().Contains("--download-decisions")){await DownloadDecisionSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}

@@ -72,7 +72,7 @@ public partial class MainWindow
             if(selected.Any(i=>string.IsNullOrEmpty(i.Asset.Digest))&&DialogMessage.Show(f,"部分附件没有作者提供的 SHA-256 摘要，只能核对下载大小。继续下载所选附件？","下载校验",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)return Task.CompletedTask;
             settings.BulkDownloadDays=BulkDownloadRules.Days[period.SelectedIndex];settings.BulkDownloadExtensions=Formats().ToList();settings.DownloadFolder=root;Save();f.Tag=(selected,root,decision==0?2:decision);f.Close();return Task.CompletedTask;
         },true);Selection();
-        f.Action("取消",()=>{if(scanId!=null)taskCoordinator.Cancel(scanId);f.Close();return Task.CompletedTask;}).IsCancel=true;f.Closed+=(_,_)=>{closed=true;if(scanId!=null)taskCoordinator.Cancel(scanId);};
+        f.Action("取消",()=>{if(scanId!=null)taskCoordinator.Cancel(scanId);f.Close();return Task.CompletedTask;}).IsCancel=true;f.Closed+=(_,_)=>{closed=true;if(scanId!=null&&!ApplicationExit.IsSessionEnding)taskCoordinator.Cancel(scanId);};
         if(previewPath!=null){Populate(BulkDownloadRules.Select(releases,DateTimeOffset.UtcNow,7,[".exe",".msi",".zip"]));summary.Text=$"找到 {rows.Count} 个附件 · 默认全选 · 支持多种格式和时间范围";f.RenderPreview(previewPath);}
         f.ShowDialog();if(f.Tag is ValueTuple<ReleaseDownload[],string,int> selection)await DownloadBatch(selection.Item1,selection.Item2,selection.Item3);
     }

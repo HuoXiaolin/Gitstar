@@ -22,9 +22,26 @@ public sealed class TaskCoordinator
             var run=new Run(this,id,claims);runs.Add(id,run);return run;
         }
     }
-    public void Pause(string id){lock(sync)if(runs.TryGetValue(id,out var run)){run.StopReason="暂停";run.Stop.Cancel();}}
-    public void Cancel(string id){lock(sync)if(runs.TryGetValue(id,out var run)){run.StopReason="取消";run.Stop.Cancel();}}
-    public void CancelAll(){lock(sync)foreach(var run in runs.Values)run.Stop.Cancel();}
+    public void Pause(string id)=>StopOne(id,"暂停");
+    public void Cancel(string id)=>StopOne(id,"取消");
+    private void StopOne(string id,string reason)
+    {
+        Run? run;lock(sync){if(!runs.TryGetValue(id,out run))return;run.StopReason=reason;}
+        // Cancellation callbacks may dispose a run or cancel children; never invoke them under the coordinator lock.
+        try{run.Stop.Cancel();}catch(ObjectDisposedException){}
+    }
+    public void CancelAll()
+    {
+        Run[] pending;lock(sync)pending=runs.Values.ToArray();
+        foreach(var run in pending)try{run.Stop.Cancel();}catch(ObjectDisposedException){}
+    }
+    public Task CancelAllAsync()
+    {
+        Run[] pending;lock(sync)pending=runs.Values.ToArray();
+        var tasks=new List<Task>();
+        foreach(var run in pending)try{tasks.Add(run.Stop.CancelAsync());}catch(ObjectDisposedException){}
+        return Task.WhenAll(tasks);
+    }
     public sealed class Run:IDisposable
     {
         private readonly TaskCoordinator owner;private readonly (string Key,Gate Gate)[] claims;private int acquired;private bool disposed;

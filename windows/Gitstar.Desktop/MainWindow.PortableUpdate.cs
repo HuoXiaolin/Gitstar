@@ -7,9 +7,11 @@ public partial class MainWindow
 {
     private async Task PortableUpdateDialog(Card card,string package,string? extracted=null,string? previewPath=null,CancellationToken ct=default,Action<Form,CheckBox,Button>? inspect=null)
     {
+        if(exit||quitting)return;
         var app=card.Update!.App;var program=card.Update.Binding.ExecutablePath.Length>0?card.Update.Binding.ExecutablePath:app.ExecutablePath;var folder=program.Length>0?Path.GetDirectoryName(program)??app.Location:app.Location;
         PortableReplacementPlan? plan=null;string? preparationError=null;
         if(previewPath==null)try{plan=await Task.Run(()=>PortableReplacement.Prepare(program,package,extracted),ct);}catch(Exception error)when(error is IOException or UnauthorizedAccessException or ArgumentException){preparationError=error.Message;}
+        if(exit||quitting)return;
         var f=new Form(this,"便携软件更新",790,600);f.Label(app.Name+" · "+app.Version+" → "+card.Release.Tag);
         f.Value("当前所选文件",Path.GetFileName(package)).ToolTip=package;f.Value("替换目标",program);f.Value("更新方式","替换原位置的程序文件，保留个人配置和数据");
         var backup=f.Check("备份旧程序（默认不备份）");
@@ -19,7 +21,7 @@ public partial class MainWindow
         var progress=new ProgressBar{Height=4,Minimum=0,Maximum=100,Visibility=Visibility.Collapsed};progress.SetResourceReference(Control.ForegroundProperty,"Accent");var summary=new StackPanel();summary.Children.Add(status);summary.Children.Add(progress);f.FixedSummary(new Border{Child=summary,Margin=new Thickness(24,12,24,0)});f.Footnote("核对更新成功后自动关闭；未完成时保留处理入口。");
         f.Action("打开新版文件夹",()=>{if(previewPath==null)WindowsServices.Open(extracted??Path.GetDirectoryName(package)!);return Task.CompletedTask;});
         f.Action("打开原软件目录",()=>{if(previewPath==null)WindowsServices.Open(folder);return Task.CompletedTask;}).IsEnabled=previewPath!=null||Directory.Exists(folder);
-        var busy=false;f.Closing+=(_,args)=>{if(busy)args.Cancel=true;};f.Action("关闭",()=>{f.Close();return Task.CompletedTask;}).IsCancel=true;
+        var busy=false;f.Closing+=(_,args)=>{if(busy&&!ApplicationExit.IsSessionEnding)args.Cancel=true;};f.Action("关闭",()=>{f.Close();return Task.CompletedTask;}).IsCancel=true;
         Button replace=null!,automatic=null!;
         async Task Replace(bool restart){
             if(previewPath!=null)return;
@@ -33,7 +35,7 @@ public partial class MainWindow
                 var prepared=plan;
                 var result=await Task.Run(()=>PortableReplacement.Apply(prepared,keep,ct,(done,total)=>f.Dispatcher.Invoke(()=>{progress.IsIndeterminate=false;progress.Value=total>0?100.0*done/total:0;status.Text=$"正在替换 {done} / {total} 个文件…";card.Transfer.Label=status.Text;})),ct);
                 applied=true;plan=null;
-                if(restart){status.Text="文件已替换，正在启动原主程序…";PortableProcessControl.Start(prepared.Program);}
+                if(restart&&!exit&&!quitting){status.Text="文件已替换，正在启动原主程序…";PortableProcessControl.Start(prepared.Program);}
                 await ScanMatchedAsync();PlanUpdates();Display();var actual=InstalledVersion.Find(installed,app.Id);var verified=actual!=null&&Rules.CompareVersions(actual.Version,Rules.VersionTag(card.Release,card.Update.Binding))>=0;
                 card.Transfer.Finish(verified?"已更新":"重新核对版本",!verified);card.Transfer.Detail=result.Backup??"未保留旧程序备份";
                 status.Text=$"已替换 {result.Replaced} 个文件。"+(restart?"已请求启动原主程序。":"")+(verified?"已核对本机版本："+actual!.Version+"。":"文件替换完成，请核对软件版本。")+(result.Backup!=null?"\n旧程序备份："+result.Backup:"\n未保留旧程序备份。");model.Status=status.Text;
