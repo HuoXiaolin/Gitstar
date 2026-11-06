@@ -5,7 +5,7 @@ namespace Gitstar.Desktop;
 
 public partial class MainWindow
 {
-    private sealed record PendingInstallationRow(Border View,TextBlock Title,TextBlock File,TextBlock Status,Button Install,CheckBox Selection);
+    private sealed record PendingInstallationRow(Border View,TextBlock Title,TextBlock File,TextBlock Status,Button Install,CheckBox Selection,Button More);
     private readonly Dictionary<string,PendingInstallationRow> pendingInstallationRows=[];
     private readonly HashSet<string> selectedPendingInstallations=[];
     private CheckBox? pendingSelectAll;
@@ -21,7 +21,7 @@ public partial class MainWindow
         var count=new TextBlock{FontSize=13,VerticalAlignment=VerticalAlignment.Center};count.SetResourceReference(TextBlock.ForegroundProperty,"AccentInk");form.HeaderActions.Children.Add(count);form.Tag=count;
         form.Footnote("关闭仅收起列表；删除所选仅移除待办，安装包文件保留，可从“安装包管理”继续安装。");
         pendingDeleteSelected=form.Action("删除所选",()=>{DeleteSelectedPendingInstallations();return Task.CompletedTask;});pendingDeleteSelected.Name="PendingDeleteSelected";pendingDeleteSelected.SetResourceReference(Control.ForegroundProperty,"DangerInk");
-        var check=form.Action("重新检测本机",async()=>{await Execute("检测","核对待安装包",async ct=>{await ScanMatchedAsync();ct.ThrowIfCancellationRequested();PlanUpdates();Display();});});check.Name="PendingInstallCheck";
+        var check=form.Action("重新检测本机",async()=>{await Execute("检测","核对待安装包",async ct=>{if(pendingInstallations.Any(item=>item.NewInstall!=null))await ScanNewInstallationInventory(PackagesKey,ct);else await ScanMatchedAsync();ct.ThrowIfCancellationRequested();PlanUpdates();Display();});});check.Name="PendingInstallCheck";
         form.Action("关闭列表",()=>{form.Close();return Task.CompletedTask;});
         form.Closed+=(_,_)=>{if(ReferenceEquals(downloadDecisions,form))downloadDecisions=null;pendingInstallationRows.Clear();selectedPendingInstallations.Clear();pendingSelectAll=null;pendingDeleteSelected=null;UpdatePendingDownloadBadge();};
         RefreshPendingInstallationRows();return form;
@@ -54,15 +54,17 @@ public partial class MainWindow
                 folder.Click+=(_,_)=>{var entry=pendingInstallations.FirstOrDefault(item=>item.Id==id);if(entry!=null&&Directory.Exists(entry.Package.Root))WindowsServices.Open(entry.Package.Root);};
                 var install=new Button{MinHeight=32,Padding=new Thickness(10,5,10,5),Margin=new Thickness(8,3,0,3)};install.SetResourceReference(Control.ForegroundProperty,"AccentInk");install.SetResourceReference(Control.BorderBrushProperty,"Accent");actions.Children.Add(install);
                 install.Click+=async(_,_)=>{var entry=pendingInstallations.FirstOrDefault(item=>item.Id==id);if(entry!=null)await ContinuePendingInstallation(entry);};
+                var more=new Button{Content="更多",Margin=new Thickness(8,3,0,3),Padding=new Thickness(10,5,10,5),MinHeight=32};more.SetResourceReference(StyleProperty,"TertiaryButton");actions.Children.Add(more);var menu=new ContextMenu();var retry=new MenuItem{Header="重新打开安装器"};var manual=new MenuItem{Header="手动关联软件"};menu.Items.Add(retry);menu.Items.Add(manual);more.ContextMenu=menu;more.Click+=(_,_)=>{menu.PlacementTarget=more;menu.IsOpen=true;};retry.Click+=async(_,_)=>{var entry=pendingInstallations.FirstOrDefault(item=>item.Id==id);if(entry!=null)await ContinueNewInstallation(entry,true);};manual.Click+=async(_,_)=>{var entry=pendingInstallations.FirstOrDefault(item=>item.Id==id);if(entry==null)return;BindingDialog(defaultRepository:entry.Package.Repository);await Execute("检测","核对安装关联",async ct=>{await ScanNewInstallationInventory(PackagesKey,ct);});};
                 void Arrange(){var narrow=form.ActualWidth>0&&form.ActualWidth<680;Grid.SetColumnSpan(selection,narrow?2:1);details.Margin=new Thickness(0,0,narrow?0:16,0);Grid.SetRow(actions,narrow?1:0);Grid.SetColumn(actions,narrow?0:1);Grid.SetColumnSpan(actions,narrow?2:1);actions.Margin=new Thickness(0,narrow?8:0,0,0);}
                 form.SizeChanged+=(_,_)=>Arrange();Arrange();
                 var view=new Border{Child=layout,Tag=pending.Id,Padding=new Thickness(0,14,0,14),BorderThickness=new Thickness(0,0,0,1)};view.SetResourceReference(Border.BorderBrushProperty,"Edge");form.Fields.Children.Add(view);
-                row=new(view,title,file,status,install,selection);pendingInstallationRows[id]=row;
+                row=new(view,title,file,status,install,selection,more);pendingInstallationRows[id]=row;
             }
             row.Title.Text=pending.App.Name+" · "+pending.Package.Tag;row.File.Text=pending.Package.AssetName;row.File.ToolTip=pending.Package.Path;
             var linked=PendingCard(pending)!=null;var busy=pendingInstallationBusy.Contains(id);
-            row.Status.Text=pendingInstallationMessages.GetValueOrDefault(id)??(linked?"安装包已保存，可继续安装；关闭列表或重启软件后仍会保留。":"原软件关联或安装位置已变化，请先核对匹配。");
-            row.Install.Content=busy?"处理中…":!linked?"核对关联":unavailablePendingPackages.Contains(id)?"重新下载":pending.App.Portable||pending.Package.Path.EndsWith(".zip",StringComparison.OrdinalIgnoreCase)?"处理替换":"打开安装器";
+            row.Status.Text=pendingInstallationMessages.GetValueOrDefault(id)??(pending.NewInstall!=null?"下载来源已记录；安装后将自动检测并关联本机软件。":linked?"安装包已保存，可继续安装；关闭列表或重启软件后仍会保留。":"原软件关联或安装位置已变化，请先核对匹配。");
+            row.Install.Content=busy?"处理中…":pending.NewInstall is {} fresh?fresh.Started?"核对安装":"打开安装器":!linked?"核对关联":unavailablePendingPackages.Contains(id)?"重新下载":pending.App.Portable||pending.Package.Path.EndsWith(".zip",StringComparison.OrdinalIgnoreCase)?"处理替换":"打开安装器";
+            row.More.Visibility=pending.NewInstall!=null?Visibility.Visible:Visibility.Collapsed;row.More.IsEnabled=!busy;
             row.Install.IsEnabled=!busy;
             row.Selection.IsEnabled=!busy;if(busy)selectedPendingInstallations.Remove(id);
         }

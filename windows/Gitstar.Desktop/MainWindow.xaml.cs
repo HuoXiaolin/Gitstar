@@ -80,7 +80,7 @@ public partial class MainWindow : Window
             if(exit)return;
             if(settings.Startup)WindowsServices.Startup(true);
             timer.Start();if(RefreshSchedule.IsDue(settings.RefreshIntervalHours,settings.LastCheck,lastAttempt,DateTimeOffset.UtcNow))await RefreshAsync(true);
-            else if(settings.Bindings.Count>0)await Execute("检测","启动时复检已关联软件",async ct=>{model.Status=$"正在复检 {settings.Bindings.Count} 个已关联软件…";await ScanMatchedAsync();ct.ThrowIfCancellationRequested();PlanUpdates();Display();StartupCheckCompleted();},true,resources:["cache"]);
+            else if(settings.Bindings.Count>0||pendingInstallations.Any(item=>item.NewInstall is {Started:true}))await Execute("检测","启动时复检已关联软件",async ct=>{model.Status=$"正在复检 {settings.Bindings.Count} 个已关联软件…";await ScanMatchedAsync();ct.ThrowIfCancellationRequested();PlanUpdates();Display();StartupCheckCompleted();},true,resources:["cache"]);
             else model.Status="已加载上次检查结果，可手动检查更新。";
     }
     private void StartupCheckCompleted()=>model.Status=$"启动复检完成 · {settings.Bindings.Count} 个已关联软件 · {updates.Count} 个可更新";
@@ -96,15 +96,16 @@ public partial class MainWindow : Window
         if(force && installedScan is {IsCompleted:false})await installedScan;
         if(installedScan==null || installedScan.IsCompleted){var portable=settings.PortableApps.ToArray();var bindings=settings.Bindings.Select(b=>b.Snapshot()).ToArray();var known=installed.ToArray();installedScan=Task.Run(()=>WindowsServices.Scan(portable,bindings,known));}
         var detected=await installedScan;if(exit || accountKey!=CacheKey)return;
-        SetInstalled(detected);
+        SetInstalled(detected,true);
     }
     private async Task ScanMatchedAsync()
     {
+        if(pendingInstallations.Any(item=>item.NewInstall is {Started:true})){await ScanInstalledAsync(true);return;}
         var accountKey=CacheKey;var bindings=settings.Bindings.Select(b=>b.Snapshot()).ToArray();var known=installed.ToArray();var portable=settings.PortableApps.ToArray();
         var fresh=await Task.Run(()=>WindowsServices.ScanMatched(bindings,portable,known));if(exit || accountKey!=CacheKey)return;
         SetInstalled(known.Where(a=>!bindings.Any(b=>InstalledVersion.Find([a],b.AppId)!=null)).Concat(fresh).ToList());
     }
-    private void SetInstalled(List<InstalledApp> detected){var repair=InstalledIdentity.Reconcile(settings,detected,installed);installed=repair.Apps;installedFresh=true;store.Set("settings",settings);SaveInstalledSnapshot();}
+    private void SetInstalled(List<InstalledApp> detected,bool fullInventory=false){var repair=InstalledIdentity.Reconcile(settings,detected,installed);installed=repair.Apps;installedFresh=true;if(fullInventory)ReconcileNewInstallations(installed);store.Set("settings",settings);SaveInstalledSnapshot();}
     private void SaveInstalledSnapshot()=>store.Set(CacheKey+"/installed",InstalledSnapshot.Capture(installed,settings.Bindings));
     private void Save(){store.Set("settings",settings);if(installedFresh)SaveInstalledSnapshot();}
     private void SaveOperations()=>store.Set(OperationsKey,operations);
@@ -147,6 +148,7 @@ public partial class MainWindow : Window
         }
         if(tray!=null){tray.Text=$"Gitstar · {updates.Count} 个软件可更新";var old=tray.Icon;tray.Icon=TrayBadge.Create(updates.Count>0);old?.Dispose();}
         ReconcilePendingInstallations();
+        foreach(var update in updates){var state=TransferFor(update.Release,true);if(!state.Active&&state.Label=="已安装并关联"&&pendingInstallations.All(item=>item.Package.ReleaseId!=update.Release.Id||!item.Package.Repository.Equals(update.Release.Repository,StringComparison.OrdinalIgnoreCase)))state.Finish("");}
     }
     private void Display()
     {
@@ -305,14 +307,17 @@ public partial class MainWindow : Window
         var selection=await ChoosePackage(card);if(selection==null)return;var release=selection.Release;var install=card.Update!=null;
         if(!ConfirmDownloadSettings(selection.Root,selection.Historical))return;
         var purpose=DownloadSelectionRules.Purpose(install,card.Update?.App.Portable==true);var downloadedAssets=new List<Asset>();
-        var stopDownloads=false;var savedCount=0;foreach(var asset in selection.Assets){
+        var stopDownloads=false;var savedCount=0;PendingInstallation? newInstallation=null;var downloadAccount=PackagesKey;foreach(var asset in selection.Assets){
         Operation? fileOperation=null;var downloadTarget=PackageTarget(release,asset,selection.Root);card.Transfer.Stage("等待下载任务");
         await Execute("下载",card.Repository+" · "+asset.Name,async ct=>{
+            if(downloadAccount!=PackagesKey)throw new OperationCanceledException("账号已变化，已停止本次下载处理。");
             var state=card.Transfer;var operation=currentOperation.Value!;fileOperation=operation;operation.Repository=card.Repository;operation.Tag=release.Tag;operation.File=downloadTarget;state.Percentage=0;state.Detail=asset.Name;state.Stage("下载中 0%",false);
             try{
                 var progressAt=DateTime.MinValue;
                 var replaceSame=false;var previousPackage=packages.FirstOrDefault(p=>p.Path.Equals(downloadTarget,StringComparison.OrdinalIgnoreCase)&&PackageRules.SameVersion(p,release,asset));
                 if(previousPackage!=null&&await PackageFiles.Matches(previousPackage,ct)){
+                    if(downloadAccount!=PackagesKey)throw new OperationCanceledException("账号已变化，未创建其他账号的安装记录。");
+                    if(!install&&asset.Id==selection.InstallAssetId){newInstallation=QueueRecentInstallation(previousPackage);savedCount++;state.Finish("安装包已就绪");return;}
                     if(install&&!bypassPending){AddPendingInstallation(card,release,downloadTarget);OpenDownloadDecisionList();return;}
                     state.Stage("处理同版本安装包");var decision=settings.SameVersionDownload;
                     if(decision==0)decision=await ConfirmDownloadAction(card.Repository+" · "+release.Tag,downloadTarget,"同版本文件已存在，新文件校验成功后才会替换。","重新下载","跳过",ct)?1:2;
@@ -321,9 +326,10 @@ public partial class MainWindow : Window
                 // Download continuations run on the UI context; report directly to avoid queued percentages overwriting later stages.
                 var path=await WindowsServices.Download(api,release,asset,selection.Root,(a,b)=>{if(a<b && DateTime.UtcNow-progressAt<TimeSpan.FromMilliseconds(100))return;progressAt=DateTime.UtcNow;state.Downloaded(a,b);model.Status=$"正在下载 {asset.Name} · {state.Detail}";},ct,()=>{state.Stage("校验中");model.Status="正在校验安装包："+asset.Name;},token=>CanReplacePackage(release,asset,downloadTarget,token,replaceSame),forceDownload:replaceSame,targetPath:downloadTarget);
                 model.Status="安装包已保存："+path;
+                if(downloadAccount!=PackagesKey)throw new OperationCanceledException("账号已变化，文件已保存，未创建其他账号的安装记录。");
                 await RecordPackage(release,asset,path,selection.Root,ct,retainForBatch:selection.Historical);
                 downloadedAssets.Add(asset);RememberPackageSelection(release,purpose,downloadedAssets);
-                if(!install){savedCount++;state.Finish("已保存文件");state.Detail=$"{savedCount}/{selection.Assets.Count} · {path}";return;}
+                if(!install){savedCount++;if(asset.Id==selection.InstallAssetId)newInstallation=QueueRecentInstallation(packages.Single(package=>package.Path.Equals(path,StringComparison.OrdinalIgnoreCase)));state.Finish("已保存文件");state.Detail=$"{savedCount}/{selection.Assets.Count} · {path}";return;}
                 if(path.EndsWith(".exe",StringComparison.OrdinalIgnoreCase)){state.Stage("检测安装包架构");var platform=await Task.Run(()=>InstallerCompatibility.InspectExe(path,Environment.Is64BitOperatingSystem),ct);if(!platform.Compatible){state.Finish("安装包架构不兼容");state.Detail=platform.Name+" 与当前 Windows 不兼容；安装包已保存，未启动安装器。";throw new IOException(state.Detail);}state.Detail=platform.Name+" · 与当前 Windows 兼容";}
                 if(path.EndsWith(".msi",StringComparison.OrdinalIgnoreCase)){state.Stage("检测安装包架构");var platform=await Task.Run(()=>WindowsServices.MsiPlatform(path),ct);if(!Rules.IsCompatibleMsiTemplate(platform,Environment.Is64BitOperatingSystem)){state.Finish("安装包架构不兼容");state.Detail="MSI 平台："+platform+"；安装包已保存，未启动安装器。";throw new IOException(state.Detail);}}
                 AddPendingInstallation(card,release,path);model.Status="安装包已保存，可从下载待处理列表继续安装。";OpenDownloadDecisionList();
@@ -334,6 +340,7 @@ public partial class MainWindow : Window
         if(fileOperation==null||fileOperation.State!="完成")stopDownloads=true;if(stopDownloads||quitting)break;
         }
         if(!install&&selection.Assets.Count>1)model.Status=$"所选 {selection.Assets.Count} 个文件，已保存 {savedCount} 个。"+(stopDownloads?"后续下载已停止。":"可在任务记录查看各文件结果。");
+        if(newInstallation!=null&&downloadAccount==PackagesKey&&!quitting&&!exit){if(!stopDownloads){if(newInstallation.NewInstall!=null)await ContinueNewInstallation(newInstallation,true);else await ContinuePendingInstallation(newInstallation);}else OpenDownloadDecisionList();}
     }
     private async Task ObserveInstaller(Process process,Card card,string account,CancellationToken ct,string packagePath)
     {
@@ -341,7 +348,7 @@ public partial class MainWindow : Window
         try{
             await process.WaitForExitAsync(ct);if(settings.Account!=account){state.Finish("重新检测版本",true);return;}state.Stage("检测安装结果");
             var known=installed.ToArray();var bindings=settings.Bindings.Select(binding=>binding.Snapshot()).ToArray();var portable=settings.PortableApps.ToArray();
-            SetInstalled(await Task.Run(()=>WindowsServices.Scan(portable,bindings,known)));PlanUpdates();
+            SetInstalled(await Task.Run(()=>WindowsServices.Scan(portable,bindings,known)),true);PlanUpdates();
             var actual=InstalledVersion.Find(installed,card.Update?.App.Id??"");
             var target=card.Update==null?card.Release.Tag:Rules.VersionTag(card.Release,card.Update.Binding);
             if(actual!=null && Rules.CompareVersions(actual.Version,target) is >=0){state.Finish("已更新");state.Detail="检测到已安装版本："+actual.Version;model.Status=card.Title+" 已更新至 "+actual.Version;Display();await CleanupInstalledPackages(packagePath);}
@@ -544,6 +551,7 @@ public partial class MainWindow : Window
         if(Environment.GetCommandLineArgs().Contains("--download-settings-notice")){DownloadSettingsNoticeSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--download-selection")){await DownloadSelectionSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--pending-installations")){await PendingInstallationsSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
+        if(Environment.GetCommandLineArgs().Contains("--recent-install")){await RecentInstallationSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--package-manager")){await PackageManagerSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--upload-progress")){var state=new TransferState();state.Stage("上传中 42%",false);state.Percentage=42;state.Detail=new ReleaseUploadProgress("Example-Setup-x64.exe",7800000,18500000,TimeSpan.FromSeconds(25),false,TimeSpan.Zero).Detail;automaticPublishing["example/Gitstar"]=state;}
         if(Environment.GetCommandLineArgs().Contains("--account-info")){settings.Account="example-user";AccountDialog(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}

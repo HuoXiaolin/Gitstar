@@ -44,7 +44,7 @@ public static class PackageRules
         foreach(var binding in bindings.Where(b=>b.Repository.Equals(package.Repository,StringComparison.OrdinalIgnoreCase))){
             var app=InstalledVersion.Find(apps,binding.AppId);if(app==null || app.VersionSource is not ("程序产品版本" or "程序文件版本") || !package.Tag.StartsWith(binding.TagPrefix,StringComparison.Ordinal))continue;
             if(app.ExecutablePath.Length>0 && System.IO.Path.GetFullPath(app.ExecutablePath).Equals(System.IO.Path.GetFullPath(package.Path),StringComparison.OrdinalIgnoreCase))continue;
-            if(Rules.CompareVersions(app.Version,package.Tag[binding.TagPrefix.Length..]) is >=0)return true;
+            if(Rules.CompareVersions(app.Version,InstallerVersionRules.Target(package,binding)) is >=0)return true;
         }
         return false;
     }

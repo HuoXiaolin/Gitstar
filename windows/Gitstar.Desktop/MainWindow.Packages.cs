@@ -20,10 +20,11 @@ public partial class MainWindow
     }
     private async Task RecordPackage(Release release,Asset asset,string path,string root,CancellationToken ct,bool retainForBatch=false)
     {
+        var account=PackagesKey;
         string digest;if(asset.Digest?.StartsWith("sha256:",StringComparison.OrdinalIgnoreCase)==true)digest=asset.Digest[7..];else{await using var stream=File.OpenRead(path);digest=Convert.ToHexString(await SHA256.HashDataAsync(stream,ct));}
         var family=PackageRules.Family(asset.Name);
         if(path.EndsWith(".msi",StringComparison.OrdinalIgnoreCase)){try{var platform=WindowsServices.MsiPlatform(path).Split(';')[0].Trim().ToLowerInvariant();family="windows/"+(platform=="intel"?"x86":platform);}catch(IOException){}}
-        packages.RemoveAll(p=>p.Path.Equals(path,StringComparison.OrdinalIgnoreCase));packages.Add(new(release.Repository,release.Id,release.Tag,release.Prerelease,release.Published,asset.Name,Path.GetFullPath(path),Path.GetFullPath(root),asset.Size,digest,family){RetainForBatch=retainForBatch,DownloadedAt=DateTimeOffset.Now});SavePackages();RefreshPackageManager?.Invoke();
+        ct.ThrowIfCancellationRequested();if(account!=PackagesKey)throw new OperationCanceledException("账号已变化，文件已保存，未写入其他账号的下载记录。");packages.RemoveAll(p=>p.Path.Equals(path,StringComparison.OrdinalIgnoreCase));packages.Add(new(release.Repository,release.Id,release.Tag,release.Prerelease,release.Published,asset.Name,Path.GetFullPath(path),Path.GetFullPath(root),asset.Size,digest,family){RetainForBatch=retainForBatch,DownloadedAt=DateTimeOffset.Now});SavePackages();RefreshPackageManager?.Invoke();
     }
     private async Task<bool> DeleteRecordedPackage(DownloadedPackage package,bool allowCurrent=false)
     {

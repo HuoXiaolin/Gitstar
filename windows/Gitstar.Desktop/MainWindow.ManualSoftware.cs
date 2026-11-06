@@ -5,7 +5,7 @@ namespace Gitstar.Desktop;
 
 public partial class MainWindow
 {
-    private void BindingDialog(string? previewPath=null)
+    private void BindingDialog(string? previewPath=null,string defaultRepository="")
     {
         var account=CacheKey;var known=installed.OrderBy(app=>app.Name,StringComparer.OrdinalIgnoreCase).ToArray();
         var f=new Form(this,"添加与关联软件",790,710);f.Label("选择主程序或软件文件夹，再填写 GitHub 仓库即可保存。名称、版本和目录自动读取；多个程序可从列表选择，保存不等待联网扫描。");
@@ -17,7 +17,7 @@ public partial class MainWindow
         var pathRow=new Grid();pathRow.ColumnDefinitions.Add(new());pathRow.ColumnDefinitions.Add(new(){Width=GridLength.Auto});pathRow.ColumnDefinitions.Add(new(){Width=GridLength.Auto});executable.Margin=new Thickness(0,0,0,10);pathRow.Children.Add(executable);f.Fields.Children.Insert(index,pathRow);
         var programs=f.Select("检测到多个程序，请选择主程序",[],-1);var programsLabel=(FrameworkElement)f.Fields.Children[f.Fields.Children.IndexOf(programs)-1];programs.Visibility=programsLabel.Visibility=Visibility.Collapsed;string[] candidates=[];var finding=false;
         var summary=new TextBlock{Text="选择主程序后，自动识别软件信息。",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,14),FontSize=12};summary.SetResourceReference(TextBlock.ForegroundProperty,"Muted");f.Fields.Children.Add(summary);
-        var repo=f.Select("GitHub 仓库（可粘贴完整网址或 owner/repo）",repositories.Select(r=>r.FullName).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase),-1);repo.IsEditable=true;repo.IsTextSearchEnabled=true;
+        var repo=f.Select("GitHub 仓库（可粘贴完整网址或 owner/repo）",repositories.Select(r=>r.FullName).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase),-1);repo.IsEditable=true;repo.IsTextSearchEnabled=true;repo.Text=defaultRepository;
         var updateMode=f.Select("更新方式",["便携软件：下载后替换程序文件","安装版软件：下载后运行安装器"]);
         var advanced=f.Advanced("软件信息与可选设置");TextBox name=null!,version=null!,location=null!,prefix=null!,pattern=null!;CheckBox beta=null!;
         f.Into(advanced,()=>{name=f.Text("软件名称（自动读取，可修改）");version=f.Text("当前版本（自动读取，识别不到可留空）");location=f.Text("软件目录（自动读取）");location.IsReadOnly=true;prefix=f.Text("版本标签前缀（多产品仓库可选）");pattern=f.Text("安装包文件名包含（可选）");beta=f.Check("包含测试版");});

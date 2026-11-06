@@ -1,12 +1,15 @@
 namespace Gitstar.Core;
 
-public record PendingInstallation(string Id,DownloadedPackage Package,InstalledApp App,Binding Binding,string TargetVersion,DateTimeOffset Added);
+public record PendingInstallation(string Id,DownloadedPackage Package,InstalledApp App,Binding Binding,string TargetVersion,DateTimeOffset Added)
+{
+    public NewInstallationState? NewInstall {get;init;}
+}
 
 public static class PendingInstallationRules
 {
     public static PendingInstallation Create(DownloadedPackage package,InstalledApp app,Binding binding)
     {
-        var tag=package.Tag.StartsWith(binding.TagPrefix,StringComparison.Ordinal)?package.Tag[binding.TagPrefix.Length..]:package.Tag;
+        var tag=InstallerVersionRules.Target(package,binding);
         return new(Guid.NewGuid().ToString("N"),package,app,binding.Snapshot(),tag,DateTimeOffset.UtcNow);
     }
     private static string PathKey(string path)

@@ -16,6 +16,7 @@ public static class PackagePreference
         var name=asset.Name.ToLowerInvariant().Replace("x86_64","x64").Replace("x86-64","x64");
         var extension=Path.GetExtension(name);var type=extension switch{".exe"=>60,".msi"=>50,".msix" or ".msixbundle"=>45,".appx" or ".appxbundle"=>40,".zip"=>20,".7z"=>10,_=>-1};if(type<0)return -1;
         if(portable){type=extension switch{".zip"=>80,".7z"=>70,".exe" when !name.Contains("setup")&&!name.Contains("installer")=>60,_=>-1};if(type<0)return -1;}
+        else{if(name.Contains("offline"))type-=12;if(name.Contains("win7")||name.Contains("server2012"))type-=20;}
         if(Regex.IsMatch(name,@"(?:^|[._\- ])(?:linux|darwin|macos|osx|mac|android|ubuntu|debian|source|sources|src|symbols|debug|pdb)(?:[._\- ]|$)"))return -1;
         var arm64=name.Contains("arm64")||name.Contains("aarch64");var arm32=!arm64&&(name.Contains("armv")||Regex.IsMatch(name,@"(?:^|[._\- ])arm(?:[._\- ]|$)"));
         var x64=name.Contains("x64")||name.Contains("amd64")||name.Contains("win64")||name.Contains("64bit")||name.Contains("64-bit");

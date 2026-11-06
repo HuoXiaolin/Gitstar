@@ -16,7 +16,7 @@ public partial class MainWindow
 
     private void LoadPendingInstallations()
     {
-        pendingInstallations=store.Get(PendingInstallationsKey,new List<PendingInstallation>());
+        pendingInstallations=store.Get(PendingInstallationsKey,new List<PendingInstallation>()).Select(item=>item with{TargetVersion=InstallerVersionRules.Target(item.Package,item.Binding)}).ToList();
         var importLegacy=!store.Get(PendingInstallationsKey+"/legacy-imported",false);
         // Older downloads have no pending-install flag. Recover ordinary bound packages, not batch archives.
         foreach(var package in packages.Where(package=>importLegacy&&!package.RetainForBatch)){
@@ -46,10 +46,10 @@ public partial class MainWindow
     {
         if(exit||quitting)return;
         var fresh=freshReleases?.ToArray();
-        var removed=pendingInstallations.RemoveAll(item=>(
+        var previous=pendingInstallations.ToArray();var removed=pendingInstallations.RemoveAll(item=>(
             PendingInstallationRules.Installed(item,settings.Bindings,installed,installedFresh)
             ||fresh!=null&&(checkStarted==null||item.Added<=checkStarted)&&item.Package.Repository.Equals(checkedRepository,StringComparison.OrdinalIgnoreCase)&&PendingInstallationRules.Superseded(item,fresh)));
-        if(removed>0){SavePendingInstallations();RefreshPendingInstallationRows();}
+        if(removed>0){foreach(var item in previous.Where(item=>pendingInstallations.All(current=>current.Id!=item.Id))){var state=TransferFor(PendingRelease(item),true);if(!state.Active&&pendingInstallations.All(current=>current.Package.Repository!=item.Package.Repository||current.Package.ReleaseId!=item.Package.ReleaseId))state.Finish("");}SavePendingInstallations();RefreshPendingInstallationRows();}
         foreach(var entry in pendingInstallations){var transfer=TransferFor(PendingRelease(entry),true);if(!transfer.Active&&!transfer.NeedsDetection)transfer.Finish("继续安装");}
         UpdatePendingDownloadBadge();
     }
@@ -71,6 +71,7 @@ public partial class MainWindow
     private async Task ContinuePendingInstallation(PendingInstallation item)
     {
         if(exit||quitting||pendingInstallationBusy.Contains(item.Id))return;
+        if(item.NewInstall!=null){await ContinueNewInstallation(item);return;}
         var card=PendingCard(item);
         if(card==null){model.Status="原软件关联或安装位置已变化，请在软件管理中核对匹配。";Reminders_Click(this,new RoutedEventArgs());return;}
         if(unavailablePendingPackages.Contains(item.Id)){await DownloadCard(card,true);return;}

@@ -150,6 +150,7 @@ public partial class MainWindow
             }else{PendingInstallationRules.Upsert(pendingInstallations,item);SavePendingInstallations();RefreshPendingInstallationRows();await ContinuePendingInstallation(item);return;}
         }
         if(DialogMessage.Show(owner,$"打开 {package.AssetName}？\n\n仓库：{package.Repository}\n版本：{package.Tag}\n"+(package.Path.EndsWith(".zip",StringComparison.OrdinalIgnoreCase)?"此压缩包将解压到独立目录并打开文件夹。":linkedContext??"此安装包尚未关联本机软件，安装后可在“软件管理”中添加关联。"),"打开已下载安装包",MessageBoxButton.OKCancel)!=MessageBoxResult.OK)return;
+        if(linkedContext==null&&NewInstallationRules.Installable(new(0,package.AssetName,package.Size,"",""))){var fresh=QueueRecentInstallation(package);await ContinuePendingInstallation(fresh);return;}
         await Execute("安装","打开 "+package.AssetName,async ct=>{
             await Task.Run(()=>ManagedPackageFiles.Verify(package,ct),ct);ct.ThrowIfCancellationRequested();
             if(package.Path.EndsWith(".exe",StringComparison.OrdinalIgnoreCase)){var check=await Task.Run(()=>InstallerCompatibility.InspectExe(package.Path,Environment.Is64BitOperatingSystem),ct);if(!check.Compatible)throw new IOException("此 EXE 与当前 Windows 架构不兼容。");}

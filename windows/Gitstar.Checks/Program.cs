@@ -252,6 +252,7 @@ DownloadDefaultsChecks.Run(Check);
 DownloadSelectionChecks.Run(Check);
 await ShutdownChecks.Run(Check,root);
 PendingInstallationChecks.Run(Check);
+NewInstallationChecks.Run(Check);
 await PackageManagementChecks.Run(Check,root);
 SoftwareAuditChecks.Run(Check,root);
 SoftwareDiscoveryChecks.Run(Check,root);

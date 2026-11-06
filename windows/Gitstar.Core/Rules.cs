@@ -48,7 +48,7 @@ public static partial class Rules
     }
     public static Asset? SelectAsset(Release release, Binding binding)
     {
-        var a = release.Assets.Where(IsWindowsInstallCandidate);
+        var a = InstallerVersionRules.Recommended(release,release.Assets,binding.AssetPattern).Where(IsWindowsInstallCandidate);
         if (binding.AssetPattern.Length > 0) a = a.Where(x => x.Name.Contains(binding.AssetPattern, StringComparison.OrdinalIgnoreCase));
         var matches = a.ToList(); return matches.Count == 1 ? matches[0] : null;
     }
@@ -72,5 +72,5 @@ public static partial class Rules
         return platform.Equals("Intel",StringComparison.OrdinalIgnoreCase) || (host64Bit && platform.Equals("x64",StringComparison.OrdinalIgnoreCase));
     }
     public static Release? SelectRelease(IEnumerable<Release> releases, Binding binding) => ReleaseSelection.Select(releases,binding);
-    public static string VersionTag(Release r, Binding b) => b.TagPrefix.Length > 0 ? r.Tag[b.TagPrefix.Length..] : r.Tag;
+    public static string VersionTag(Release r, Binding b) => InstallerVersionRules.Target(r,b);
 }
