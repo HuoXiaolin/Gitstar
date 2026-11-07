@@ -7,9 +7,9 @@ public record PendingInstallation(string Id,DownloadedPackage Package,InstalledA
 
 public static class PendingInstallationRules
 {
-    public static PendingInstallation Create(DownloadedPackage package,InstalledApp app,Binding binding)
+    public static PendingInstallation Create(DownloadedPackage package,InstalledApp app,Binding binding,Release? release=null)
     {
-        var tag=InstallerVersionRules.Target(package,binding);
+        var tag=InstallerVersionRules.Target(package,binding,release);
         return new(Guid.NewGuid().ToString("N"),package,app,binding.Snapshot(),tag,DateTimeOffset.UtcNow);
     }
     private static string PathKey(string path)

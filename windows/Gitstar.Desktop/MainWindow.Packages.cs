@@ -46,7 +46,10 @@ public partial class MainWindow
     private async Task CleanupInstalledPackages(string? currentPath=null)
     {
         if(exit||quitting || !installedFresh)return;
-        var candidates=packages.Where(p=>File.Exists(p.Path) && (currentPath==null?!taskCoordinator.Uses("file:"+p.Path):p.Path.Equals(currentPath,StringComparison.OrdinalIgnoreCase)) && PackageRules.Installed(p,settings.Bindings,installed) && (settings.DeleteInstalledPackages || !p.Prompted)).ToArray();
+        var candidates = packages.Where(package => File.Exists(package.Path)
+            && (currentPath == null ? !taskCoordinator.Uses("file:" + package.Path) : package.Path.Equals(currentPath, StringComparison.OrdinalIgnoreCase))
+            && PackageRules.Installed(package, settings.Bindings, installed, FindPackageRelease(package))
+            && (settings.DeleteInstalledPackages || !package.Prompted)).ToArray();
         if(candidates.Length==0)return;
         if(!settings.DeleteInstalledPackages){
             if(!settings.PromptInstalledPackageCleanup)return;

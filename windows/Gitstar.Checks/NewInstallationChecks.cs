@@ -38,5 +38,30 @@ internal static class NewInstallationChecks
         var changed=settings.Bindings[0].Snapshot();changed.Repository="other/Example";var otherSettings=new Settings{Bindings=[changed]};check(NewInstallationRules.Bind(otherSettings,fresh,[app])==null&&changed.Repository=="other/Example","existing association to another repository is never overwritten");
         var restored=JsonSerializer.Deserialize<PendingInstallation>(JsonSerializer.Serialize(fresh))!;check(restored.NewInstall is {Started:true}&&restored.Package.Repository==release.Repository,"unfinished new installation retains its baseline and source across restart");
         check(!NewInstallationRules.Installable(A("Example.zip"))&&!NewInstallationRules.Installable(A("Example-arm64.exe"))&&NewInstallationRules.Installable(stable),"download-after-install only starts compatible Windows EXE/MSI files");
+
+        var digest = "sha256:" + package.Sha256;
+        var previewWithDigest = preview with { Digest = digest };
+        var renamed = stable with { Digest = digest };
+        var aliases = release with { Assets = [renamed, previewWithDigest] };
+        var renamedPackage = package with { AssetName = renamed.Name, Path = @"C:\Downloads\" + renamed.Name };
+        var completed = PendingInstallationRules.Create(renamedPackage, app, associated, aliases);
+        check(completed.TargetVersion == beta && PendingInstallationRules.Installed(completed, [associated], [app], true),
+            "an installed package with a stable filename is settled when its SHA-256 matches the preview attachment");
+        check(InstallerVersionRules.Target(aliases, binding) == beta, "renaming identical bytes does not offer a duplicate stable upgrade");
+        check(InstallerVersionRules.Target(renamedPackage, associated, null, completed.TargetVersion) == beta,
+            "the resolved target remains available after the release cache is pruned");
+        var distinctStable = release with { Assets = [renamed, previewWithDigest, offline with { Digest = "sha256:" + new string('B', 64) }] };
+        var choices = InstallerVersionRules.Recommended(distinctStable, distinctStable.Assets);
+        check(choices.Count == 1 && choices[0].Id == offline.Id && InstallerVersionRules.Target(distinctStable, binding) == release.Tag,
+            "the stable recommendation bypasses both copies of the preview while preserving a distinct stable installer");
+        var replacedPackage = renamedPackage with { Sha256 = new string('B', 64) };
+        var replaced = PendingInstallationRules.Create(replacedPackage, app, associated, aliases);
+        check(replaced.TargetVersion == release.Tag && !PendingInstallationRules.Installed(replaced, [associated], [app], true),
+            "a new digest under the same filename cannot complete using an older preview's installation");
+        var ambiguous = aliases with { Assets = [.. aliases.Assets, previewWithDigest with { Name = "Example_0.6.67-beta.2_x64-setup.exe" }] };
+        check(InstallerVersionRules.Target(renamedPackage, associated, ambiguous) == release.Tag,
+            "conflicting preview labels for a shared digest leave the stable target unresolved");
+        check(InstallerVersionRules.Target(renamedPackage, associated, aliases with { Repository = "other/Example" }) == release.Tag,
+            "matching attachment digests from another repository do not change the pending target");
     }
 }

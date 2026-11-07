@@ -143,7 +143,7 @@ public partial class MainWindow
         var matches=settings.Bindings.Where(binding=>binding.Repository.Equals(package.Repository,StringComparison.OrdinalIgnoreCase)&&package.Tag.StartsWith(binding.TagPrefix,StringComparison.Ordinal)&&(!package.Prerelease||binding.IncludePrerelease)&&(binding.AssetPattern.Length==0||package.AssetName.Contains(binding.AssetPattern,StringComparison.OrdinalIgnoreCase))).Select(binding=>(Binding:binding,App:InstalledVersion.Find(installed,binding.AppId))).Where(item=>item.App!=null).ToArray();
         if(matches.Length>0){
             var chosen=0;if(matches.Length>1){var pick=new Form(owner,"选择安装位置",700,360);var target=pick.Select("同一仓库关联了多个软件，请选择目标",matches.Select(item=>item.App!.Name+" · "+item.App.ExecutablePath));var accepted=false;pick.Action("取消",()=>{pick.Close();return Task.CompletedTask;});pick.Action("继续",()=>{chosen=target.SelectedIndex;accepted=true;pick.Close();return Task.CompletedTask;},true);pick.ShowDialog();if(!accepted)return;}
-            var match=matches[chosen];var item=PendingInstallationRules.Create(package,match.App!,match.Binding);
+            var match=matches[chosen];var item=PendingInstallationRules.Create(package,match.App!,match.Binding,FindPackageRelease(package));
             if(PendingInstallationRules.Installed(item,settings.Bindings,installed,installedFresh)){
                 if(match.App!.Portable){DialogMessage.Show(owner,"该安装位置已达到此安装包版本。可导出保留，或选择更新的版本。","已安装此版本");return;}
                 linkedContext=$"已关联 {match.App!.Name}，本机版本 {match.App.Version}。将重新打开所选版本的安装器，由安装器决定修复、重装或降级。";

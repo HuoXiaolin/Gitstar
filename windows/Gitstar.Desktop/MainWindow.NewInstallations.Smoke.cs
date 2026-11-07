@@ -37,7 +37,11 @@ public partial class MainWindow
         await ContinuePendingInstallation(unmatched);var preserved=pendingInstallations.Any(entry=>entry.Id==unmatched.Id&&entry.NewInstall is {Started:true});
         pendingInstallations=[];LoadPendingInstallations();var restartRetains=pendingInstallations.Any(entry=>entry.Id==unmatched.Id&&entry.NewInstall is {Started:true});
         newInstallScanSmoke=null;newInstallLaunchSmoke=null;
-        var betaVersion="0.6.67-beta.20261105.1";var betaAsset=setup with{Name="ExampleEditor_"+betaVersion+"_x64-setup.exe"};var stableAsset=setup with{Id=4,Name="ExampleEditor_0.6.67_x64-setup.exe"};var companion=release.Assets[2];var mixed=release with{Tag="v0.6.67",Assets=[betaAsset,stableAsset,companion]};
+        var betaVersion = "0.6.67-beta.20261105.1";
+        var betaAsset = setup with { Name = "ExampleEditor_" + betaVersion + "_x64-setup.exe" };
+        var stableAsset = setup with { Id = 4, Name = "ExampleEditor_0.6.67_x64-setup.exe", Digest = "sha256:" + new string('B', 64) };
+        var companion = release.Assets[2];
+        var mixed = release with { Tag = "v0.6.67", Assets = [betaAsset, stableAsset, companion] };
         RememberPackageSelection(mixed,DownloadPurpose.Save,[betaAsset,companion]);var stableDefault=false;
         await ChoosePackage(new(){Release=mixed},(_,_)=>Task.FromResult(new GitHubClient.DownloadVersionPage(1,[mixed])),_=>Task.FromResult<Release?>(mixed),(_,_)=>Task.FromResult<Release?>(null),null,(form,_,files,_,_)=>{stableDefault=files.SelectedItems.Cast<string>().Any(file=>file.StartsWith(stableAsset.Name+" "))&&!files.SelectedItems.Cast<string>().Any(file=>file.StartsWith(betaAsset.Name+" "));form.Close();});
         var betaApp=app with{Version=betaVersion};var betaBinding=new Binding{Repository=release.Repository,AppId=app.Id,ExecutablePath=program};settings.Bindings=[betaBinding];installed=[betaApp];installedFresh=true;releases=[mixed];

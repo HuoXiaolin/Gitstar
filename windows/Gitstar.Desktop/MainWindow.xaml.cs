@@ -317,7 +317,13 @@ public partial class MainWindow : Window
                 var replaceSame=false;var previousPackage=packages.FirstOrDefault(p=>p.Path.Equals(downloadTarget,StringComparison.OrdinalIgnoreCase)&&PackageRules.SameVersion(p,release,asset));
                 if(previousPackage!=null&&await PackageFiles.Matches(previousPackage,ct)){
                     if(downloadAccount!=PackagesKey)throw new OperationCanceledException("账号已变化，未创建其他账号的安装记录。");
-                    if(!install&&asset.Id==selection.InstallAssetId){newInstallation=QueueRecentInstallation(previousPackage);savedCount++;state.Finish("安装包已就绪");return;}
+                    if (!install && asset.Id == selection.InstallAssetId)
+                    {
+                        newInstallation = QueueRecentInstallation(previousPackage, release);
+                        savedCount++;
+                        state.Finish("安装包已就绪");
+                        return;
+                    }
                     if(install&&!bypassPending){AddPendingInstallation(card,release,downloadTarget);OpenDownloadDecisionList();return;}
                     state.Stage("处理同版本安装包");var decision=settings.SameVersionDownload;
                     if(decision==0)decision=await ConfirmDownloadAction(card.Repository+" · "+release.Tag,downloadTarget,"同版本文件已存在，新文件校验成功后才会替换。","重新下载","跳过",ct)?1:2;
@@ -329,7 +335,15 @@ public partial class MainWindow : Window
                 if(downloadAccount!=PackagesKey)throw new OperationCanceledException("账号已变化，文件已保存，未创建其他账号的安装记录。");
                 await RecordPackage(release,asset,path,selection.Root,ct,retainForBatch:selection.Historical);
                 downloadedAssets.Add(asset);RememberPackageSelection(release,purpose,downloadedAssets);
-                if(!install){savedCount++;if(asset.Id==selection.InstallAssetId)newInstallation=QueueRecentInstallation(packages.Single(package=>package.Path.Equals(path,StringComparison.OrdinalIgnoreCase)));state.Finish("已保存文件");state.Detail=$"{savedCount}/{selection.Assets.Count} · {path}";return;}
+                if (!install)
+                {
+                    savedCount++;
+                    if (asset.Id == selection.InstallAssetId)
+                        newInstallation = QueueRecentInstallation(packages.Single(package => package.Path.Equals(path, StringComparison.OrdinalIgnoreCase)), release);
+                    state.Finish("已保存文件");
+                    state.Detail = $"{savedCount}/{selection.Assets.Count} · {path}";
+                    return;
+                }
                 if(path.EndsWith(".exe",StringComparison.OrdinalIgnoreCase)){state.Stage("检测安装包架构");var platform=await Task.Run(()=>InstallerCompatibility.InspectExe(path,Environment.Is64BitOperatingSystem),ct);if(!platform.Compatible){state.Finish("安装包架构不兼容");state.Detail=platform.Name+" 与当前 Windows 不兼容；安装包已保存，未启动安装器。";throw new IOException(state.Detail);}state.Detail=platform.Name+" · 与当前 Windows 兼容";}
                 if(path.EndsWith(".msi",StringComparison.OrdinalIgnoreCase)){state.Stage("检测安装包架构");var platform=await Task.Run(()=>WindowsServices.MsiPlatform(path),ct);if(!Rules.IsCompatibleMsiTemplate(platform,Environment.Is64BitOperatingSystem)){state.Finish("安装包架构不兼容");state.Detail="MSI 平台："+platform+"；安装包已保存，未启动安装器。";throw new IOException(state.Detail);}}
                 AddPendingInstallation(card,release,path);model.Status="安装包已保存，可从下载待处理列表继续安装。";OpenDownloadDecisionList();
@@ -342,16 +356,32 @@ public partial class MainWindow : Window
         if(!install&&selection.Assets.Count>1)model.Status=$"所选 {selection.Assets.Count} 个文件，已保存 {savedCount} 个。"+(stopDownloads?"后续下载已停止。":"可在任务记录查看各文件结果。");
         if(newInstallation!=null&&downloadAccount==PackagesKey&&!quitting&&!exit){if(!stopDownloads){if(newInstallation.NewInstall!=null)await ContinueNewInstallation(newInstallation,true);else await ContinuePendingInstallation(newInstallation);}else OpenDownloadDecisionList();}
     }
-    private async Task ObserveInstaller(Process process,Card card,string account,CancellationToken ct,string packagePath)
+    private async Task ObserveInstaller(Process process, Card card, string account, CancellationToken ct, PendingInstallation item)
     {
         var state=card.Transfer;
         try{
-            await process.WaitForExitAsync(ct);if(settings.Account!=account){state.Finish("重新检测版本",true);return;}state.Stage("检测安装结果");
+            await process.WaitForExitAsync(ct);
+            if (settings.Account != account || exit || quitting) return;
+            state.Stage("检测安装结果");
             var known=installed.ToArray();var bindings=settings.Bindings.Select(binding=>binding.Snapshot()).ToArray();var portable=settings.PortableApps.ToArray();
-            SetInstalled(await Task.Run(()=>WindowsServices.Scan(portable,bindings,known)),true);PlanUpdates();
-            var actual=InstalledVersion.Find(installed,card.Update?.App.Id??"");
-            var target=card.Update==null?card.Release.Tag:Rules.VersionTag(card.Release,card.Update.Binding);
-            if(actual!=null && Rules.CompareVersions(actual.Version,target) is >=0){state.Finish("已更新");state.Detail="检测到已安装版本："+actual.Version;model.Status=card.Title+" 已更新至 "+actual.Version;Display();await CleanupInstalledPackages(packagePath);}
+            var detected = await Task.Run(() => WindowsServices.Scan(portable, bindings, known, ct), ct);
+            ct.ThrowIfCancellationRequested();
+            if (settings.Account != account || exit || quitting) return;
+            SetInstalled(detected, true);
+            item = ResolvePendingTarget(item);
+            PlanUpdates();
+            var actual = PendingInstallationRules.CurrentApp(item, settings.Bindings, installed);
+            var target = item.TargetVersion;
+            if (actual != null && PendingInstallationRules.Installed(item, settings.Bindings, installed, installedFresh))
+            {
+                var otherUpdate = updates.Any(update => update.Release.Id == item.Package.ReleaseId
+                    && update.Release.Repository.Equals(item.Package.Repository, StringComparison.OrdinalIgnoreCase));
+                state.Finish(otherUpdate ? "" : "已更新");
+                state.Detail = "检测到已安装版本：" + actual.Version;
+                model.Status = card.Title + " 已核对安装版本 " + actual.Version;
+                Display();
+                await CleanupInstalledPackages(item.Package.Path);
+            }
             else{state.Finish("重新检测版本",true);state.Detail=actual==null?"未找到原安装位置的主程序，请核对安装位置。":$"当前检测版本：{actual.Version}；目标版本：{target}。尚未确认更新完成，请核对安装位置或等待安装器结束。";model.Status=card.Title+"："+state.Detail;Display();}
         }catch(OperationCanceledException){state.Finish("重新检测版本",true);state.Detail="已停止等待安装器；安装器仍可继续运行，请稍后检测版本。";throw;}catch(Exception ex){state.Finish("重新检测版本",true);state.Detail="无法确认安装结果："+ex.Message;}
         finally{process.Dispose();}

@@ -5,12 +5,12 @@ public record NewInstallationState(InstalledApp[] Before,bool Started=false);
 public static class NewInstallationRules
 {
     public static bool Installable(Asset asset)=>Rules.IsWindowsInstallCandidate(asset)&&(asset.Name.EndsWith(".exe",StringComparison.OrdinalIgnoreCase)||asset.Name.EndsWith(".msi",StringComparison.OrdinalIgnoreCase));
-    public static PendingInstallation Create(DownloadedPackage package)
+    public static PendingInstallation Create(DownloadedPackage package, Release? release = null)
     {
         var prefix=Rules.CompareVersions(package.Tag,package.Tag)==null?Regex.Match(package.Tag,@"^.*?(?=\d+\.\d+)").Value:"";
         var app=new InstalledApp("new-install/"+package.Repository.ToLowerInvariant(),package.Repository.Split('/').Last(),"待检测","");
         var binding=new Binding{AppId=app.Id,Repository=package.Repository,IncludePrerelease=package.Prerelease,TagPrefix=prefix};
-        return PendingInstallationRules.Create(package,app,binding) with{NewInstall=new([])};
+        return PendingInstallationRules.Create(package, app, binding, release) with { NewInstall = new([]) };
     }
     private static string PathKey(string path){try{return string.IsNullOrWhiteSpace(path)?"":Path.GetFullPath(path).ToUpperInvariant();}catch(ArgumentException){return "";}}
     public static InstalledApp[] Candidates(PendingInstallation item,IEnumerable<InstalledApp> after)

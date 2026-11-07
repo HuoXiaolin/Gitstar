@@ -59,8 +59,32 @@ public partial class MainWindow
         OpenDownloadDecisionList();await ContinuePendingInstallation(corrupt);
         var changedFileBlocked=resumed==1&&pendingInstallations.Count==1&&unavailablePendingPackages.Contains(corrupt.Id);
         downloadDecisions!.Close();pendingInstallationSmokeAction=null;
-        var passed=initial&&widthOK&&closedRetains&&loaded&&reopened&&mixedCloseRetains&&installerExitNotCompletion&&installedRemoved&&staleResponseIgnored&&newerRemoved&&noResurrection&&changedFileBlocked;
-        File.WriteAllText(Path.ChangeExtension(path,".pending-installations.json"),JsonSerializer.Serialize(new{Passed=passed,DownloadsReleaseTaskResources=initial,RowActionsFit=widthOK,ClosingRetainsEntries=closedRetains,DurableReload=loaded,TasksEntryReopens=reopened,TemporaryQuestionsDoNotDeleteInstallations=mixedCloseRetains,InstallerExitAloneKeepsEntry=installerExitNotCompletion,VerifiedInstalledRemovesEntry=installedRemoved,NewerReleaseRemovesEntryButPreservesFile=newerRemoved,NoLegacyResurrection=noResurrection,ChangedFileCannotExecute=changedFileBlocked,RealInstallerStarted=false,RealNetworkUsed=false}));
+
+        const string previewVersion = "2.0.0-beta.20261105.1";
+        var stableName = new Asset(10, "Editor_2.0.0_x64-setup.exe", bytes.Length, "", "sha256:" + hash);
+        var previewName = stableName with { Id = 11, Name = $"Editor_{previewVersion}_x64-setup.exe" };
+        var aliasRelease = first.Release with { Id = 44, Assets = [stableName, previewName] };
+        releases = [aliasRelease];
+        var aliasPath = Path.Combine(root, stableName.Name);
+        File.WriteAllBytes(aliasPath, bytes);
+        await RecordPackage(aliasRelease, stableName, aliasPath, root, CancellationToken.None);
+        var app = first.Update!.App with { Version = previewVersion };
+        installed = [app];
+        installedFresh = false;
+        var legacy = PendingInstallationRules.Create(packages.Single(package => package.Path == aliasPath), app, first.Update.Binding);
+        pendingInstallations = [legacy];
+        SavePendingInstallations();
+        LoadPendingInstallations();
+        OpenDownloadDecisionList();
+        var aliasRetargeted = pendingInstallations.Single().TargetVersion == previewVersion && downloadDecisions != null;
+        installedFresh = true;
+        PlanUpdates();
+        LoadPendingInstallations();
+        var installedAliasCleared = pendingInstallations.Count == 0 && downloadDecisions == null && updates.Count == 0
+            && TasksPendingDot.Visibility == Visibility.Collapsed && File.Exists(aliasPath);
+
+        var passed=initial&&widthOK&&closedRetains&&loaded&&reopened&&mixedCloseRetains&&installerExitNotCompletion&&installedRemoved&&staleResponseIgnored&&newerRemoved&&noResurrection&&changedFileBlocked&&aliasRetargeted&&installedAliasCleared;
+        File.WriteAllText(Path.ChangeExtension(path,".pending-installations.json"),JsonSerializer.Serialize(new{Passed=passed,DownloadsReleaseTaskResources=initial,RowActionsFit=widthOK,ClosingRetainsEntries=closedRetains,DurableReload=loaded,TasksEntryReopens=reopened,TemporaryQuestionsDoNotDeleteInstallations=mixedCloseRetains,InstallerExitAloneKeepsEntry=installerExitNotCompletion,VerifiedInstalledRemovesEntry=installedRemoved,NewerReleaseRemovesEntryButPreservesFile=newerRemoved,NoLegacyResurrection=noResurrection,ChangedFileCannotExecute=changedFileBlocked,AliasRetargetedOnReload=aliasRetargeted,InstalledAliasClearsPendingBadgeAndDuplicateUpdate=installedAliasCleared,RealInstallerStarted=false,RealNetworkUsed=false}));
         if(!passed)throw new IOException("Persistent installation regression");
     }
     private async Task PendingSelectionSmoke(string path)

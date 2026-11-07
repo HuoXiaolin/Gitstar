@@ -7,17 +7,20 @@ public partial class MainWindow
 {
     private Func<CancellationToken,Task<List<InstalledApp>>>? newInstallScanSmoke;
     private Func<string,CancellationToken,Task>? newInstallLaunchSmoke;
-    private PendingInstallation QueueRecentInstallation(DownloadedPackage package)
+    private PendingInstallation QueueRecentInstallation(DownloadedPackage package, Release? release = null)
     {
         var existing=pendingInstallations.FirstOrDefault(item=>item.Package.Path.Equals(package.Path,StringComparison.OrdinalIgnoreCase)&&item.Package.Sha256.Equals(package.Sha256,StringComparison.OrdinalIgnoreCase));if(existing!=null)return existing;
         var targets=settings.Bindings.Where(binding=>binding.Repository.Equals(package.Repository,StringComparison.OrdinalIgnoreCase)&&package.Tag.StartsWith(binding.TagPrefix,StringComparison.Ordinal)&&(binding.AssetPattern.Length==0||package.AssetName.Contains(binding.AssetPattern,StringComparison.OrdinalIgnoreCase))).Select(binding=>(Binding:binding,App:InstalledVersion.Find(installed,binding.AppId))).Where(item=>item.App!=null).ToArray();
-        var entry=targets.Length==1?PendingInstallationRules.Create(package,targets[0].App!,targets[0].Binding):NewInstallationRules.Create(package);
+        release ??= FindPackageRelease(package);
+        var entry = targets.Length == 1 ? PendingInstallationRules.Create(package, targets[0].App!, targets[0].Binding, release) : NewInstallationRules.Create(package, release);
         PendingInstallationRules.Upsert(pendingInstallations,entry);SavePendingInstallations();RefreshPendingInstallationRows();UpdatePendingDownloadBadge();return entry;
     }
     private void ReconcileNewInstallations(List<InstalledApp> detected)
     {
         var removed=false;
-        foreach(var item in pendingInstallations.Where(item=>item.NewInstall is {Started:true}).ToArray()){
+        foreach (var pending in pendingInstallations.Where(item => item.NewInstall is { Started: true }).ToArray())
+        {
+            var item = ResolvePendingTarget(pending);
             var binding=NewInstallationRules.Bind(settings,item,detected);if(binding==null)continue;
             var app=InstalledVersion.Find(detected,binding.AppId);if(app==null)continue;
             // Persist the association before removing its durable retry entry.

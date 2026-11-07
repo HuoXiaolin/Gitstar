@@ -16,7 +16,9 @@ public partial class MainWindow
 
     private void LoadPendingInstallations()
     {
-        pendingInstallations=store.Get(PendingInstallationsKey,new List<PendingInstallation>()).Select(item=>item with{TargetVersion=InstallerVersionRules.Target(item.Package,item.Binding)}).ToList();
+        var saved = store.Get(PendingInstallationsKey, new List<PendingInstallation>());
+        pendingInstallations = saved.Select(ResolvePendingTarget).ToList();
+        var targetsChanged = !saved.SequenceEqual(pendingInstallations);
         var importLegacy=!store.Get(PendingInstallationsKey+"/legacy-imported",false);
         // Older downloads have no pending-install flag. Recover ordinary bound packages, not batch archives.
         foreach(var package in packages.Where(package=>importLegacy&&!package.RetainForBatch)){
@@ -24,10 +26,11 @@ public partial class MainWindow
             if(PackagePreference.Select([new(0,package.AssetName,package.Size,"","")],System.Runtime.InteropServices.RuntimeInformation.OSArchitecture)==null)continue;
             foreach(var binding in settings.Bindings.Where(binding=>binding.Repository.Equals(package.Repository,StringComparison.OrdinalIgnoreCase)&&package.Tag.StartsWith(binding.TagPrefix,StringComparison.Ordinal))){
                 var app=InstalledVersion.Find(installed,binding.AppId);if(app==null||PackagePreference.Select([new(0,package.AssetName,package.Size,"","")],System.Runtime.InteropServices.RuntimeInformation.OSArchitecture,portable:app.Portable)==null)continue;
-                PendingInstallationRules.Upsert(pendingInstallations,PendingInstallationRules.Create(package,app,binding));
+                PendingInstallationRules.Upsert(pendingInstallations, PendingInstallationRules.Create(package, app, binding, FindPackageRelease(package)));
             }
         }
-        if(importLegacy){SavePendingInstallations();store.Set(PendingInstallationsKey+"/legacy-imported",true);}
+        if (importLegacy || targetsChanged) SavePendingInstallations();
+        if (importLegacy) store.Set(PendingInstallationsKey+"/legacy-imported", true);
         RefreshPendingInstallationRows();
         UpdatePendingDownloadBadge();
     }
@@ -35,7 +38,7 @@ public partial class MainWindow
     private PendingInstallation AddPendingInstallation(Card card,Release release,string path)
     {
         var package=packages.Single(item=>item.Path.Equals(path,StringComparison.OrdinalIgnoreCase));
-        var pending=PendingInstallationRules.Create(package,card.Update!.App,card.Update.Binding);
+        var pending = PendingInstallationRules.Create(package, card.Update!.App, card.Update.Binding, release);
         PendingInstallationRules.Upsert(pendingInstallations,pending);SavePendingInstallations();
         var saved=pendingInstallations.Last(item=>item.Package.Path.Equals(path,StringComparison.OrdinalIgnoreCase)&&PendingInstallationRules.SameContext(item,pending));
         card.Transfer.Finish("继续安装");card.Transfer.Detail=path;
@@ -44,20 +47,54 @@ public partial class MainWindow
 
     private void ReconcilePendingInstallations(string? checkedRepository=null,IEnumerable<Release>? freshReleases=null,DateTimeOffset? checkStarted=null)
     {
-        if(exit||quitting)return;
-        var fresh=freshReleases?.ToArray();
-        var previous=pendingInstallations.ToArray();var removed=pendingInstallations.RemoveAll(item=>(
-            PendingInstallationRules.Installed(item,settings.Bindings,installed,installedFresh)
-            ||fresh!=null&&(checkStarted==null||item.Added<=checkStarted)&&item.Package.Repository.Equals(checkedRepository,StringComparison.OrdinalIgnoreCase)&&PendingInstallationRules.Superseded(item,fresh)));
-        if(removed>0){foreach(var item in previous.Where(item=>pendingInstallations.All(current=>current.Id!=item.Id))){var state=TransferFor(PendingRelease(item),true);if(!state.Active&&pendingInstallations.All(current=>current.Package.Repository!=item.Package.Repository||current.Package.ReleaseId!=item.Package.ReleaseId))state.Finish("");}SavePendingInstallations();RefreshPendingInstallationRows();}
+        if (exit || quitting) return;
+        var fresh = freshReleases?.ToArray();
+        var removed = new List<PendingInstallation>();
+        var targetsChanged = false;
+        for (var index = pendingInstallations.Count - 1; index >= 0; index--)
+        {
+            var previous = pendingInstallations[index];
+            var item = ResolvePendingTarget(previous);
+            var superseded = fresh != null && (checkStarted == null || item.Added <= checkStarted)
+                && item.Package.Repository.Equals(checkedRepository, StringComparison.OrdinalIgnoreCase) && PendingInstallationRules.Superseded(item, fresh);
+            if (PendingInstallationRules.Installed(item, settings.Bindings, installed, installedFresh) || superseded)
+            {
+                pendingInstallations.RemoveAt(index);
+                removed.Add(item);
+            }
+            else if (item.TargetVersion != previous.TargetVersion)
+            {
+                pendingInstallations[index] = item;
+                targetsChanged = true;
+            }
+        }
+        foreach (var item in removed)
+        {
+            pendingInstallationMessages.Remove(item.Id);
+            unavailablePendingPackages.Remove(item.Id);
+            var state = TransferFor(PendingRelease(item), true);
+            if (!state.Active && pendingInstallations.All(current => current.Package.Repository != item.Package.Repository || current.Package.ReleaseId != item.Package.ReleaseId))
+                state.Finish("");
+        }
+        if (removed.Count > 0 || targetsChanged) SavePendingInstallations();
+        if (removed.Count > 0) RefreshPendingInstallationRows();
         foreach(var entry in pendingInstallations){var transfer=TransferFor(PendingRelease(entry),true);if(!transfer.Active&&!transfer.NeedsDetection)transfer.Finish("继续安装");}
         UpdatePendingDownloadBadge();
+    }
+
+    private Release? FindPackageRelease(DownloadedPackage package) => releases.FirstOrDefault(release => release.Id == package.ReleaseId
+        && release.Tag == package.Tag && release.Repository.Equals(package.Repository, StringComparison.OrdinalIgnoreCase));
+
+    private PendingInstallation ResolvePendingTarget(PendingInstallation item)
+    {
+        var version = InstallerVersionRules.Target(item.Package, item.Binding, FindPackageRelease(item.Package), item.TargetVersion);
+        return version == item.TargetVersion ? item : item with { TargetVersion = version };
     }
 
     private Release PendingRelease(PendingInstallation item)
     {
         var package=item.Package;
-        return releases.FirstOrDefault(release=>release.Repository.Equals(package.Repository,StringComparison.OrdinalIgnoreCase)&&release.Id==package.ReleaseId)
+        return FindPackageRelease(package)
             ??new(package.ReleaseId,package.Repository,package.Tag,package.Tag,"",package.Prerelease,package.Published,"https://github.com/"+package.Repository+"/releases",[new(0,package.AssetName,package.Size,"","sha256:"+package.Sha256)]);
     }
     private Card? PendingCard(PendingInstallation item)
@@ -71,6 +108,7 @@ public partial class MainWindow
     private async Task ContinuePendingInstallation(PendingInstallation item)
     {
         if(exit||quitting||pendingInstallationBusy.Contains(item.Id))return;
+        item = ResolvePendingTarget(item);
         if(item.NewInstall!=null){await ContinueNewInstallation(item);return;}
         var card=PendingCard(item);
         if(card==null){model.Status="原软件关联或安装位置已变化，请在软件管理中核对匹配。";Reminders_Click(this,new RoutedEventArgs());return;}
@@ -97,9 +135,10 @@ public partial class MainWindow
                     state.Finish("替换后核对版本",true);await PortableUpdateDialog(card,package,extracted,ct:ct);
                 }else{
                     ct.ThrowIfCancellationRequested();var process=Process.Start(new ProcessStartInfo(package){UseShellExecute=true})??throw new IOException("无法跟踪安装器，请安装后重新核对版本。");
-                    state.Stage("安装器运行中");await ObserveInstaller(process,card,settings.Account,ct,package);
+                    state.Stage("安装器运行中");await ObserveInstaller(process, card, settings.Account, ct, item);
                 }
-                pendingInstallationMessages[item.Id]="尚未确认达到目标版本，可继续处理或重新检测。";
+                if (pendingInstallations.Any(entry => entry.Id == item.Id))
+                    pendingInstallationMessages[item.Id] = "尚未确认达到目标版本，可继续处理或重新检测。";
             },resources:["file:"+item.Package.Path,"app:"+card.Update!.App.Id],transfer:card.Transfer);
         }finally{
             pendingInstallationBusy.Remove(item.Id);ReconcilePendingInstallations();RefreshPendingInstallationRows();
