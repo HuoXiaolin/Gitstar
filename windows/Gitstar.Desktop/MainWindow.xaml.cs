@@ -375,60 +375,6 @@ public partial class MainWindow : Window
         if(localPage){AutoBindingDialog();return;}
         AddProjectDialog();
     }
-    private bool discoveringSoftware;
-    private async void AutoBindingDialog(string? previewPath=null)
-    {
-        if(quitting)return;
-        if(previewPath==null){
-            if(discoveringSoftware)return;discoveringSoftware=true;
-            try{model.Status="正在检测本机软件与用户程序位置…";await ScanInstalledAsync();if(quitting)return;}
-            catch(Exception ex){model.Status="软件检测未完成："+ex.Message;DialogMessage.Show(this,model.Status,"Gitstar");return;}
-            finally{discoveringSoftware=false;}
-        }
-        var knownNames=repositories.Select(r=>r.FullName).Order(StringComparer.OrdinalIgnoreCase).ToArray();
-        var suggest=AppMatcher.Prepare(repositories);
-        var rows=installed.Where(a=>!settings.Bindings.Any(b=>b.AppId==a.Id)).Select(a=>{
-            var matches=suggest(a);var first=matches.FirstOrDefault();
-            return new MatchRow {App=a,Repository=first?.Repository??"",Choices=matches.Count>0?matches.Select(m=>m.Repository).ToArray():knownNames,Selected=matches.Count==1 && first!.Reliable,Reason=first?.Reason??"未匹配；可搜索或粘贴仓库"};
-        }).OrderByDescending(r=>r.Selected).ThenBy(r=>r.Repository.Length==0).ThenBy(r=>r.Name).ToList();
-        var f=new Form(this,"自动匹配 / 批量关联",1030,760);
-        f.Label($"已检测 {installed.Count} 个软件，已有 {settings.Bindings.Count} 个关联；本次 {rows.Count} 个待处理，{rows.Count(r=>r.Selected)} 个可靠候选已勾选。");
-        f.Label("优先使用软件登记的 GitHub 地址，其次匹配已同步仓库名称。同名或相近结果请先确认；可以直接修改仓库，一次关联多个软件。已有的忽略、暂停和测试版设置不会改动。");
-        var table=new DataGrid {ItemsSource=rows,AutoGenerateColumns=false,CanUserAddRows=false,CanUserDeleteRows=false,MinHeight=320,MaxHeight=420,Margin=new Thickness(0,14,0,12),HeadersVisibility=DataGridHeadersVisibility.Column,RowHeaderWidth=0,SelectionMode=DataGridSelectionMode.Single,EnableRowVirtualization=true,EnableColumnVirtualization=true};
-        table.Columns.Add(new DataGridCheckBoxColumn {Header="关联",ElementStyle=(Style)f.FindResource(typeof(CheckBox)),EditingElementStyle=(Style)f.FindResource(typeof(CheckBox)),Binding=new System.Windows.Data.Binding(nameof(MatchRow.Selected)){Mode=System.Windows.Data.BindingMode.TwoWay,UpdateSourceTrigger=System.Windows.Data.UpdateSourceTrigger.PropertyChanged},Width=55});
-        table.Columns.Add(new DataGridTextColumn {Header="本机软件",Binding=new System.Windows.Data.Binding(nameof(MatchRow.Name)),IsReadOnly=true,Width=new DataGridLength(1,DataGridLengthUnitType.Star)});
-        table.Columns.Add(new DataGridTextColumn {Header="当前版本",Binding=new System.Windows.Data.Binding(nameof(MatchRow.Version)),IsReadOnly=true,Width=105});
-        var repoColumn=new DataGridTemplateColumn {Header="GitHub 仓库（可编辑）",Width=new DataGridLength(1.4,DataGridLengthUnitType.Star)};
-        var combo=new FrameworkElementFactory(typeof(ComboBox));combo.SetValue(ComboBox.IsEditableProperty,true);combo.SetValue(ComboBox.IsTextSearchEnabledProperty,true);combo.SetBinding(ComboBox.ItemsSourceProperty,new System.Windows.Data.Binding(nameof(MatchRow.Choices)));combo.SetBinding(ComboBox.TextProperty,new System.Windows.Data.Binding(nameof(MatchRow.Repository)){Mode=System.Windows.Data.BindingMode.TwoWay,UpdateSourceTrigger=System.Windows.Data.UpdateSourceTrigger.PropertyChanged});repoColumn.CellTemplate=new DataTemplate {VisualTree=combo};table.Columns.Add(repoColumn);
-        table.Columns.Add(new DataGridTextColumn {Header="匹配依据",Binding=new System.Windows.Data.Binding(nameof(MatchRow.Reason)),IsReadOnly=true,Width=180});f.Fields.Children.Add(table);
-        f.Action("取消勾选",()=>{foreach(var row in rows)row.Selected=false;return Task.CompletedTask;});
-        f.Action("手动管理 / 便携软件",()=>{f.Close();BindingDialog();return Task.CompletedTask;});
-        f.Action("搜索所选行仓库",()=>{if(table.SelectedItem is not MatchRow row)throw new IOException("请先点击需要关联的软件行。");RepositorySearchDialog(f,row.Repository,value=>{row.Repository=value;table.Items.Refresh();},row.App.Name);return Task.CompletedTask;});
-        f.Action("关联所选",async()=>{
-            table.CommitEdit();table.CommitEdit(DataGridEditingUnit.Row,true);var selected=rows.Where(r=>r.Selected).ToList();if(selected.Count==0)throw new IOException("请勾选需要关联的软件。");
-            foreach(var row in selected){row.Repository=Rules.RepositoryName(row.Repository);GitHubClient.Validate(row.Repository);}
-            f.Close();
-            await Execute("关联",$"批量关联 {selected.Count} 个软件",async ct=>{
-                var validated=new Dictionary<string,Repository>(StringComparer.OrdinalIgnoreCase);var failures=new List<string>();var added=0;
-                foreach(var row in selected){ct.ThrowIfCancellationRequested();model.Status="正在关联："+row.Name;
-                    try{
-                        if(!validated.TryGetValue(row.Repository,out var info)){info=repositories.FirstOrDefault(r=>r.FullName.Equals(row.Repository,StringComparison.OrdinalIgnoreCase))??await api.Repo(row.Repository,ct);validated[row.Repository]=info;if(!repositories.Any(r=>r.FullName==info.FullName))repositories.Add(info);}
-                        if(!settings.Bindings.Any(b=>InstalledVersion.Find([row.App],b.AppId)!=null)){var binding=new Binding{AppId=row.App.Id,Repository=info.FullName};InstalledIdentity.Remember(binding,row.App);settings.Bindings.Add(binding);Save();added++;}
-                        if(!releases.Any(r=>r.Repository.Equals(info.FullName,StringComparison.OrdinalIgnoreCase))){releases.AddRange(await api.Releases(info.FullName,ct,settings.Bindings));SaveCache();}
-                    }catch(Exception ex)when(ex is not OperationCanceledException){failures.Add(row.Name+"："+ex.Message);}
-                }
-                SaveCache();RebuildGroups();PlanUpdates();Display();model.Status=$"批量关联完成：新增 {added} 个，{updates.Count} 个软件可更新。"+(failures.Count>0?"待处理："+string.Join("；",failures.Take(3)):"");
-            });
-        },true);f.Action("关闭",()=>{f.Close();return Task.CompletedTask;});
-        if(previewPath!=null)f.ContentRendered+=(_,_)=>f.Dispatcher.BeginInvoke(()=>{f.UpdateLayout();
-            static T? Find<T>(DependencyObject parent) where T:DependencyObject {if(parent is T match)return match;for(var i=0;i<VisualTreeHelper.GetChildrenCount(parent);i++){var found=Find<T>(VisualTreeHelper.GetChild(parent,i));if(found!=null)return found;}return null;}
-            var comboView=Find<ComboBox>(repoColumn.GetCellContent(table.Items[0]));comboView?.ApplyTemplate();var editor=comboView?.Template.FindName("PART_EditableTextBox",comboView) as TextBox;
-            var original=rows[0].Repository;if(editor!=null){editor.Text="fixture/edited";editor.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();}var edited=rows[0].Repository=="fixture/edited";if(editor!=null){editor.Text=original;editor.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();}
-            var check=Find<CheckBox>(table.Columns[0].GetCellContent(table.Items[0]));var originalCheck=rows[0].Selected;if(check!=null)check.IsChecked=!originalCheck;var checkEdited=rows[0].Selected!=originalCheck;if(check!=null)check.IsChecked=originalCheck;
-            File.WriteAllText(Path.ChangeExtension(previewPath,".interaction.json"),JsonSerializer.Serialize(new{EditableRepositoryRoundtrip=edited,CheckBoxRoundtrip=checkEdited},new JsonSerializerOptions{WriteIndented=true}));
-            var root=(FrameworkElement)f.Content;var bitmap=new System.Windows.Media.Imaging.RenderTargetBitmap((int)root.ActualWidth,(int)root.ActualHeight,96,96,PixelFormats.Pbgra32);bitmap.Render(root);var encoder=new System.Windows.Media.Imaging.PngBitmapEncoder();encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));using(var stream=File.Create(previewPath))encoder.Save(stream);f.Close();},DispatcherPriority.ApplicationIdle);
-        f.ShowDialog();
-    }
     private void Settings_Click(object sender,RoutedEventArgs e)=>SettingsDialog();
     private void SettingsDialog(string? previewPath=null)
     {
@@ -658,7 +604,7 @@ public partial class MainWindow : Window
             using var first=taskCoordinator.Start(a.Id,["file:a"]);using var second=taskCoordinator.Start(b.Id,["repo:b"]);var progress=new TransferState();progress.Stage("下载中 42%",false);progress.Percentage=42;progress.Detail="21.0 / 50.0 MB";taskTransfers[a.Id]=progress;TasksDialog(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;
         }        if(settingsPreview){if(Environment.GetCommandLineArgs().Contains("--settings-busy"))batchPublishing=true;SettingsDialog(path);exit=true;tray.Icon?.Dispose();tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(groupPreview || addPreview){if(groupPreview)GroupEditor(settings.LocalGroups.FirstOrDefault(),path);else AddProjectDialog(path);exit=true;tray.Icon?.Dispose();tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
-        if(matching){settings.Bindings.Clear();installed=[new("fixture1","示例编辑器","2.3.0","",RepositoryHint:"example/editor"),new("fixture2","Sync","1.8.0",""),new("fixture3","未识别的软件","1.0","")];repositories=[new("example/editor","",false),new("example/sync","",false)];AutoBindingDialog(path);exit=true;tray.Icon?.Dispose();tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
+        if(matching){settings.Bindings.Clear();installed=[new("fixture1","示例编辑器","2.3.0","",RepositoryHint:"example/editor"),new("fixture2","Sync","1.8.0",""),new("fixture3","未识别的软件","1.0",""),new("fixture4","文析助手","2.0.0","")];repositories=[new("example/editor","",false),new("example/sync","",false),new("z7786/wenxi","文析助手，跨平台网盘管理软件",false),new("example/wenxi-notes","笔记示例",false)];AutoBindingDialog(path);exit=true;tray.Icon?.Dispose();tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--background-memory"))await BackgroundMemorySmoke(path);
         if(Environment.GetCommandLineArgs().Contains("--status-bar")){StatusSmoke(path);if(Environment.GetCommandLineArgs().Contains("--status-details")){StatusButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}}
         if(!Environment.GetCommandLineArgs().Contains("--startup-completion")&&!Environment.GetCommandLineArgs().Contains("--status-bar"))model.Status=cards?"离线样例渲染 · 示例项目仅用于界面检查，不是已同步的 GitHub 数据":"离线界面渲染检查 · 未连接 GitHub";UpdateLayout();await Dispatcher.InvokeAsync(()=>{},DispatcherPriority.ApplicationIdle);if(Environment.GetCommandLineArgs().Contains("--layout-check"))await VerifyMainLayoutResize(path);var bitmap=new System.Windows.Media.Imaging.RenderTargetBitmap((int)ActualWidth,(int)ActualHeight,96,96,PixelFormats.Pbgra32);bitmap.Render(this);var root=(FrameworkElement)Content;var client=new System.Windows.Media.Imaging.CroppedBitmap(bitmap,new Int32Rect(0,0,Math.Min(bitmap.PixelWidth,(int)(root.ActualWidth+root.Margin.Left+root.Margin.Right)),Math.Min(bitmap.PixelHeight,(int)(root.ActualHeight+root.Margin.Top+root.Margin.Bottom))));var encoder=new System.Windows.Media.Imaging.PngBitmapEncoder();encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(client));using(var stream=File.Create(path))encoder.Save(stream);exit=true;tray.Icon?.Dispose();tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();

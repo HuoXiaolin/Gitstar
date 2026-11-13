@@ -96,11 +96,17 @@ public class MatchRow : Observable
     public InstalledApp App {get;init;}=null!;
     public string Name=>App.Name;
     public string Version=>App.Version;
-    public IEnumerable<string> Choices {get;init;}=[];
+    public IReadOnlyList<string> Choices {get;init;}=[];
     private bool selected;
     private string repository="",reason="";
     public bool Selected {get=>selected;set=>Set(ref selected,value);}
     public string Repository {get=>repository;set=>Set(ref repository,value);}
     public string Reason {get=>reason;set=>Set(ref reason,value);}
+    public void ChooseRepository(string value,string basis)
+    {
+        Repository=value;
+        Reason=basis;
+        Selected=true;
+    }
 }
 

@@ -7,7 +7,8 @@ public static class AppMatcher
     {
         if(!Uri.TryCreate(value,UriKind.Absolute,out var uri)||uri.Host!="github.com"||uri.Scheme is not ("http" or "https"))return "";
         var parts=uri.AbsolutePath.Trim('/').Split('/');if(parts.Length<2)return "";
-        var repo=parts[0]+"/"+parts[1].Replace(".git","",StringComparison.OrdinalIgnoreCase);
+        var name = parts[1].EndsWith(".git", StringComparison.OrdinalIgnoreCase) ? parts[1][..^4] : parts[1];
+        var repo = parts[0] + "/" + name;
         if(new[]{"settings","features","topics","orgs","users","login","marketplace","search","collections","sponsors"}.Contains(parts[0],StringComparer.OrdinalIgnoreCase))return "";
         return Rules.ValidRepository(repo)?repo:"";
     }
