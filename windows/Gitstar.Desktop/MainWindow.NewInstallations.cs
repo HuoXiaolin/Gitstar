@@ -33,9 +33,10 @@ public partial class MainWindow
     }
     private async Task<List<InstalledApp>> ScanNewInstallationInventory(string account,CancellationToken ct)
     {
+        var generation=++inventoryGeneration;
         var portable=settings.PortableApps.ToArray();var bindings=settings.Bindings.Select(binding=>binding.Snapshot()).ToArray();var known=installed.ToArray();
         var detected=smokeMode&&newInstallScanSmoke!=null?await newInstallScanSmoke(ct):await Task.Run(()=>WindowsServices.Scan(portable,bindings,known,ct),ct);
-        ct.ThrowIfCancellationRequested();if(account!=PackagesKey||exit||quitting)throw new OperationCanceledException("账号或运行状态已改变。");SetInstalled(detected,true);PlanUpdates();Display();return detected;
+        ct.ThrowIfCancellationRequested();if(account!=PackagesKey||exit||quitting||generation!=inventoryGeneration)throw new OperationCanceledException("账号、运行状态或安装复检批次已改变。");SetInstalled(detected,true);PlanUpdates();Display();return detected;
     }
     private async Task ContinueNewInstallation(PendingInstallation item,bool reopenInstaller=false)
     {

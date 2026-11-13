@@ -1,4 +1,4 @@
-﻿using Gitstar.Core;
+using Gitstar.Core;
 using Gitstar.Desktop;
 using System.Net;
 using System.Net.Http;
@@ -204,8 +204,8 @@ var betaLine=new Binding{Repository="owner/app",TagPrefix="desktop-",IncludePrer
 Check(new[]{false,true}.All(beta=>history.First(r=>r.Prerelease==beta).Id==compact.Where(r=>r.Prerelease==beta).OrderByDescending(r=>r.Published).First().Id),"compaction preserves both feed channels and full release content");
 var releasePageCalls=0;using(var pagedClient=new GitHubClient(new(),new FakeHttp((req,ct)=>{
  if(req.RequestUri!.AbsolutePath.EndsWith("/latest"))return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
- var page=Interlocked.Increment(ref releasePageCalls);if(!req.RequestUri!.Query.Contains("per_page=30"))throw new Exception("Unbounded release page");
- var payload=Enumerable.Range(0,page==1?30:1).Select(i=>new{id=(page-1)*30+i+1,tag_name=page==2?"desktop-v1":"mobile-v"+i,name="fixture",body="完整日志",draft=false,prerelease=false,published_at=now.AddMinutes(-((page-1)*30+i)),html_url="",assets=Array.Empty<object>()});
+ var page=Interlocked.Increment(ref releasePageCalls);if(!req.RequestUri!.Query.Contains("per_page=100"))throw new Exception("Unbounded release page");
+ var payload=Enumerable.Range(0,page==1?100:1).Select(i=>new{id=(page-1)*30+i+1,tag_name=page==2?"desktop-v1":"mobile-v"+i,name="fixture",body="完整日志",draft=false,prerelease=false,published_at=now.AddMinutes(-((page-1)*30+i)),html_url="",assets=Array.Empty<object>()});
  return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent(System.Text.Json.JsonSerializer.Serialize(payload))});
  }))){var candidates=await pagedClient.Releases("owner/app",CancellationToken.None,[line]);Check(releasePageCalls==2 && candidates.Count==2 && candidates.Any(r=>r.Tag=="desktop-v1" && r.Body=="完整日志"),"streamed paged scan retains older subscribed line without all historical records");}
 var cachedPages=new Dictionary<string,GitHubClient.ReleasePage>();var cachePhase=0;var cacheRequests=0;var cacheBodies=0;var conditionalRequests=0;
@@ -215,7 +215,7 @@ HttpMessageHandler CachedTransport()=>new FakeHttp((req,ct)=>{
  if(req.Headers.IfNoneMatch.Count>0)conditionalRequests++;
  if(cachePhase==1){if(req.Headers.IfNoneMatch.Single().Tag!=etag)throw new Exception("Missing validator");return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotModified));}
  if(cachePhase==3 && req.Headers.IfNoneMatch.Count>0)throw new Exception("Binding change reused incompatible candidates");
- cacheBodies++;var items=Enumerable.Range(0,cachePhase==2&&page==2?0:page==1?30:1).Select(i=>new{id=(page-1)*30+i+1,tag_name=page==2?"desktop-v1":"mobile-v"+i,name="fixture",body="complete-body",draft=false,prerelease=false,published_at=now.AddMinutes(-((page-1)*30+i)),html_url="",assets=Array.Empty<object>()});
+ cacheBodies++;var items=Enumerable.Range(0,cachePhase==2&&page==2?0:page==1?100:1).Select(i=>new{id=(page-1)*30+i+1,tag_name=page==2?"desktop-v1":"mobile-v"+i,name="fixture",body="complete-body",draft=false,prerelease=false,published_at=now.AddMinutes(-((page-1)*30+i)),html_url="",assets=Array.Empty<object>()});
  var response=new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent(System.Text.Json.JsonSerializer.Serialize(items))};response.Headers.ETag=new(etag);return Task.FromResult(response);
  });
 using(var cachedClient=new GitHubClient(new(),CachedTransport())){cachedClient.ReadReleasePage=key=>cachedPages.GetValueOrDefault(key);cachedClient.SaveReleasePage=(key,page)=>cachedPages[key]=page;var original=await cachedClient.Releases("owner/app",CancellationToken.None,[line]);cachePhase=1;var warm=await cachedClient.Releases("owner/app",CancellationToken.None,[line]);Check(cacheRequests==4 && cacheBodies==2 && conditionalRequests==2 && original.Select(r=>r.Id).SequenceEqual(warm.Select(r=>r.Id)),"unchanged pages verified without downloading or reparsing bodies");}
@@ -260,6 +260,7 @@ SoftwareInventoryChecks.Run(Check,root);
 UsageStatisticsChecks.Run(Check,root);
 await RepositorySearchChecks.Run(Check);
 await RankingChecks.Run(Check);
+await ScanningChecks.Run(Check,root);
 await ReleaseStateChecks.Run(Check,root);
 await SelfUpdateChecks.Run(Check);
 await UpdateSortingChecks.Run(Check);

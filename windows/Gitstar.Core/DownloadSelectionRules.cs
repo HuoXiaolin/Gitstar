@@ -28,6 +28,28 @@ public static class DownloadSelectionRules
         return previous==null?null:new(repository,purpose,previous.Tag,[previous.AssetName]);
     }
 
+    public static Asset? SelectInstaller(Release release, Binding binding, DownloadSelectionPreference? previous, Architecture host)
+    {
+        var host64Bit = host is Architecture.X64 or Architecture.Arm64;
+        var candidates = release.Assets.Where(asset => Rules.IsWindowsInstallCandidate(asset, host64Bit)
+            && PackagePreference.CanRecommend(asset, host)
+            && (binding.AssetPattern.Length == 0 || asset.Name.Contains(binding.AssetPattern, StringComparison.OrdinalIgnoreCase))).ToList();
+
+        if (previous is { Purpose: DownloadPurpose.Install }
+            && Match(release with { Assets = candidates }, previous, host).FirstOrDefault() is { } remembered)
+        {
+            // Prefer the previously selected installer format and variant. A stable build of that variant still supersedes a preview alias.
+            var format = Format(remembered.Name);
+            var family = Family(remembered.Name);
+            var roles = Roles(remembered.Name);
+            var sameVariant = candidates.Where(asset => Format(asset.Name) == format && Family(asset.Name) == family && Roles(asset.Name) == roles);
+            var recommended = InstallerVersionRules.Recommended(release, sameVariant, tagPrefix: binding.TagPrefix, host64Bit: host64Bit);
+            return recommended.Contains(remembered) ? remembered : PackagePreference.Select(recommended, host);
+        }
+
+        return PackagePreference.Select(InstallerVersionRules.Recommended(release, candidates, tagPrefix: binding.TagPrefix, host64Bit: host64Bit), host);
+    }
+
     public static List<Asset> Match(Release release,DownloadSelectionPreference? previous,Architecture host,string pattern="")
     {
         if(previous==null||!previous.Repository.Equals(release.Repository,StringComparison.OrdinalIgnoreCase))return [];
@@ -35,7 +57,7 @@ public static class DownloadSelectionRules
         if(previous.Purpose!=DownloadPurpose.Save)
         {
             var portable=previous.Purpose==DownloadPurpose.PortableUpdate;
-            assets=assets.Where(asset=>PackagePreference.Select([asset],host,portable:portable)!=null).ToList();
+            assets=assets.Where(asset=>PackagePreference.CanRecommend(asset,host,portable)).ToList();
             var matching=assets.Where(asset=>pattern.Length>0&&asset.Name.Contains(pattern,StringComparison.OrdinalIgnoreCase)).ToList();
             if(matching.Count>0)assets=matching;
         }
@@ -64,7 +86,7 @@ public static class DownloadSelectionRules
         return new[]{".tar.gz",".tar.xz",".tar.bz2",".tar.zst"}.FirstOrDefault(lower.EndsWith)??Path.GetExtension(lower);
     }
 
-    private static string Roles(string name) => string.Join('/',Regex.Matches(name.ToLowerInvariant(),@"(?:^|[._\- ])(cli|gui|setup|installer|portable|standalone|noinstall|online|offline|cpu|cuda|vulkan|avx2?|source|sources|src|symbols|debug)(?=[._\- ]|$)").Select(match=>match.Groups[1].Value).Distinct().Order());
+    private static string Roles(string name) => string.Join('/',Regex.Matches(name.ToLowerInvariant(),@"(?:^|[._\- ])(cli|gui|setup|installer|portable|standalone|noinstall|online|offline|win7|windows7|server2008r2?|server2012r2?|cpu|cuda|vulkan|avx2?|source|sources|src|symbols|debug)(?=[._\- ]|$)").Select(match=>match.Groups[1].Value).Distinct().Order());
 
     private static string Family(string name)
     {

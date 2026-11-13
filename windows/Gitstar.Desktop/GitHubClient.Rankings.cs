@@ -21,7 +21,8 @@ public sealed partial class GitHubClient
         var floorKey=kind+"/"+period;var floor=kind==RankingKind.Search?0:rankingFloors.GetValueOrDefault(floorKey,kind==RankingKind.Popular?100000L:1000L);JsonElement data;
         // Narrow high-star candidates first to avoid broad-query search timeouts. Expand
         // the same page when the range is too small; never skip a rank at a boundary.
-        while(true){var filtered=q+(floor>0?" stars:>="+floor:"");data=await Request("search/repositories?q="+Uri.EscapeDataString(filtered)+sort+$"&per_page=25&page={page}",ct:ct);if(floor==0||data.GetProperty("total_count").GetInt32()>=page*25)break;floor/=2;}
+        var expansions=0;
+        while(true){var filtered=q+(floor>0?" stars:>="+floor:"");data=await Request("search/repositories?q="+Uri.EscapeDataString(filtered)+sort+$"&per_page=25&page={page}",ct:ct);if(floor==0||data.GetProperty("total_count").GetInt32()>=page*25)break;floor=++expansions>=2?0:floor/2;}
         if(kind!=RankingKind.Search)rankingFloors[floorKey]=floor;
         var entriesApi=new List<RankingEntry>();foreach(var item in data.GetProperty("items").EnumerateArray()){
             if(!Rules.ValidRepository(S(item,"full_name"))||item.GetProperty("private").GetBoolean())continue;var repo=ParseRepository(item,false);if(kind!=RankingKind.Search&&(repo.Metadata.Stars is not {} stars||stars<floor))throw new IOException("GitHub 返回的项目不满足 Stars 筛选，已停止替换榜单结果。");if(entriesApi.Any(entry=>entry.Repository.FullName.Equals(repo.FullName,StringComparison.OrdinalIgnoreCase)))continue;

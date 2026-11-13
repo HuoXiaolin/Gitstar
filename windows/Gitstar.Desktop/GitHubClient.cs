@@ -1,16 +1,20 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 namespace Gitstar.Desktop;
 
 public sealed partial class GitHubClient : IDisposable
 {
-    public sealed record ReleasePage(string ETag,string Signature,int Count,List<Release> Candidates);
+    public sealed record ReleasePage(string ETag,string Signature,int Count,List<Release> Candidates) {public int? LastPage {get;init;}}
     public Func<string,ReleasePage?>? ReadReleasePage {get;set;}
     public Action<string,ReleasePage>? SaveReleasePage {get;set;}
     private readonly HttpClient http;
     private readonly HttpClient uploadHttp;
     private readonly string clientId;
+    internal const int ReadConcurrency=32,ScanReadConcurrency=24;
+    private readonly SemaphoreSlim readSlots=new(ReadConcurrency);
+    // Bulk checks cannot occupy the slots reserved for interactive repository and version reads.
+    private readonly SemaphoreSlim scanReadSlots=new(ScanReadConcurrency);
     private string token="";
     private string[]? oauthScopes;
     public const string OAuthScopes="repo user workflow delete_repo";
@@ -25,7 +29,17 @@ public sealed partial class GitHubClient : IDisposable
         http.DefaultRequestHeaders.UserAgent.ParseAdd("Gitstar/"+AppInfo.Version);
         uploadHttp.DefaultRequestHeaders.UserAgent.ParseAdd("Gitstar/"+AppInfo.Version);
     }
-    private async Task<JsonElement> Request(string url, HttpMethod? method=null, object? body=null, CancellationToken ct=default,Action<JsonElement>? consume=null,string? etag=null,Action<string,bool>? cacheResult=null,bool fresh=false,string? modifiedSince=null,Action<HttpResponseMessage>? headers=null)
+    private async Task<JsonElement> Request(string url, HttpMethod? method=null, object? body=null, CancellationToken ct=default,Action<JsonElement>? consume=null,string? etag=null,Action<string,bool>? cacheResult=null,bool fresh=false,string? modifiedSince=null,Action<HttpResponseMessage>? headers=null,bool background=false)
+    {
+        var read=(method??HttpMethod.Get)==HttpMethod.Get;
+        var scan=read&&background;if(scan)await scanReadSlots.WaitAsync(ct);
+        try{
+            if(read)await readSlots.WaitAsync(ct);
+            try{return await RequestCore(url,method,body,ct,consume,etag,cacheResult,fresh,modifiedSince,headers);}
+            finally{if(read)readSlots.Release();}
+        }finally{if(scan)scanReadSlots.Release();}
+    }
+    private async Task<JsonElement> RequestCore(string url,HttpMethod? method,object? body,CancellationToken ct,Action<JsonElement>? consume,string? etag,Action<string,bool>? cacheResult,bool fresh,string? modifiedSince,Action<HttpResponseMessage>? headers)
     {
         await EnsureFreshToken(ct);
         string requestToken;long requestCredentialRevision;lock(credentialSync){requestToken=token;requestCredentialRevision=credentialRevision;}
@@ -63,38 +77,18 @@ public sealed partial class GitHubClient : IDisposable
     }
     private static string S(JsonElement e,string key) => e.TryGetProperty(key,out var v) && v.ValueKind==JsonValueKind.String ? v.GetString()! : "";
     public async Task<string> Account(CancellationToken ct) => S(await Request("user",ct:ct),"login");
-    public async Task<List<Repository>> Stars(CancellationToken ct)
+    public async Task<List<Repository>> Stars(CancellationToken ct,Action<IReadOnlyList<Repository>>? received=null,bool background=false)
     {
         List<Repository> list=[];
-        for (var page=1;;page++) { var data=await Request($"user/starred?per_page=100&page={page}",ct:ct); var items=data.EnumerateArray().ToArray();
-            list.AddRange(items.Select(e=>ParseRepository(e,true))); if(items.Length<100) return list;
+        for (var page=1;;page++) { var data=await Request($"user/starred?per_page=100&page={page}",ct:ct,background:background); var items=data.EnumerateArray().ToArray();
+            var pageItems=items.Select(e=>ParseRepository(e,true)).ToArray();list.AddRange(pageItems);received?.Invoke(pageItems);if(items.Length<100) return list;
         }
     }
-    public async Task<Repository> Repo(string repo,CancellationToken ct=default)
+    public async Task<Repository> Repo(string repo,CancellationToken ct=default,bool background=false)
     {
-        Validate(repo); var e=await Request("repos/"+repo,ct:ct); return ParseRepository(e,false);
+        Validate(repo); var e=await Request("repos/"+repo,ct:ct,background:background); return ParseRepository(e,false);
     }
     private static Repository ParseRepository(JsonElement e,bool starred)=>new(S(e,"full_name"),S(e,"description"),e.GetProperty("private").GetBoolean(),starred,S(e,"node_id")) {Updated=DateTimeOffset.TryParse(S(e,"updated_at"),out var updated)?updated:null,Metadata=ParseMetadata(e)};
-    public async Task<List<Release>> Releases(string repo,CancellationToken ct,IEnumerable<Binding>? bindings=null)
-    {
-        Validate(repo);var subscriptions=bindings?.ToArray()??[];var selected=new ReleaseCandidates(repo,subscriptions);
-        var signature="version-selection-v2\n"+string.Join("\n",subscriptions.Where(b=>b.Repository.Equals(repo,StringComparison.OrdinalIgnoreCase)).Select(b=>b.TagPrefix).Append("").Distinct().Order(StringComparer.Ordinal));
-        var latest=await LatestStableRelease(repo,signature,ct);if(latest!=null)selected.Add(latest);
-        // Each page is verified remotely, including historical deletion/editing, without retaining raw JSON.
-        for(var page=1;;page++) {
-            var key=$"{repo.ToLowerInvariant()}/{page}";var cached=ReadReleasePage?.Invoke(key);if(cached?.Signature!=signature)cached=null;
-            var count=0;var unchanged=false;var nextTag="";var pageCandidates=new ReleaseCandidates(repo,subscriptions);
-            await Request($"repos/{repo}/releases?per_page=30&page={page}",ct:ct,etag:cached?.ETag,cacheResult:(tag,same)=>{nextTag=tag;unchanged=same;},consume:data=>{
-                count=data.GetArrayLength();foreach(var e in data.EnumerateArray())if(!e.GetProperty("draft").GetBoolean()){
-                    var tag=S(e,"tag_name");var beta=e.GetProperty("prerelease").GetBoolean();var published=DateTimeOffset.TryParse(S(e,"published_at"),out var date)?date:DateTimeOffset.MinValue;
-                    if(pageCandidates.Needs(tag,beta,published))pageCandidates.Add(ParseRelease(repo,e));
-                }
-            });
-            if(unchanged){count=cached!.Count;foreach(var item in cached.Candidates)selected.Add(item);}
-            else{var values=pageCandidates.Values;foreach(var item in values)selected.Add(item);SaveReleasePage?.Invoke(key,new(nextTag,signature,count,values));}
-            if(count<30)return selected.Values;
-        }
-    }
     private static Release ParseRelease(string repo,JsonElement e,bool includeBody=true) => new(e.GetProperty("id").GetInt64(),repo,S(e,"tag_name"),S(e,"name"),includeBody?S(e,"body"):"",e.GetProperty("prerelease").GetBoolean(),DateTimeOffset.TryParse(S(e,"published_at"),out var date)?date:DateTimeOffset.MinValue,S(e,"html_url"),e.GetProperty("assets").EnumerateArray().Select(a=>new Asset(a.GetProperty("id").GetInt64(),S(a,"name"),a.GetProperty("size").GetInt64(),S(a,"browser_download_url"),S(a,"digest"))).ToList());
     public async Task<List<StarGroup>> Lists(CancellationToken ct)
     {

@@ -3,7 +3,7 @@ namespace Gitstar.Core;
 
 public static class InstallerVersionRules
 {
-    private static string Raw(string tag, Binding binding) => tag.StartsWith(binding.TagPrefix, StringComparison.Ordinal) ? tag[binding.TagPrefix.Length..] : tag;
+    private static string Raw(string tag, string prefix) => tag.StartsWith(prefix, StringComparison.Ordinal) ? tag[prefix.Length..] : tag;
     private static string NumericVersion(string version) => version.Trim().TrimStart('v', 'V').Split('-', '+')[0];
     private static bool IsPreview(string version) => version.Split('+')[0].Contains('-');
 
@@ -34,7 +34,7 @@ public static class InstallerVersionRules
 
     public static string Target(Release release, Binding binding, Asset? asset = null)
     {
-        var raw = Raw(release.Tag, binding);
+        var raw = Raw(release.Tag, binding.TagPrefix);
         if (asset != null) return PreferDeclared(AttachmentVersion(asset, raw, release.Assets), raw);
 
         var versions = release.Assets.Where(Rules.IsWindowsInstallCandidate)
@@ -47,7 +47,7 @@ public static class InstallerVersionRules
 
     public static string Target(DownloadedPackage package, Binding binding, Release? release = null, string? savedTarget = null)
     {
-        var raw = Raw(package.Tag, binding);
+        var raw = Raw(package.Tag, binding.TagPrefix);
         var attachments = release != null && release.Id == package.ReleaseId && release.Tag == package.Tag
             && release.Repository.Equals(package.Repository, StringComparison.OrdinalIgnoreCase) ? release.Assets : [];
         var asset = new Asset(0, package.AssetName, package.Size, "", "sha256:" + package.Sha256);
@@ -61,14 +61,14 @@ public static class InstallerVersionRules
         return target;
     }
 
-    public static List<Asset> Recommended(Release release, IEnumerable<Asset> assets, string pattern = "")
+    public static List<Asset> Recommended(Release release, IEnumerable<Asset> assets, string pattern = "", string tagPrefix = "", bool? host64Bit = null)
     {
         var all = assets.ToList();
-        var raw = release.Tag;
+        var raw = Raw(release.Tag, tagPrefix);
         if (release.Prerelease || IsPreview(raw) || Rules.CompareVersions(raw, raw) == null) return all;
 
         var candidates = all.Select(asset => (Asset: asset, Version: AttachmentVersion(asset, raw, release.Assets))).ToArray();
-        var hasStable = candidates.Any(item => Rules.IsWindowsInstallCandidate(item.Asset) && Rules.CompareVersions(item.Version ?? "", raw) == 0
+        var hasStable = candidates.Any(item => Rules.IsWindowsInstallCandidate(item.Asset, host64Bit ?? Environment.Is64BitOperatingSystem) && Rules.CompareVersions(item.Version ?? "", raw) == 0
             && (pattern.Length == 0 || item.Asset.Name.Contains(pattern, StringComparison.OrdinalIgnoreCase)));
         return hasStable ? candidates.Where(item => Rules.CompareVersions(item.Version ?? "", raw) is not < 0).Select(item => item.Asset).ToList() : all;
     }

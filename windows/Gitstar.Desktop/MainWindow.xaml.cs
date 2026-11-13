@@ -25,6 +25,10 @@ public partial class MainWindow : Window
     private List<InstalledApp> installed=[];
     private bool installedFresh;
     private Task<List<InstalledApp>>? installedScan;
+    private string installedScanKey="";
+    private long inventoryGeneration;
+    private readonly SharedWork<List<InstalledApp>> matchedScans=new();
+    private readonly CancellationTokenSource scanLifetime=new();
     private List<UpdateCandidate> updates=[];
     private readonly Dictionary<string,TransferState> transfers=new(StringComparer.OrdinalIgnoreCase);
     private string TransferKey(Release release,bool install)=>$"{settings.Account}/{release.Repository}/{release.Id}/{install}";
@@ -80,30 +84,36 @@ public partial class MainWindow : Window
             if(exit)return;
             if(settings.Startup)WindowsServices.Startup(true);
             timer.Start();if(RefreshSchedule.IsDue(settings.RefreshIntervalHours,settings.LastCheck,lastAttempt,DateTimeOffset.UtcNow))await RefreshAsync(true);
-            else if(settings.Bindings.Count>0||pendingInstallations.Any(item=>item.NewInstall is {Started:true}))await Execute("检测","启动时复检已关联软件",async ct=>{model.Status=$"正在复检 {settings.Bindings.Count} 个已关联软件…";await ScanMatchedAsync();ct.ThrowIfCancellationRequested();PlanUpdates();Display();StartupCheckCompleted();},true,resources:["cache"]);
+            else if(settings.Bindings.Count>0||pendingInstallations.Any(item=>item.NewInstall is {Started:true}))await Execute("检测","启动时复检已关联软件",async ct=>{model.Status=$"正在复检 {settings.Bindings.Count} 个已关联软件，已有结果可继续使用…";await ScanMatchedAsync(ct);ct.ThrowIfCancellationRequested();PlanUpdates();Display();StartupCheckCompleted();},true,resources:["cache"]);
             else model.Status="已加载上次检查结果，可手动检查更新。";
     }
     private void StartupCheckCompleted()=>model.Status=$"启动复检完成 · {settings.Bindings.Count} 个已关联软件 · {updates.Count} 个可更新";
     private void LoadToken() {ConfigureApiCache();api.CredentialsChanged=auth=>CredentialStorage.Save(store,auth);try{api.SetCredentials(CredentialStorage.Load(store));}catch{model.Status="凭据不可读取，请重新登录。";}}
     private void ConfigureApiCache()
     {
-        api.ReadReleasePage=key=>store.Get<GitHubClient.ReleasePage?>(CacheKey+"/http-releases/"+key,null);
-        api.SaveReleasePage=(key,page)=>store.Set(CacheKey+"/http-releases/"+key,page);
+        var accountKey=CacheKey;
+        api.ReadReleasePage=key=>store.Get<GitHubClient.ReleasePage?>(accountKey+"/http-releases/"+key,null);
+        api.SaveReleasePage=(key,page)=>store.Set(accountKey+"/http-releases/"+key,page);
     }
-    private async Task ScanInstalledAsync(bool force=false)
+    private async Task ScanInstalledAsync(bool force=false,CancellationToken ct=default)
     {
         var accountKey=CacheKey;
-        if(force && installedScan is {IsCompleted:false})await installedScan;
-        if(installedScan==null || installedScan.IsCompleted){var portable=settings.PortableApps.ToArray();var bindings=settings.Bindings.Select(b=>b.Snapshot()).ToArray();var known=installed.ToArray();installedScan=Task.Run(()=>WindowsServices.Scan(portable,bindings,known));}
-        var detected=await installedScan;if(exit || accountKey!=CacheKey)return;
+        if(force && installedScan is {IsCompleted:false})await installedScan.WaitAsync(ct);
+        ct.ThrowIfCancellationRequested();
+        var generation=inventoryGeneration;var portable=settings.PortableApps.ToArray();var bindings=settings.Bindings.Select(b=>b.Snapshot()).ToArray();var known=installed.ToArray();var inputKey=accountKey+JsonSerializer.Serialize(new{generation,portable,bindings,known});
+        if(installedScan==null || installedScan.IsCompleted || installedScanKey!=inputKey){installedScanKey=inputKey;installedScan=Task.Run(()=>WindowsServices.Scan(portable,bindings,known,scanLifetime.Token));}
+        var detected=await installedScan.WaitAsync(ct);if(exit || quitting || accountKey!=CacheKey || generation!=inventoryGeneration)return;
         SetInstalled(detected,true);
     }
-    private async Task ScanMatchedAsync()
+    private async Task ScanMatchedAsync(CancellationToken ct=default,bool afterChange=false)
     {
-        if(pendingInstallations.Any(item=>item.NewInstall is {Started:true})){await ScanInstalledAsync(true);return;}
+        if(afterChange)inventoryGeneration++;var generation=inventoryGeneration;
+        if(pendingInstallations.Any(item=>item.NewInstall is {Started:true})){await ScanInstalledAsync(ct:ct);return;}
         var accountKey=CacheKey;var bindings=settings.Bindings.Select(b=>b.Snapshot()).ToArray();var known=installed.ToArray();var portable=settings.PortableApps.ToArray();
-        var fresh=await Task.Run(()=>WindowsServices.ScanMatched(bindings,portable,known));if(exit || accountKey!=CacheKey)return;
-        SetInstalled(known.Where(a=>!bindings.Any(b=>InstalledVersion.Find([a],b.AppId)!=null)).Concat(fresh).ToList());
+        if(bindings.Length==0)return;
+        var scanKey=accountKey+JsonSerializer.Serialize(new{generation,bindings,portable,known});
+        var fresh=smokeMode&&matchedScanSmoke!=null?await matchedScanSmoke(ct):await matchedScans.Run(scanKey,()=>Task.FromResult(WindowsServices.ScanMatched(bindings,portable,known,scanLifetime.Token)),ct);if(exit || quitting || accountKey!=CacheKey || generation!=inventoryGeneration)return;
+        SetInstalled(installed.Where(a=>!bindings.Any(b=>InstalledVersion.Find([a],b.AppId)!=null)).Concat(fresh).ToList());
     }
     private void SetInstalled(List<InstalledApp> detected,bool fullInventory=false){var repair=InstalledIdentity.Reconcile(settings,detected,installed);installed=repair.Apps;installedFresh=true;if(fullInventory)ReconcileNewInstallations(installed);store.Set("settings",settings);SaveInstalledSnapshot();}
     private void SaveInstalledSnapshot()=>store.Set(CacheKey+"/installed",InstalledSnapshot.Capture(installed,settings.Bindings));
@@ -121,19 +131,19 @@ public partial class MainWindow : Window
         var retained=releases.SelectMany(r=>new[]{TransferKey(r,false),TransferKey(r,true)}).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach(var key in transfers.Where(p=>!p.Value.Active && !p.Value.NeedsDetection && !retained.Contains(p.Key)).Select(p=>p.Key).ToArray())transfers.Remove(key);
     }
-    private void AccountLabel(){model.Account=settings.Account.Length==0?"登录 GitHub":settings.Account;ResetNoticeAccount();}
+    private void AccountLabel(){ConfigureApiCache();model.Account=settings.Account.Length==0?"登录 GitHub":settings.Account;ResetNoticeAccount();}
     private void RebuildGroups(bool refresh=true)
     {
         var selected=(GroupSidebar.SelectedItem as GroupEntry)?.Id??"all";var allGroups=groups.Concat(settings.LocalGroups).ToList();
         var repoNames=repositories.Select(r=>r.FullName).Concat(releases.Select(r=>r.Repository)).Concat(settings.ExtraRepositories).Where(r=>!settings.HiddenRepositories.Contains(r,StringComparer.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var githubFollowed=FollowLists.GitHub(repositories).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var nextGroups=new List<GroupEntry>{new("all","全部收藏","所有项目",repoNames.Count),new(SpecialFollows.GroupId,"特别关注","心形标记 · 仅保存在本机",SpecialFollows.Visible(settings,repoNames).Length),new("local-following","本地关注","仅保存在本机",FollowLists.Local(repositories,settings.ExtraRepositories,settings.HiddenRepositories).Length),new("ungrouped","未分组","账号收藏中未分组",repoNames.Count(r=>githubFollowed.Contains(r)&&!allGroups.Any(g=>g.Repositories.Contains(r,StringComparer.OrdinalIgnoreCase))))};
+        nextGroups.AddRange(allGroups.Select(g=>new GroupEntry(g.Source+"/"+g.Id,g.Name,g.Source,g.Repositories.Distinct(StringComparer.OrdinalIgnoreCase).Count(r=>!settings.HiddenRepositories.Contains(r,StringComparer.OrdinalIgnoreCase)&&(g.Source!="GitHub"||githubFollowed.Contains(r))))));
+        if(model.Groups.SequenceEqual(nextGroups)){if(refresh)Display();return;}
         syncingGroups=true;
         try{
-            model.Groups.Clear();model.Groups.Add(new("all","全部收藏","所有项目",repoNames.Count));
-            model.Groups.Add(new(SpecialFollows.GroupId,"特别关注","心形标记 · 仅保存在本机",SpecialFollows.Visible(settings,repoNames).Length));
-            model.Groups.Add(new("local-following","本地关注","仅保存在本机",FollowLists.Local(repositories,settings.ExtraRepositories,settings.HiddenRepositories).Length));
-            model.Groups.Add(new("ungrouped","未分组","账号收藏中未分组",repoNames.Count(r=>githubFollowed.Contains(r)&&!allGroups.Any(g=>g.Repositories.Contains(r,StringComparer.OrdinalIgnoreCase)))));
-            foreach(var g in allGroups)model.Groups.Add(new(g.Source+"/"+g.Id,g.Name,g.Source,g.Repositories.Distinct(StringComparer.OrdinalIgnoreCase).Count(r=>!settings.HiddenRepositories.Contains(r,StringComparer.OrdinalIgnoreCase)&&(g.Source!="GitHub"||githubFollowed.Contains(r)))));
+            for(var position=0;position<nextGroups.Count;position++){if(position>=model.Groups.Count)model.Groups.Add(nextGroups[position]);else if(model.Groups[position]!=nextGroups[position])model.Groups[position]=nextGroups[position];}
+            while(model.Groups.Count>nextGroups.Count)model.Groups.RemoveAt(model.Groups.Count-1);
             GroupFilter.ItemsSource=model.Groups.Select(g=>g.Name).ToArray();
             var index=model.Groups.ToList().FindIndex(g=>g.Id==selected);GroupFilter.SelectedIndex=Math.Max(index,0);GroupSidebar.SelectedIndex=GroupFilter.SelectedIndex;
         }finally{syncingGroups=false;}if(refresh)Display();
@@ -141,10 +151,18 @@ public partial class MainWindow : Window
     private void PlanUpdates()
     {
         updates=[];
-        foreach(var b in settings.Bindings.Where(b=>b.Enabled(DateTimeOffset.UtcNow))) {
-            var app=InstalledVersion.Find(installed,b.AppId); if(app==null||app.VersionNeedsReview)continue;
-            var r=Rules.SelectRelease(releases.Where(r=>r.Repository.Equals(b.Repository,StringComparison.OrdinalIgnoreCase)),b); if(r==null||r.Tag==b.IgnoredTag)continue;
-            if(Rules.CompareVersions(Rules.VersionTag(r,b),app.Version)>0)updates.Add(new(app,b,r,Rules.SelectAsset(r,b)));
+        var now = DateTimeOffset.UtcNow;
+        foreach (var binding in settings.Bindings.Where(binding => binding.Enabled(now)))
+        {
+            var app = InstalledVersion.Find(installed, binding.AppId);
+            if (app == null || app.VersionNeedsReview) continue;
+            var release = Rules.SelectRelease(releases.Where(item => item.Repository.Equals(binding.Repository, StringComparison.OrdinalIgnoreCase)), binding);
+            if (release == null || release.Tag == binding.IgnoredTag) continue;
+
+            var asset = app.Portable ? Rules.SelectAsset(release, binding) : DownloadSelectionRules.SelectInstaller(release, binding,
+                DownloadSelectionRules.Find(settings, release.Repository, DownloadPurpose.Install, packages), System.Runtime.InteropServices.RuntimeInformation.OSArchitecture);
+            var target = InstallerVersionRules.Target(release, binding, app.Portable ? null : asset);
+            if (Rules.CompareVersions(target, app.Version) > 0) updates.Add(new(app, binding, release, asset) { TargetVersion = target });
         }
         if(tray!=null){tray.Text=$"Gitstar · {updates.Count} 个软件可更新";var old=tray.Icon;tray.Icon=TrayBadge.Create(updates.Count>0);old?.Dispose();}
         ReconcilePendingInstallations();
@@ -175,7 +193,7 @@ public partial class MainWindow : Window
         cards=cards.Where(c=>(c.Title+" "+c.Repository+" "+c.Version).Contains(search,StringComparison.OrdinalIgnoreCase));
         if(!localPage)cards=cards.GroupBy(c=>c.Repository,StringComparer.OrdinalIgnoreCase).Select(g=>{var selectedRelease=Rules.SelectRelease(g.Select(c=>c.Release),new Binding{IncludePrerelease=channel!=0})!;return g.First(c=>ReferenceEquals(c.Release,selectedRelease));});
         var selected=model.Cards.Where(c=>c.IsSelected).Select(c=>(c.Repository,c.Release.Id)).Concat(backgroundSelections).ToHashSet();
-        model.Cards.Clear();foreach(var card in Card.Order(cards)){card.Transfer=TransferFor(card.Release,localPage);card.IsSpecial=SpecialFollows.Contains(settings,card.Repository);card.IsSelected=model.SelectionMode&&selected.Contains((card.Repository,card.Release.Id));model.Cards.Add(card);}
+        var desired=Card.Order(cards).ToList();foreach(var card in desired){card.Transfer=TransferFor(card.Release,localPage);card.IsSpecial=SpecialFollows.Contains(settings,card.Repository);card.IsSelected=model.SelectionMode&&selected.Contains((card.Repository,card.Release.Id));}Card.Reconcile(model.Cards,desired);
         backgroundSelections.Clear();
         var now=DateTimeOffset.UtcNow;
         model.CountCaption=localPage?"本机待更新软件":"最近 7 天更新";
@@ -193,43 +211,6 @@ public partial class MainWindow : Window
     private void Local_Click(object sender,RoutedEventArgs e)=>Page(true);
     private void Page(bool local) {LeaveRankings();UseFeature(local?UsageFeature.LocalPage:UsageFeature.RecentPage);projectsPage=false;ProjectsHost.Visibility=Visibility.Collapsed;UpdatesToolbar.Visibility=UpdatesContent.Visibility=Visibility.Visible;localPage=local;if(local)model.SelectionMode=false;BatchButton.Visibility=local?Visibility.Collapsed:Visibility.Visible;SidebarColumn.Width=new GridLength(local?0:208);GroupPanel.Visibility=local?Visibility.Collapsed:Visibility.Visible;AddButton.Content=local?"自动匹配 / 批量关联":"添加项目";model.Title=local?"本机软件更新":"关注项目的新版本";model.Subtitle=local?"查看已关联软件的新版本，按需下载并安装。":"按收藏分组查看更新内容，将所需安装包保存到指定文件夹。";GroupFilter.IsEnabled=!local;SetPageAccent(local?1:0);Display();}
     private async void Refresh_Click(object sender,RoutedEventArgs e)=>await RefreshAsync(matchedOnly:localPage);
-    private async Task RefreshAsync(bool background=false,bool matchedOnly=false)
-    {
-        if(refreshing||quitting)return;
-        if(background&&!RefreshSchedule.CanStartAutomatic(refreshing,busy,batchPublishing,quitting,clearingCache))return;
-        if(matchedOnly && settings.Bindings.Count==0){model.Status="尚未关联本机软件，请先使用自动匹配 / 批量关联。";return;}
-        if(api.Token.Length==0 && settings.ExtraRepositories.Count==0 && settings.Bindings.Count==0 && settings.SelfRepository.Length==0){await ScanInstalledAsync(true);if(exit)return;if(!background)model.Status="已重新扫描本机软件；登录 GitHub 或添加仓库后可检查新版本。";return;}
-        if(!matchedOnly)lastAttempt=DateTimeOffset.UtcNow;
-        await Execute("检查",matchedOnly?"检查已关联软件":background?"后台自动检查关注项目":"手动检查关注项目",async ct=>{
-            var messageRefresh=NotificationSchedule.FollowsUpdates(settings.NotificationIntervalMinutes)?RefreshNotificationBadge(ct):Task.CompletedTask;
-            var clock=Stopwatch.StartNew();var warnings=new List<string>();model.Status=matchedOnly?"正在复检已关联软件…":"正在重新检测本机版本…";if(matchedOnly)await ScanMatchedAsync();else await ScanInstalledAsync(true);if(exit)return;ct.ThrowIfCancellationRequested();PlanUpdates();Display();model.Status=matchedOnly?"正在检查已关联仓库…":"正在同步收藏和分组…";
-            if(!matchedOnly && api.Token.Length>0) {
-                repositories=await api.Stars(ct);
-                try{groups=await api.Lists(ct);}catch(Exception e)when(e is not OperationCanceledException && e is not GitHubRateLimitException){warnings.Add(e.Message);}
-            }
-            var names=RepositoryChecks.Targets(matchedOnly,repositories,settings).ToList();
-            if(!matchedOnly)recentCacheCleared=false;
-            var completed=0;var active=new HashSet<string>();var savedAt=TimeSpan.Zero;
-            void Progress()=>model.Status=$"正在检查 {completed}/{names.Count} · {active.Count} 个并行 · 已用 {clock.Elapsed.TotalSeconds:0} 秒 · "+string.Join(" / ",active);
-            try{await RepositoryChecks.Run(names,async(name,token)=>{
-                active.Add(name);Progress();
-                try{var known=repositories.FirstOrDefault(r=>r.FullName.Equals(name,StringComparison.OrdinalIgnoreCase));if(known==null||(!matchedOnly&&(!known.Starred||api.Token.Length==0))){var fresh=await api.Repo(name,token);if(known!=null)repositories.Remove(known);repositories.Add(fresh with{Starred=known?.Starred??false});}else if(matchedOnly){try{var fresh=await api.Repo(name,token);repositories.Remove(known);repositories.Add(fresh with{Starred=known.Starred});}catch(Exception ex)when(ex is IOException or System.Net.Http.HttpRequestException){warnings.Add(name+"：仓库卡片信息未刷新，保留上次数据。"+ex.Message);}}var releaseCheckStarted=DateTimeOffset.UtcNow;var found=await api.Releases(name,token,settings.Bindings);releases.RemoveAll(r=>r.Repository.Equals(name,StringComparison.OrdinalIgnoreCase));releases.AddRange(found);ReconcilePendingInstallations(name,found,releaseCheckStarted);}
-                catch(Exception e)when(e is not OperationCanceledException && e is not GitHubRateLimitException){warnings.Add(name+"："+e.Message);}
-                finally{active.Remove(name);completed++;Progress();if(clock.Elapsed-savedAt>=TimeSpan.FromSeconds(5)){SaveCache();savedAt=clock.Elapsed;}}
-            },ct);}finally{SaveCache();}
-            // Repositories removed from Stars are not retained unless explicitly subscribed or bound.
-            if(!matchedOnly)releases.RemoveAll(r=>!names.Contains(r.Repository,StringComparer.OrdinalIgnoreCase));SaveCache();RebuildGroups();
-            if(exit)return;
-            PlanUpdates();Display();
-            if(!matchedOnly && warnings.Count==0)settings.LastCheck=DateTimeOffset.UtcNow;
-            await messageRefresh;
-            var newUpdates=updates.Where(u=>!settings.Notified.Contains($"{u.App.Id}/{u.Release.Id}")).ToList();
-            if(newUpdates.Count>0) {notificationLocal=true;tray.ShowBalloonTip(6000,"Gitstar",$"{newUpdates.Count} 个已关联软件有新版本，点击打开查看。",Forms.ToolTipIcon.Info);settings.Notified.AddRange(newUpdates.Select(u=>$"{u.App.Id}/{u.Release.Id}"));}
-            if(!matchedOnly){Release? own=null;try{own=names.Contains(AppInfo.Repository,StringComparer.OrdinalIgnoreCase)?Rules.SelectRelease(releases.Where(r=>r.Repository.Equals(AppInfo.Repository,StringComparison.OrdinalIgnoreCase)),new Binding()):await api.LatestGitstarRelease(ct);}catch(Exception ex)when(ex is IOException or System.Net.Http.HttpRequestException){/* Optional app update checks do not invalidate subscribed-project results; About exposes check errors. */}if(own!=null && Rules.CompareVersions(own.Tag,typeof(Program).Assembly.GetName().Version?.ToString()??"1.0.0.0")>0 && !settings.Notified.Contains("self/"+own.Id)){notificationLocal=false;tray.ShowBalloonTip(6000,"Gitstar 有新版本",own.Tag+" · 请在最近更新查看日志并手动下载安装。",Forms.ToolTipIcon.Info);settings.Notified.Add("self/"+own.Id);}}
-            Save();model.Status=warnings.Count==0?$"检查完成 · {names.Count} 个项目 · 用时 {clock.Elapsed.TotalSeconds:0} 秒 · {updates.Count} 个软件可更新":$"检查完成 · 用时 {clock.Elapsed.TotalSeconds:0} 秒，{warnings.Count} 项待处理："+string.Join("；",warnings.Take(3));
-            if(matchedOnly && !background)await CleanupInstalledPackages();
-        },background);
-    }
     private async Task Execute(string kind,string description,Func<CancellationToken,Task> work,bool background=false,string[]? resources=null,TransferState? transfer=null,CancellationToken parentToken=default,Func<string?>? parentStopReason=null)
     {
         if(quitting)return;
@@ -314,7 +295,7 @@ public partial class MainWindow : Window
             var state=card.Transfer;var operation=currentOperation.Value!;fileOperation=operation;operation.Repository=card.Repository;operation.Tag=release.Tag;operation.File=downloadTarget;state.Percentage=0;state.Detail=asset.Name;state.Stage("下载中 0%",false);
             try{
                 var progressAt=DateTime.MinValue;
-                var replaceSame=false;var previousPackage=packages.FirstOrDefault(p=>p.Path.Equals(downloadTarget,StringComparison.OrdinalIgnoreCase)&&PackageRules.SameVersion(p,release,asset));
+                var replaceSame=false;var previousPackage=packages.FirstOrDefault(p=>p.Path.Equals(downloadTarget,StringComparison.OrdinalIgnoreCase)&&PackageRules.MatchesAttachment(p,release,asset));
                 if(previousPackage!=null&&await PackageFiles.Matches(previousPackage,ct)){
                     if(downloadAccount!=PackagesKey)throw new OperationCanceledException("账号已变化，未创建其他账号的安装记录。");
                     if (!install && asset.Id == selection.InstallAssetId)
@@ -363,11 +344,9 @@ public partial class MainWindow : Window
             await process.WaitForExitAsync(ct);
             if (settings.Account != account || exit || quitting) return;
             state.Stage("检测安装结果");
-            var known=installed.ToArray();var bindings=settings.Bindings.Select(binding=>binding.Snapshot()).ToArray();var portable=settings.PortableApps.ToArray();
-            var detected = await Task.Run(() => WindowsServices.Scan(portable, bindings, known, ct), ct);
+            await ScanMatchedAsync(ct,afterChange:true);
             ct.ThrowIfCancellationRequested();
             if (settings.Account != account || exit || quitting) return;
-            SetInstalled(detected, true);
             item = ResolvePendingTarget(item);
             PlanUpdates();
             var actual = PendingInstallationRules.CurrentApp(item, settings.Bindings, installed);
@@ -571,6 +550,7 @@ public partial class MainWindow : Window
     public async void RenderSmoke(string path,bool cards=false,bool local=false,bool dark=false,bool firstGroup=false,bool matching=false,bool settingsPreview=false,bool avatars=false,bool progressPreview=false,bool groupPreview=false,bool addPreview=false,bool batchPreview=false,bool tasksPreview=false,bool projectsPreview=false,bool sourcePreview=false,bool createPreview=false,bool projectSettingsPreview=false,bool workspacePreview=false,bool publishPreview=false,bool automationPreview=false)
     {
         settings.Dark=dark;ApplyTheme();
+        if(Environment.GetCommandLineArgs().Contains("--scan-pipeline")){await ScanningSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--session-shutdown")){await SessionShutdownSmoke(path);return;}
         if(Environment.GetCommandLineArgs().Contains("--manual-exit")){await ManualExitSmoke(path);return;}
         if(Environment.GetCommandLineArgs().Contains("--layout-compact")){Width=940;Height=740;}

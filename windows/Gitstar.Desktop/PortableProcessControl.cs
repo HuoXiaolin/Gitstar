@@ -4,6 +4,9 @@ namespace Gitstar.Desktop;
 
 internal static class PortableProcessControl
 {
+    internal static readonly TimeSpan GracefulCloseTimeout=TimeSpan.FromSeconds(6);
+    internal static readonly TimeSpan TerminationTimeout=TimeSpan.FromSeconds(8);
+    internal static readonly TimeSpan FileReleaseTimeout=TimeSpan.FromSeconds(6);
     internal static HashSet<string> Paths(PortableReplacementPlan plan)=>plan.Files.Select(file=>Path.GetFullPath(file.Target)).ToHashSet(StringComparer.OrdinalIgnoreCase);
     internal static List<Process> Find(IReadOnlySet<string> paths)
     {
@@ -16,21 +19,21 @@ internal static class PortableProcessControl
             if(process.HasExited)return;var started=process.StartTime;
             if(process.MainModule?.FileName is not {} path||!paths.Contains(Path.GetFullPath(path)))throw new IOException("运行中的程序位置已变化，未关闭其他程序。");
             var requested=process.CloseMainWindow();
-            if(requested){using var graceful=CancellationTokenSource.CreateLinkedTokenSource(ct);graceful.CancelAfter(TimeSpan.FromSeconds(3));try{await process.WaitForExitAsync(graceful.Token);}catch(OperationCanceledException)when(!ct.IsCancellationRequested){}}
+            if(requested){using var graceful=CancellationTokenSource.CreateLinkedTokenSource(ct);graceful.CancelAfter(GracefulCloseTimeout);try{await process.WaitForExitAsync(graceful.Token);}catch(OperationCanceledException)when(!ct.IsCancellationRequested){}}
             ct.ThrowIfCancellationRequested();if(process.HasExited){await WaitForRelease(path,ct);return;}
             if(!terminate)throw new IOException("软件仍在运行，请从窗口或托盘彻底退出后重试。");
             using var current=Process.GetProcessById(process.Id);
             if(current.StartTime!=started||current.MainModule?.FileName is not {} actual||!paths.Contains(Path.GetFullPath(actual)))throw new IOException("进程标识或程序位置已变化，已停止自动关闭。");
             current.Kill(entireProcessTree:false);
-            using var stopping=CancellationTokenSource.CreateLinkedTokenSource(ct);stopping.CancelAfter(TimeSpan.FromSeconds(5));try{await current.WaitForExitAsync(stopping.Token);}catch(OperationCanceledException)when(!ct.IsCancellationRequested){throw new IOException("目标软件尚未退出，文件未替换。");}
+            using var stopping=CancellationTokenSource.CreateLinkedTokenSource(ct);stopping.CancelAfter(TerminationTimeout);try{await current.WaitForExitAsync(stopping.Token);}catch(OperationCanceledException)when(!ct.IsCancellationRequested){throw new IOException("目标软件尚未退出，文件未替换。");}
             await WaitForRelease(path,ct);
         }catch(ArgumentException){if(!process.HasExited)throw;}
         catch(Win32Exception error){throw new IOException("无法关闭目标软件，请核对权限或手动退出后重试："+error.Message,error);}
     }
-    private static async Task WaitForRelease(string path,CancellationToken ct)
+    internal static async Task WaitForRelease(string path,CancellationToken ct)
     {
         var timer=Stopwatch.StartNew();while(true){ct.ThrowIfCancellationRequested();try{using var file=new FileStream(path,FileMode.Open,FileAccess.ReadWrite,FileShare.None);return;}
-            catch(IOException error)when((error.HResult&0xffff) is 32 or 33){if(timer.Elapsed>TimeSpan.FromSeconds(3))throw new IOException("软件已退出，但程序文件仍被占用，请稍后重试。未替换文件。",error);await Task.Delay(100,ct);}}
+            catch(IOException error)when((error.HResult&0xffff) is 32 or 33){if(timer.Elapsed>FileReleaseTimeout)throw new IOException("软件已退出，但程序文件仍被占用，请稍后重试。未替换文件。",error);await Task.Delay(100,ct);}}
     }
     internal static int? Start(string program,IReadOnlyList<string>? arguments=null,bool headless=false)
     {

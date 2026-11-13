@@ -7,6 +7,7 @@ namespace Gitstar.Desktop;
 public partial class MainWindow
 {
     private bool projectsPage,renderingProjects;
+    private bool projectsSyncing;
     private List<ManagedProject> myProjects=[];
     private List<ProjectWorkspace> projectWorkspaces=[];
     private readonly Dictionary<string,GitProjectState> projectStates=new(StringComparer.OrdinalIgnoreCase);
@@ -183,7 +184,16 @@ public partial class MainWindow
     private async Task SyncProjects()
     {
         if(api.Token.Length==0){Login_Click(this,new());return;}
-        await Execute("项目同步","同步我的项目",async ct=>{var data=await api.MyProjects(ct);InvalidateProjectCaches(ProjectRules.InvalidatedProjects(myProjects,data));var names=data.Select(p=>p.FullName).ToHashSet(StringComparer.OrdinalIgnoreCase);InvalidateProjectCaches(projectVersions.Keys.Where(name=>!names.Contains(name)).ToArray());myProjects=data;projectsSynced=DateTimeOffset.Now;SaveProjects();RenderProjects();var selected=myProjects.FirstOrDefault(p=>p.FullName.Equals(selectedProject,StringComparison.OrdinalIgnoreCase));if(selected!=null){ReplaceProjectVersions(selected.FullName,await api.ProjectVersions(selected.FullName,ct));await RefreshReleaseDirectoryStatus(selected.FullName,ct);SaveProjects();if(selectedProject==selected.FullName)RenderProjectDetails(selected);}model.Status=$"已同步 {data.Count} 个项目及当前项目的版本。";},resources:["projects:"+settings.Account]);
+        if(projectsSyncing){model.Status="项目列表正在同步，已读取的项目可继续操作。";return;}projectsSyncing=true;
+        try{await Execute("项目同步","同步我的项目",async ct=>{
+            var key=ProjectsKey;var client=api;var previous=myProjects.ToArray();var received=0;
+            void Current(){ct.ThrowIfCancellationRequested();if(key!=ProjectsKey||client!=api||quitting)throw new OperationCanceledException(ct);}
+            var data=await client.MyProjects(ct,page=>{Current();var pageNames=page.Select(p=>p.FullName).ToHashSet(StringComparer.OrdinalIgnoreCase);InvalidateProjectCaches(ProjectRules.InvalidatedProjects(myProjects.Where(p=>pageNames.Contains(p.FullName)),page));foreach(var project in page){myProjects.RemoveAll(old=>old.FullName.Equals(project.FullName,StringComparison.OrdinalIgnoreCase));myProjects.Add(project);}received+=page.Count;RenderProjects();model.Status=$"已读取 {received} 个项目，正在继续同步，列表可直接使用…";});Current();
+            InvalidateProjectCaches(ProjectRules.InvalidatedProjects(previous,data));var names=data.Select(p=>p.FullName).ToHashSet(StringComparer.OrdinalIgnoreCase);InvalidateProjectCaches(projectVersions.Keys.Where(name=>!names.Contains(name)).ToArray());myProjects=data;projectsSynced=DateTimeOffset.Now;SaveProjects();RenderProjects();
+            var selected=myProjects.FirstOrDefault(p=>p.FullName.Equals(selectedProject,StringComparison.OrdinalIgnoreCase));
+            if(selected!=null){model.Status="项目列表已就绪，正在并行核对当前项目的版本与本地附件…";await RefreshProjectVersionStatus(selected,ct);SaveProjects();if(projectsPage&&selectedProject==selected.FullName)RenderProjectDetails(selected);}
+            model.Status=$"已同步 {data.Count} 个项目及当前项目的版本。";
+        },resources:["projects:"+settings.Account]);}finally{projectsSyncing=false;}
     }
     private async Task InspectProject(ManagedProject p)
     {
@@ -200,7 +210,7 @@ public partial class MainWindow
     }
     private async Task SyncProjectVersions(ManagedProject p)
     {
-        await Execute("版本同步",p.FullName,async ct=>{ManagedProject current;try{current=await api.Project(p.FullName,ct);}catch(GitHubNotFoundException){InvalidateProjectCaches([p.FullName]);SaveProjects();if(selectedProject==p.FullName)RenderProjectDetails(p);throw;}if(!ProjectRules.SameRepository(p,current))InvalidateProjectCaches([p.FullName]);myProjects.RemoveAll(item=>item.FullName.Equals(p.FullName,StringComparison.OrdinalIgnoreCase));myProjects.Add(current);SaveProjects();if(selectedProject==p.FullName)RenderProjectDetails(current);ReplaceProjectVersions(p.FullName,await api.ProjectVersions(p.FullName,ct));await RefreshReleaseDirectoryStatus(p.FullName,ct);SaveProjects();if(selectedProject==p.FullName)RenderProjectDetails(current);model.Status="版本与草稿已同步。";},resources:["repo:"+p.FullName]);
+        await Execute("版本同步",p.FullName,async ct=>{ManagedProject current;try{current=await api.Project(p.FullName,ct);}catch(GitHubNotFoundException){InvalidateProjectCaches([p.FullName]);SaveProjects();if(selectedProject==p.FullName)RenderProjectDetails(p);throw;}if(!ProjectRules.SameRepository(p,current))InvalidateProjectCaches([p.FullName]);myProjects.RemoveAll(item=>item.FullName.Equals(p.FullName,StringComparison.OrdinalIgnoreCase));myProjects.Add(current);SaveProjects();if(selectedProject==p.FullName)RenderProjectDetails(current);await RefreshProjectVersionStatus(current,ct);SaveProjects();if(selectedProject==p.FullName)RenderProjectDetails(current);model.Status="版本与草稿已同步。";},resources:["repo:"+p.FullName]);
     }
     private void CreateProject_Click(object sender,RoutedEventArgs e)=>CreateProjectDialog();
     private void CreateProjectDialog(string? previewPath=null)

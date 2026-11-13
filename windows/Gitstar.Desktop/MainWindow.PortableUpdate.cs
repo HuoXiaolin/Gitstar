@@ -36,7 +36,7 @@ public partial class MainWindow
                 var result=await Task.Run(()=>PortableReplacement.Apply(prepared,keep,ct,(done,total)=>f.Dispatcher.Invoke(()=>{progress.IsIndeterminate=false;progress.Value=total>0?100.0*done/total:0;status.Text=$"正在替换 {done} / {total} 个文件…";card.Transfer.Label=status.Text;})),ct);
                 applied=true;plan=null;
                 if(restart&&!exit&&!quitting){status.Text="文件已替换，正在启动原主程序…";PortableProcessControl.Start(prepared.Program);}
-                await ScanMatchedAsync();PlanUpdates();Display();var actual=InstalledVersion.Find(installed,app.Id);var verified=actual!=null&&Rules.CompareVersions(actual.Version,Rules.VersionTag(card.Release,card.Update.Binding))>=0;
+                await ScanMatchedAsync(ct,afterChange:true);PlanUpdates();Display();var actual=InstalledVersion.Find(installed,app.Id);var verified=actual!=null&&Rules.CompareVersions(actual.Version,Rules.VersionTag(card.Release,card.Update.Binding))>=0;
                 card.Transfer.Finish(verified?"已更新":"重新核对版本",!verified);card.Transfer.Detail=result.Backup??"未保留旧程序备份";
                 status.Text=$"已替换 {result.Replaced} 个文件。"+(restart?"已请求启动原主程序。":"")+(verified?"已核对本机版本："+actual!.Version+"。":"文件替换完成，请核对软件版本。")+(result.Backup!=null?"\n旧程序备份："+result.Backup:"\n未保留旧程序备份。");model.Status=status.Text;
                 currentOperation.Value?.Results.Add(status.Text);closeOnSuccess=verified;

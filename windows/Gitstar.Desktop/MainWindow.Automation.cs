@@ -102,7 +102,7 @@ public partial class MainWindow
     {
         if(batchPublishing)return;if(api.Token.Length==0){Login_Click(this,new());return;}batchPublishing=true;AllAutoPublishButton.IsEnabled=false;AllAutoPublishButton.Content="批量同步发布中…";
         try{
-            var candidates=myProjects.Where(ProjectWritable).ToArray();foreach(var candidate in candidates)await InferAutomation(candidate);
+            var candidates=myProjects.Where(ProjectWritable).ToArray();await RepositoryChecks.Run(candidates.Select(p=>p.FullName).ToArray(),async(name,_)=>{await InferAutomation(candidates.Single(p=>p.FullName==name));},scanLifetime.Token,4);
             var projects=candidates.Where(p=>projectAutomation.TryGetValue(p.FullName,out var config)&&config.IncludeInBatch).ToArray();
             if(projects.Length==0){model.Status="尚未配置参与全部发布的项目，请在项目中设置自动发布配置。";return;}
             var results=await Task.WhenAll(projects.Select(project=>AutoPublishProject(project,true)));model.Status=$"全部同步发布结束：完成 {results.Count(value=>value)} 个，未完成 {results.Count(value=>!value)} 个；未配置、只读及未参与的项目已跳过。详情见任务记录。";

@@ -87,7 +87,7 @@ public partial class MainWindow
                 await Execute("下载",item.Release.Repository+" · "+item.Release.Tag+" · "+item.Asset.Name,async ct=>{
                     var operation=currentOperation.Value!;operation.Repository=item.Release.Repository;operation.Tag=item.Release.Tag;operation.File=target;
                     ct.ThrowIfCancellationRequested();
-                    state.Stage("核对已有安装包");var previous=packages.FirstOrDefault(p=>p.Path.Equals(target,StringComparison.OrdinalIgnoreCase)&&PackageRules.SameVersion(p,item.Release,item.Asset));var replace=false;
+                    state.Stage("核对已有安装包");var previous=packages.FirstOrDefault(p=>p.Path.Equals(target,StringComparison.OrdinalIgnoreCase)&&PackageRules.MatchesAttachment(p,item.Release,item.Asset));var replace=false;
                     if(previous!=null&&await PackageFiles.Matches(previous,ct)){if(duplicatePolicy!=1){var existingIndex=packages.IndexOf(previous);if(existingIndex>=0){packages[existingIndex]=previous with{RetainForBatch=true};SavePackages();}state.Finish("已跳过");result="跳过";operation.Results.Add("同版本文件已存在，按本批设置跳过并保留。");return;}replace=true;}
                     var progressAt=DateTime.UtcNow;state.Stage("下载中 0%",false);state.Detail=item.Asset.Name;
                     try{var path=await WindowsServices.Download(api,item.Release,item.Asset,root,(received,total)=>{if(received<total&&DateTime.UtcNow-progressAt<TimeSpan.FromMilliseconds(100))return;progressAt=DateTime.UtcNow;state.Downloaded(received,total);},ct,()=>state.Stage("校验中"),replacement=>CanReplacePackage(item.Release,item.Asset,target,replacement,replace),forceDownload:replace,targetPath:target);

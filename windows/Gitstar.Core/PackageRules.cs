@@ -17,6 +17,13 @@ public static class PackageRules
     public static string[] OriginalNameConflicts(IEnumerable<ReleaseDownload> items)=>items.GroupBy(item=>OriginalFileName(item.Asset.Name),StringComparer.OrdinalIgnoreCase).Where(group=>group.Skip(1).Any(item=>!SameDownload(group.First(),item))).Select(group=>group.Key).ToArray();
     public static bool SameDownload(ReleaseDownload a,ReleaseDownload b)=>a.Release.Repository.Equals(b.Release.Repository,StringComparison.OrdinalIgnoreCase)&&(Rules.CompareVersions(a.Release.Tag,b.Release.Tag)==0||a.Release.Tag.Equals(b.Release.Tag,StringComparison.OrdinalIgnoreCase))&&a.Release.Prerelease==b.Release.Prerelease&&a.Asset.Name.Equals(b.Asset.Name,StringComparison.OrdinalIgnoreCase)&&a.Asset.Size==b.Asset.Size&&a.Asset.Digest==b.Asset.Digest;
     public static bool SameVersion(DownloadedPackage package,Release release,Asset asset)=>package.Repository.Equals(release.Repository,StringComparison.OrdinalIgnoreCase)&&package.AssetName.Equals(asset.Name,StringComparison.OrdinalIgnoreCase)&&package.Prerelease==release.Prerelease&&(Rules.CompareVersions(package.Tag,release.Tag)==0||package.Tag.Equals(release.Tag,StringComparison.OrdinalIgnoreCase));
+
+    public static bool MatchesAttachment(DownloadedPackage package, Release release, Asset asset)
+    {
+        return SameVersion(package, release, asset) && package.ReleaseId == release.Id && package.Size == asset.Size
+            && (string.IsNullOrEmpty(asset.Digest) || asset.Digest.Equals("sha256:" + package.Sha256, StringComparison.OrdinalIgnoreCase));
+    }
+
     public static string Family(string name)
     {
         var n=name.ToLowerInvariant();var ext=System.IO.Path.GetExtension(n);

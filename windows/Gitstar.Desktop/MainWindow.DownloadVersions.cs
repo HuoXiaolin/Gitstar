@@ -47,14 +47,30 @@ public partial class MainWindow
         void Assets()
         {
             fillingAssets=true;assets=!install&&ordered.Count==0?[]:current.Assets.Where(asset=>asset.Size>0).ToList();choices.ItemsSource=assets.Select(asset=>$"{asset.Name}  ·  {asset.Size/1048576.0:F1} MB").ToArray();
-            var recommended=InstallerVersionRules.Recommended(current,assets,card.Update?.Binding.AssetPattern??"");
-            var preferred=PackagePreference.Select(recommended,System.Runtime.InteropServices.RuntimeInformation.OSArchitecture,card.Update?.Binding.AssetPattern??"",card.Update?.App.Portable==true);
-            var previous=DownloadSelectionRules.Match(current with{Assets=recommended},preference,System.Runtime.InteropServices.RuntimeInformation.OSArchitecture,card.Update?.Binding.AssetPattern??"");
-            if(previous.Count>0&&previous.All(asset=>!Rules.IsWindowsInstallCandidate(asset))&&preference?.FileNames.Any(name=>Rules.IsWindowsInstallCandidate(new(0,name,1,"","")))==true&&preferred!=null)previous.Add(preferred);
-            var rememberedSelection=chosenAssets.TryGetValue(current.Id,out var remembered);var selected=rememberedSelection?assets.FindIndex(asset=>remembered!.Contains(asset.Id)):assets.FindIndex(asset=>previous.Any(match=>match.Id==asset.Id));
-            if(!rememberedSelection&&selected<0&&install&&card.Update?.App.Portable!=true&&card.Update?.Asset is {} linked&&recommended.Any(asset=>asset.Id==linked.Id))selected=assets.FindIndex(asset=>asset.Id==linked.Id);
-            if(!rememberedSelection&&selected<0&&preferred!=null)selected=assets.FindIndex(asset=>asset.Id==preferred.Id);
-            choices.SelectedIndex=selected;if(!install){var saved=rememberedSelection?remembered!:previous.Select(asset=>asset.Id).ToHashSet();foreach(var i in Enumerable.Range(0,assets.Count).Where(i=>saved.Contains(assets[i].Id)))if(!choices.SelectedItems.Contains(choices.Items[i]))choices.SelectedItems.Add(choices.Items[i]);}fillingAssets=false;choices.IsEnabled=assets.Count>0;download.IsEnabled=!loading&&choices.SelectedIndex>=0;
+            if (!chosenAssets.TryGetValue(current.Id, out var selection))
+            {
+                var host = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture;
+                var pattern = card.Update?.Binding.AssetPattern ?? "";
+                if (card.Update is { App.Portable: false } update)
+                {
+                    var installer = DownloadSelectionRules.SelectInstaller(current, update.Binding, preference, host);
+                    selection = installer == null ? [] : [installer.Id];
+                }
+                else
+                {
+                    var recommended = InstallerVersionRules.Recommended(current, assets, pattern, card.Update?.Binding.TagPrefix ?? "");
+                    var preferred = PackagePreference.Select(recommended, host, pattern, card.Update?.App.Portable == true);
+                    var previous = DownloadSelectionRules.Match(current with { Assets = recommended }, preference, host, pattern);
+                    if (preferred != null && (previous.Count == 0 || previous.All(asset => !Rules.IsWindowsInstallCandidate(asset))
+                        && preference?.FileNames.Any(name => Rules.IsWindowsInstallCandidate(new(0, name, 1, "", ""))) == true)) previous.Add(preferred);
+                    selection = previous.Select(asset => asset.Id).ToHashSet();
+                }
+            }
+            choices.SelectedIndex = assets.FindIndex(asset => selection.Contains(asset.Id));
+            if (!install)
+                foreach (var i in Enumerable.Range(0, assets.Count).Where(i => selection.Contains(assets[i].Id)))
+                    if (!choices.SelectedItems.Contains(choices.Items[i])) choices.SelectedItems.Add(choices.Items[i]);
+            fillingAssets=false;choices.IsEnabled=assets.Count>0;download.IsEnabled=!loading&&choices.SelectedIndex>=0;
             if(!loading)note.Text=assets.Count==0?"此版本没有可下载的安装包，请选择其他版本。":$"{current.Tag} · {current.Channel} · {current.Published.ToLocalTime():yyyy-MM-dd HH:mm}";
             if(!loading&&assets.Count>0&&choices.SelectedIndex<0)note.Text="未识别出适合当前电脑的安装包，可展开列表手动选择其他文件保存。";
             SelectionState();

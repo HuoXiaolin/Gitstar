@@ -18,13 +18,13 @@ public sealed partial class GitHubClient
         if(e.TryGetProperty("permissions",out var p)){push=p.TryGetProperty("push",out var a)&&a.GetBoolean();admin=p.TryGetProperty("admin",out a)&&a.GetBoolean();}
         return new(S(e,"full_name"),S(e,"description"),e.GetProperty("private").GetBoolean(),S(e,"default_branch"),push,admin,e.TryGetProperty("archived",out var archived)&&archived.GetBoolean(),DateTimeOffset.TryParse(S(e,"updated_at"),out var date)?date:DateTimeOffset.MinValue,S(e,"homepage"),S(e,"visibility"),e.TryGetProperty("fork",out var fork)&&fork.GetBoolean(),e.TryGetProperty("id",out var id)&&id.TryGetInt64(out var number)?number:0){Metadata=ParseMetadata(e)};
     }
-    public async Task<List<ManagedProject>> MyProjects(CancellationToken ct)
+    public async Task<List<ManagedProject>> MyProjects(CancellationToken ct,Action<IReadOnlyList<ManagedProject>>? received=null)
     {
         if(Token.Length==0)throw new IOException("请先登录 GitHub。");
         var list=new List<ManagedProject>();
         for(var page=1;;page++){
             var data=await Request($"user/repos?affiliation=owner,collaborator,organization_member&sort=updated&direction=desc&per_page=100&page={page}",ct:ct);
-            list.AddRange(data.EnumerateArray().Select(ParseProject));if(data.GetArrayLength()<100)return list;
+            var items=data.EnumerateArray().Select(ParseProject).ToArray();list.AddRange(items);received?.Invoke(items);if(data.GetArrayLength()<100)return list;
         }
     }
     public async Task<ManagedProject> Project(string repo,CancellationToken ct){Validate(repo);return ParseProject(await Request("repos/"+repo,ct:ct,fresh:true));}

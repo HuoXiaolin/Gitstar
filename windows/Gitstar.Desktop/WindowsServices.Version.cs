@@ -12,7 +12,7 @@ public static partial class WindowsServices
         string text=>int.TryParse(text,System.Globalization.NumberStyles.Integer,System.Globalization.CultureInfo.InvariantCulture,out var number)&&number==1,
         _=>false
     };
-    private static List<RegisteredProgram> RegisteredPrograms(Action<string>? warning=null)
+    private static List<RegisteredProgram> RegisteredPrograms(Action<string>? warning=null,CancellationToken ct=default)
     {
         var list=new List<RegisteredProgram>();
         foreach(var hive in new[]{RegistryHive.LocalMachine,RegistryHive.CurrentUser})foreach(var view in new[]{RegistryView.Registry64,RegistryView.Registry32}){
@@ -20,6 +20,7 @@ public static partial class WindowsServices
                 using var root=RegistryKey.OpenBaseKey(hive,view);using var uninstall=root.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall");
                 if(uninstall==null)continue;
                 foreach(var key in uninstall.GetSubKeyNames())try{
+                    ct.ThrowIfCancellationRequested();
                     using var entry=uninstall.OpenSubKey(key);var name=entry?.GetValue("DisplayName") as string;
                     // Uninstall entries are written by third-party installers. A malformed
                     // optional flag must not abort discovery of unrelated applications.
@@ -36,9 +37,12 @@ public static partial class WindowsServices
     }
     private static List<InstalledApp> ScanCurrentPrograms(IEnumerable<Binding> bindings,IEnumerable<InstalledApp> portable,IEnumerable<InstalledApp> known,bool matchedOnly,CancellationToken ct=default)
     {
-        var subscriptions=bindings.ToArray();var apps=ScanInventory(RegisteredPrograms(),subscriptions,portable,known,matchedOnly,RelatedRunningPrograms(subscriptions),ct);return matchedOnly?apps:SoftwareInventory.Combine(apps,UserPrograms(ct),subscriptions);
+        var subscriptions=bindings.ToArray();var apps=ScanInventory(RegisteredPrograms(ct:ct),subscriptions,portable,known,matchedOnly,RelatedRunningPrograms(subscriptions),ct);return matchedOnly?apps:SoftwareInventory.Combine(apps,UserPrograms(ct),subscriptions);
     }
-    public static List<InstalledApp> ScanMatched(IEnumerable<Binding> bindings,IEnumerable<InstalledApp> portable,IEnumerable<InstalledApp>? known=null)=>ScanCurrentPrograms(bindings,portable,known??[],true);
+    public static List<InstalledApp> ScanMatched(IEnumerable<Binding> bindings,IEnumerable<InstalledApp> portable,IEnumerable<InstalledApp>? known=null,CancellationToken ct=default)
+    {
+        var targets=bindings.ToArray();ct.ThrowIfCancellationRequested();return targets.Length==0?[]:ScanCurrentPrograms(targets,portable,known??[],true,ct);
+    }
     internal static List<InstalledApp> ScanInventory(IEnumerable<RegisteredProgram> registry,IEnumerable<Binding> bindings,IEnumerable<InstalledApp> portable,IEnumerable<InstalledApp> known,bool matchedOnly,IEnumerable<ProgramVersion>? running=null,CancellationToken ct=default)
     {
         var explicitPortable=portable.ToArray();var records=registry.Concat(explicitPortable.Select(app=>new RegisteredProgram(app))).Select(record=>explicitPortable.Any(app=>app.Portable&&(app.Id.Equals(record.App.Id,StringComparison.OrdinalIgnoreCase)||app.ExecutablePath.Length>0&&app.ExecutablePath.Equals(record.App.ExecutablePath,StringComparison.OrdinalIgnoreCase)))?record with{App=record.App with{Portable=true}}:record).ToList();var apps=records.Select(record=>record.App).ToArray();

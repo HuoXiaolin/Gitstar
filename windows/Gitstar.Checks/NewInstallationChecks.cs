@@ -63,5 +63,29 @@ internal static class NewInstallationChecks
             "conflicting preview labels for a shared digest leave the stable target unresolved");
         check(InstallerVersionRules.Target(renamedPackage, associated, aliases with { Repository = "other/Example" }) == release.Tag,
             "matching attachment digests from another repository do not change the pending target");
+
+        var portable = offline with { Id = 5, Name = "Example_0.6.67_x64-portable.zip" };
+        var mixed = distinctStable with { Assets = [.. distinctStable.Assets, portable] };
+        var preference = new DownloadSelectionPreference(mixed.Repository, DownloadPurpose.Install, mixed.Tag, [renamed.Name]);
+        var preferred = DownloadSelectionRules.SelectInstaller(mixed, binding, preference, Architecture.X64);
+        check(preferred == renamed && Rules.CompareVersions(InstallerVersionRules.Target(mixed, binding, preferred), app.Version) == 0,
+            "the installed online alias is current even when the release also has offline and portable files");
+        check(DownloadSelectionRules.SelectInstaller(mixed, binding, null, Architecture.X64)?.Id == offline.Id,
+            "without an installer preference a distinct stable installer is still offered");
+        var msiBinding = new Binding { AssetPattern = ".msi" };
+        var msi = offline with { Id = 6, Name = "Example_0.6.67_x64.msi" };
+        check(DownloadSelectionRules.SelectInstaller(mixed with { Assets = [.. mixed.Assets, msi] }, msiBinding, preference, Architecture.X64) == msi,
+            "explicit installer matching overrides a remembered online package");
+        var rebuilt = renamed with { Digest = "sha256:" + new string('C', 64) };
+        var rebuiltRelease = mixed with { Assets = mixed.Assets.Select(asset => asset == renamed ? rebuilt : asset).ToList() };
+        var rebuiltTarget = DownloadSelectionRules.SelectInstaller(rebuiltRelease, binding, preference, Architecture.X64);
+        check(rebuiltTarget == rebuilt && Rules.CompareVersions(InstallerVersionRules.Target(rebuiltRelease, binding, rebuiltTarget), app.Version) > 0,
+            "a true stable rebuild of the remembered installer is offered even when its filename and tag are unchanged");
+        var newName = rebuilt with { Id = 8, Name = "Example_0.6.67-setup-amd64.exe" };
+        var renamedStable = mixed with { Assets = [.. mixed.Assets, newName] };
+        check(DownloadSelectionRules.SelectInstaller(renamedStable, binding, preference, Architecture.X64) == newName,
+            "a differently named stable build of the same installer variant supersedes the remembered preview alias");
+        check(PackageRules.MatchesAttachment(renamedPackage, mixed, renamed) && !PackageRules.MatchesAttachment(renamedPackage, mixed, rebuilt),
+            "a same-name rebuilt attachment is not reused from the old download record");
     }
 }

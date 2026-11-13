@@ -24,7 +24,7 @@ public sealed class Card : Observable
     public string Title => Update?.App.Name ?? Release.Repository.Split('/').Last();
     public string Repository => Release.Repository;
     public string FollowSource {get;init;}="";
-    public string Version => Update==null ? Release.Tag : $"{Update.App.Version}  →  {Release.Tag}";
+    public string Version => Update==null ? Release.Tag : $"{Update.App.Version}  →  {Update.TargetVersion}";
     public string VersionEvidence=>Update==null?"":$"版本来源：{Update.App.VersionSource}\n程序：{Update.App.ExecutablePath}\n{Update.App.VersionDetails}\n登记版本：{Update.App.RegisteredVersion}";
     public string Channel => Release.Channel;
     public string BadgeColor => Release.Prerelease ? "#FFF1D6" : "#E9F7F1";
@@ -35,6 +35,18 @@ public sealed class Card : Observable
     public string Date => ShowRepositoryUpdated?RepositoryUpdated is {} updated?$"仓库更新 {updated.ToLocalTime():yyyy-MM-dd HH:mm}":"更新时间待同步":Release.Date;
     public string DateHint=>$"发布时间：{Release.Date}\n仓库更新时间：{(RepositoryUpdated is {} updated?updated.ToLocalTime().ToString("yyyy-MM-dd HH:mm"):"尚无缓存，点击检查更新后获取")}\n更新时间使用 GitHub 仓库的 updated_at，与版本发布时间分别记录。";
     public static IOrderedEnumerable<Card> Order(IEnumerable<Card> cards)=>cards.OrderByDescending(c=>c.SortTime).ThenByDescending(c=>c.Release.Published).ThenBy(c=>c.Repository,StringComparer.OrdinalIgnoreCase);
+    internal static void Reconcile(ObservableCollection<Card> current,IReadOnlyList<Card> desired)
+    {
+        bool Same(Card a,Card b)=>a.Repository.Equals(b.Repository,StringComparison.OrdinalIgnoreCase)&&a.Release.Id==b.Release.Id&&a.Update?.App.Id==b.Update?.App.Id&&a.Update?.Binding.TagPrefix==b.Update?.Binding.TagPrefix&&a.Update?.Binding.AssetPattern==b.Update?.Binding.AssetPattern;
+        for(var index=0;index<desired.Count;index++){
+            var next=desired[index];var found=-1;for(var candidate=index;candidate<current.Count;candidate++)if(Same(current[candidate],next)){found=candidate;break;}
+            if(found<0){current.Insert(index,next);continue;}
+            if(found!=index)current.Move(found,index);var old=current[index];
+            if(old.Release==next.Release&&old.Update==next.Update&&old.Metadata==next.Metadata&&old.RepositoryUpdated==next.RepositoryUpdated&&old.ShowRepositoryUpdated==next.ShowRepositoryUpdated&&old.FollowSource==next.FollowSource&&ReferenceEquals(old.Transfer,next.Transfer)){old.IsSelected=next.IsSelected;old.IsSpecial=next.IsSpecial;}
+            else current[index]=next;
+        }
+        while(current.Count>desired.Count)current.RemoveAt(current.Count-1);
+    }
     private string? summary;
     public string Summary => summary ??= ReleasePreview.Create(Release.Body,Release.Tag);
     public string Action => Update==null ? "保存安装包" : Update.App.Portable?"下载便携新版":Update.Asset?.Name.EndsWith(".zip",StringComparison.OrdinalIgnoreCase)==true ? "获取便携新版" : "下载并安装";

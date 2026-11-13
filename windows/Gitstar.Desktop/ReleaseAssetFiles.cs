@@ -18,6 +18,20 @@ public static class ReleaseAssetFiles
                 files.Add(new(ReleaseRules.AssetName(file.Name),copy,total,Convert.ToHexString(hash.GetHashAndReset()),file.Name));
             }
         }
+        return await ValidateManifest(files,ct,true);
+    }
+    public static async Task<List<PreparedReleaseAsset>> Inspect(IEnumerable<string> paths,CancellationToken ct)
+    {
+        var files=new List<PreparedReleaseAsset>();
+        foreach(var path in paths){
+            ct.ThrowIfCancellationRequested();var file=new FileInfo(path);if(file.Length==0||file.Attributes.HasFlag(FileAttributes.ReparsePoint))throw new IOException("附件为空或是文件链接："+file.Name);
+            using var input=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read,81920,true);
+            var size=input.Length;var sha=Convert.ToHexString(await SHA256.HashDataAsync(input,ct));files.Add(new(ReleaseRules.AssetName(file.Name),path,size,sha,file.Name));
+        }
+        return await ValidateManifest(files,ct,false);
+    }
+    private static async Task<List<PreparedReleaseAsset>> ValidateManifest(List<PreparedReleaseAsset> files,CancellationToken ct,bool write)
+    {
         if(files.GroupBy(item=>item.Name,StringComparer.OrdinalIgnoreCase).Any(group=>group.Count()>1))throw new IOException("附件的兼容名称重复，请调整文件名后重试。");
         var manifest=files.FirstOrDefault(item=>item.Name.Equals("SHA256SUMS.txt",StringComparison.OrdinalIgnoreCase));
         if(manifest!=null){
@@ -30,7 +44,7 @@ public static class ReleaseAssetFiles
                 if(item.Name!=item.OriginalName){lines[index]=item.Sha+"  "+item.Name;renamed=true;}
             }
             if(verified==0&&files.Count>1)throw new IOException("校验清单没有覆盖所选安装包，请完成构建后重试。");
-            if(renamed){await File.WriteAllTextAsync(manifest.Path,string.Join("\n",lines)+"\n",new UTF8Encoding(false),ct);using var input=File.OpenRead(manifest.Path);files[files.IndexOf(manifest)]=manifest with{Size=input.Length,Sha=Convert.ToHexString(await SHA256.HashDataAsync(input,ct))};}
+            if(renamed){var bytes=new UTF8Encoding(false).GetBytes(string.Join("\n",lines)+"\n");if(write)await File.WriteAllBytesAsync(manifest.Path,bytes,ct);files[files.IndexOf(manifest)]=manifest with{Size=bytes.Length,Sha=Convert.ToHexString(SHA256.HashData(bytes))};}
         }
         return files;
     }

@@ -12,7 +12,7 @@ public partial class MainWindow
         // This handler must not wait for callbacks, network completion, database locks or user input.
         ApplicationExit.BeginSessionEnding();quitting=exit=true;
         timer.Stop();backgroundMemoryTimer.Stop();store.BeginShutdown();
-        ApplicationExit.Observe(taskCoordinator.CancelAllAsync());ApplicationExit.Cancel(rankingRequest);
+        ApplicationExit.Observe(taskCoordinator.CancelAllAsync());ApplicationExit.Cancel(rankingRequest);ApplicationExit.Cancel(scanLifetime);
         QueueShutdownCleanup();
     }
 
@@ -40,7 +40,7 @@ public partial class MainWindow
             window.Close();if(window.IsVisible||ApplicationExit.IsSessionEnding)return;
         }
         quitting=true;ApplicationExit.BeginExit();timer.Stop();backgroundMemoryTimer.Stop();
-        ApplicationExit.Observe(taskCoordinator.CancelAllAsync());ApplicationExit.Cancel(rankingRequest);
+        ApplicationExit.Observe(taskCoordinator.CancelAllAsync());ApplicationExit.Cancel(rankingRequest);ApplicationExit.Cancel(scanLifetime);
         var grace=Stopwatch.StartNew();while(busy&&grace.Elapsed<TimeSpan.FromSeconds(2)&&!ApplicationExit.IsSessionEnding)await Task.Delay(25);
         if(ApplicationExit.IsSessionEnding)return;
         // Settings and task checkpoints are committed during normal operations. No VACUUM or final rescan here.

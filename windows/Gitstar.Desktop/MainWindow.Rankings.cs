@@ -11,6 +11,9 @@ public partial class MainWindow
     private string rankingQuery="";
     private RankingPage? rankingData;
     private CancellationTokenSource? rankingRequest;
+    private string rankingLoadKey="";
+    private Task? rankingLoad;
+    private readonly Dictionary<string,RankingPage> rankingMemory=new();
     private StackPanel rankingCards=null!;
     private TextBlock rankingHint=null!,rankingPageLabel=null!;
     private TextBox rankingSearch=null!;
@@ -35,14 +38,21 @@ public partial class MainWindow
         rankingsPage=true;projectsPage=false;localPage=false;model.SelectionMode=false;UpdatesToolbar.Visibility=UpdatesContent.Visibility=ProjectsHost.Visibility=Visibility.Collapsed;RankingsHost.Visibility=Visibility.Visible;SetPageAccent(3);UseFeature(UsageFeature.Rankings);await LoadRankings();
     }
     private void LeaveRankings(){rankingsPage=false;RankingsHost.Visibility=Visibility.Collapsed;rankingGeneration++;rankingRequest?.Cancel();}
-    private async Task LoadRankings(bool force=false)
+    private Task LoadRankings(bool force=false)
+    {
+        var key=$"{CacheKey}/{rankingKind}/{rankingPeriod}/{rankingPage}/{rankingQuery.Trim()}";
+        if(!force&&rankingLoadKey==key&&rankingLoad is {IsCompleted:false}&&rankingRequest?.IsCancellationRequested==false)return rankingLoad;
+        rankingLoadKey=key;return rankingLoad=LoadRankingsCore(force,key);
+    }
+    private async Task LoadRankingsCore(bool force,string memoryKey)
     {
         if(!rankingsPage||quitting)return;var generation=++rankingGeneration;rankingRequest?.Cancel();using var request=new CancellationTokenSource();rankingRequest=request;var account=CacheKey;var client=api;var kind=rankingKind;var period=rankingPeriod;var page=rankingPage;var query=rankingQuery;
         var key=$"rankings/v1/{kind}/{period}";
+        if(rankingData==null&&rankingMemory.TryGetValue(memoryKey,out var memory))rankingData=memory;
         if(rankingData==null&&kind!=RankingKind.Search&&page==1)try{var cached=store.Get<RankingPage?>(key,null);if(cached?.Kind==kind&&cached.Period==period&&cached.Page==page)rankingData=cached;}catch(Exception error)when(error is JsonException or IOException){}
-        RenderRankings();if(!force&&rankingData is {} fresh&&fresh.Kind==kind&&fresh.Period==period&&fresh.Page==page&&!fresh.Incomplete&&DateTimeOffset.UtcNow-fresh.Fetched is var age&&age>=TimeSpan.Zero&&age<TimeSpan.FromHours(1)){rankingRequest=null;rankingRefresh.IsEnabled=true;return;}
+        RenderRankings();if(!force&&rankingData is {} fresh&&fresh.Kind==kind&&fresh.Period==period&&fresh.Page==page&&!fresh.Incomplete&&DateTimeOffset.UtcNow-fresh.Fetched is var age&&age>=TimeSpan.Zero&&age<(kind==RankingKind.Search?TimeSpan.FromMinutes(10):TimeSpan.FromHours(1))){rankingRequest=null;rankingRefresh.IsEnabled=true;return;}
         rankingRefresh.IsEnabled=rankingPrevious.IsEnabled=rankingNext.IsEnabled=false;rankingHint.Text=rankingData==null?"正在读取 GitHub 项目…":"正在刷新，暂时显示上次结果…";
-        try{var data=await client.Rankings(kind,period,page,query,request.Token);if(request.IsCancellationRequested||generation!=rankingGeneration||account!=CacheKey||!rankingsPage||quitting)return;rankingData=data;if(kind!=RankingKind.Search&&page==1)store.Set(key,data);RenderRankings();}
+        try{var data=await client.Rankings(kind,period,page,query,request.Token);if(request.IsCancellationRequested||generation!=rankingGeneration||account!=CacheKey||!rankingsPage||quitting)return;rankingData=data;rankingMemory[memoryKey]=data;while(rankingMemory.Count>24)rankingMemory.Remove(rankingMemory.MinBy(entry=>entry.Value.Fetched).Key);if(kind!=RankingKind.Search&&page==1)store.Set(key,data);RenderRankings();}
         catch(OperationCanceledException)when(request.IsCancellationRequested){}
         catch(Exception error){if(generation==rankingGeneration&&rankingsPage&&!quitting){RenderRankings();rankingHint.Text="读取未完成："+error.Message+(rankingData!=null?" 已保留上次结果。":" 可点击刷新重试。");}}
         finally{if(ReferenceEquals(rankingRequest,request)){rankingRequest=null;rankingRefresh.IsEnabled=true;rankingPrevious.IsEnabled=rankingPage>1;rankingNext.IsEnabled=rankingData?.More==true;}}
@@ -92,11 +102,12 @@ public partial class MainWindow
         settings.Account="example-user";AccountLabel();var transport=new RankingSmokeTransport();api.Dispose();api=new(settings,transport){Token="fixture"};
         rankingData=new(RankingKind.Trending,0,1,DateTimeOffset.UtcNow,examples.ToList(),3,false);RenderRankings();FollowRankingLocal(examples[0].Repository);var localSaved=settings.ExtraRepositories.Contains("example/desk-tools");await FollowRankingStar(examples[0].Repository);var starSaved=transport.Starred&&repositories.Any(repo=>repo.FullName=="example/desk-tools"&&repo.Starred);var precedence=!FollowLists.Local(repositories,settings.ExtraRepositories,settings.HiddenRepositories).Contains("example/desk-tools");
         rankingKind=RankingKind.Search;rankingQuery="desk";rankingData=null;await LoadRankings(true);var searchWorks=rankingData?.Kind==RankingKind.Search&&rankingData.Items.Count==1&&rankingData.Items[0].Repository.Description=="Search result project introduction";
+        var searchCount=transport.SearchRequests;rankingData=null;await LoadRankings();var queryCache=transport.SearchRequests==searchCount&&rankingData?.Kind==RankingKind.Search;rankingQuery="another";rankingData=null;await LoadRankings();var queryIsolated=transport.SearchRequests==searchCount+1;await LoadRankings(true);var forced=transport.SearchRequests==searchCount+2;if(!queryCache||!queryIsolated||!forced)throw new IOException("Ranking cache identity or force-refresh regression");
         Page(false);var left=!rankingsPage&&RankingsHost.Visibility==Visibility.Collapsed;Projects_Click(this,new RoutedEventArgs());var projects=!rankingsPage&&projectsPage;rankingsPage=true;projectsPage=false;UpdatesToolbar.Visibility=UpdatesContent.Visibility=ProjectsHost.Visibility=Visibility.Collapsed;RankingsHost.Visibility=Visibility.Visible;rankingKind=RankingKind.Trending;rankingPeriod=0;rankingData=new(RankingKind.Trending,0,1,DateTimeOffset.UtcNow,examples.ToList(),3,false);SetPageAccent(3);RenderRankings();if(!localSaved||!starSaved||!precedence||!searchWorks||!left||!projects)throw new IOException("Rankings interaction regression");
         UpdateLayout();var avatarCount=rankingCards.Children.OfType<Border>().Select(border=>(Grid)border.Child).SelectMany(card=>card.Children.OfType<StackPanel>().Where(panel=>Grid.GetColumn(panel)==0)).SelectMany(panel=>panel.Children.OfType<OwnerAvatar>()).Count();var iconCount=0;var aligned=true;
         foreach(var card in rankingCards.Children.OfType<Border>().Select(border=>(Grid)border.Child)){var content=card.Children.OfType<StackPanel>().Single(panel=>Grid.GetColumn(panel)==1);var address=content.Children.OfType<DockPanel>().Single();var text=address.Children.OfType<TextBlock>().Single();var center=text.TranslatePoint(new Point(0,text.ActualHeight/2),address).Y;foreach(var button in address.Children.OfType<StackPanel>().Single().Children.OfType<Button>()){if(button.Content is System.Windows.Shapes.Path)iconCount++;aligned&=Math.Abs(button.TranslatePoint(new Point(0,button.ActualHeight/2),address).Y-center)<=1;}}
         if(avatarCount!=3||iconCount!=6||!aligned)throw new IOException("Ranking avatar or address icon alignment regression");
-        File.WriteAllText(Path.ChangeExtension(path,".rankings.json"),JsonSerializer.Serialize(new{AvatarCount=avatarCount,VectorIconCount=iconCount,AddressIconsAligned=aligned,LocalFollowSaved=localSaved,StarSaved=starSaved,GitHubFollowPrecedence=precedence,SearchVerified=searchWorks,NavigationVerified=left&&projects,TopLevelVisible=RankingsButton.IsVisible,OnlyIntroductions=rankingCards.Children.Count==3,SearchAvailable=rankingSearch.IsVisible,FollowAndStar=true}));
+        File.WriteAllText(Path.ChangeExtension(path,".rankings.json"),JsonSerializer.Serialize(new{AvatarCount=avatarCount,VectorIconCount=iconCount,AddressIconsAligned=aligned,LocalFollowSaved=localSaved,StarSaved=starSaved,GitHubFollowPrecedence=precedence,SearchVerified=searchWorks,NavigationVerified=left&&projects,TopLevelVisible=RankingsButton.IsVisible,OnlyIntroductions=rankingCards.Children.Count==3,SearchAvailable=rankingSearch.IsVisible,FollowAndStar=true,QueryCache=queryCache,QueryIsolation=queryIsolated,ForceRefresh=forced}));
         _=Dispatcher.BeginInvoke(()=>{UpdateLayout();if(Environment.GetCommandLineArgs().Contains("--layout-check"))VerifyMainLayout(path);var root=(FrameworkElement)Content;var bitmap=new System.Windows.Media.Imaging.RenderTargetBitmap((int)ActualWidth,(int)ActualHeight,96,96,PixelFormats.Pbgra32);bitmap.Render(this);var encoder=new System.Windows.Media.Imaging.PngBitmapEncoder();encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));using(var file=File.Create(path))encoder.Save(file);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();},System.Windows.Threading.DispatcherPriority.ApplicationIdle);
     }
 }

@@ -75,7 +75,10 @@ public record DownloadedPackage(string Repository,long ReleaseId,string Tag,bool
     public bool RetainForBatch {get;init;}
     public DateTimeOffset? DownloadedAt {get;init;}
 }
-public record UpdateCandidate(InstalledApp App, Binding Binding, Release Release, Asset? Asset);
+public record UpdateCandidate(InstalledApp App, Binding Binding, Release Release, Asset? Asset)
+{
+    public string TargetVersion { get; init; } = Release.Tag;
+}
 public class Operation
 {
     public List<string> Results {get;set;}=[];

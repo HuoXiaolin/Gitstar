@@ -63,8 +63,11 @@ public partial class MainWindow
         const string previewVersion = "2.0.0-beta.20261105.1";
         var stableName = new Asset(10, "Editor_2.0.0_x64-setup.exe", bytes.Length, "", "sha256:" + hash);
         var previewName = stableName with { Id = 11, Name = $"Editor_{previewVersion}_x64-setup.exe" };
-        var aliasRelease = first.Release with { Id = 44, Assets = [stableName, previewName] };
+        var offline = stableName with { Id = 12, Name = "Editor_2.0.0_x64-offline-setup.exe", Size = bytes.Length * 2, Digest = "sha256:" + new string('B', 64) };
+        var portable = offline with { Id = 13, Name = "Editor_2.0.0_x64-portable.zip" };
+        var aliasRelease = first.Release with { Id = 44, Assets = [stableName, previewName, offline, portable] };
         releases = [aliasRelease];
+        RememberPackageSelection(aliasRelease, DownloadPurpose.Install, [stableName]);
         var aliasPath = Path.Combine(root, stableName.Name);
         File.WriteAllBytes(aliasPath, bytes);
         await RecordPackage(aliasRelease, stableName, aliasPath, root, CancellationToken.None);
@@ -82,9 +85,27 @@ public partial class MainWindow
         LoadPendingInstallations();
         var installedAliasCleared = pendingInstallations.Count == 0 && downloadDecisions == null && updates.Count == 0
             && TasksPendingDot.Visibility == Visibility.Collapsed && File.Exists(aliasPath);
+        var rebuilt = stableName with { Digest = "sha256:" + new string('C', 64) };
+        releases = [aliasRelease with { Assets = [rebuilt, previewName, offline, portable] }];
+        PlanUpdates();
+        var rebuiltShown = updates.Count == 1 && updates[0].Asset == rebuilt && updates[0].TargetVersion == aliasRelease.Tag;
+        var rebuiltSelected = false;
+        if (rebuiltShown)
+        {
+            var update = updates[0];
+            await ChoosePackage(new() { Release = update.Release, Update = update },
+                (_, _) => throw new InvalidOperationException("Local picker must not read a version page"),
+                _ => throw new InvalidOperationException("Local picker must not request Latest"),
+                (_, _) => throw new InvalidOperationException("Local picker must not request release details"),
+                null, (picker, _, files, _, _) =>
+                {
+                    rebuiltSelected = files.SelectedItem is string selected && selected.StartsWith(rebuilt.Name + " ", StringComparison.Ordinal);
+                    picker.Close();
+                });
+        }
 
-        var passed=initial&&widthOK&&closedRetains&&loaded&&reopened&&mixedCloseRetains&&installerExitNotCompletion&&installedRemoved&&staleResponseIgnored&&newerRemoved&&noResurrection&&changedFileBlocked&&aliasRetargeted&&installedAliasCleared;
-        File.WriteAllText(Path.ChangeExtension(path,".pending-installations.json"),JsonSerializer.Serialize(new{Passed=passed,DownloadsReleaseTaskResources=initial,RowActionsFit=widthOK,ClosingRetainsEntries=closedRetains,DurableReload=loaded,TasksEntryReopens=reopened,TemporaryQuestionsDoNotDeleteInstallations=mixedCloseRetains,InstallerExitAloneKeepsEntry=installerExitNotCompletion,VerifiedInstalledRemovesEntry=installedRemoved,NewerReleaseRemovesEntryButPreservesFile=newerRemoved,NoLegacyResurrection=noResurrection,ChangedFileCannotExecute=changedFileBlocked,AliasRetargetedOnReload=aliasRetargeted,InstalledAliasClearsPendingBadgeAndDuplicateUpdate=installedAliasCleared,RealInstallerStarted=false,RealNetworkUsed=false}));
+        var passed=initial&&widthOK&&closedRetains&&loaded&&reopened&&mixedCloseRetains&&installerExitNotCompletion&&installedRemoved&&staleResponseIgnored&&newerRemoved&&noResurrection&&changedFileBlocked&&aliasRetargeted&&installedAliasCleared&&rebuiltShown&&rebuiltSelected;
+        File.WriteAllText(Path.ChangeExtension(path,".pending-installations.json"),JsonSerializer.Serialize(new{Passed=passed,DownloadsReleaseTaskResources=initial,RowActionsFit=widthOK,ClosingRetainsEntries=closedRetains,DurableReload=loaded,TasksEntryReopens=reopened,TemporaryQuestionsDoNotDeleteInstallations=mixedCloseRetains,InstallerExitAloneKeepsEntry=installerExitNotCompletion,VerifiedInstalledRemovesEntry=installedRemoved,NewerReleaseRemovesEntryButPreservesFile=newerRemoved,NoLegacyResurrection=noResurrection,ChangedFileCannotExecute=changedFileBlocked,AliasRetargetedOnReload=aliasRetargeted,InstalledAliasClearsPendingBadgeAndDuplicateUpdate=installedAliasCleared,RebuiltPreferredInstallerStillOffered=rebuiltShown,UpdateCardAndPickerAgree=rebuiltSelected,RealInstallerStarted=false,RealNetworkUsed=false}));
         if(!passed)throw new IOException("Persistent installation regression");
     }
     private async Task PendingSelectionSmoke(string path)

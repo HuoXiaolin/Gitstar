@@ -4,6 +4,8 @@ namespace Gitstar.Core;
 
 public static class PackagePreference
 {
+    internal static bool CanRecommend(Asset asset, Architecture host, bool portable = false) => Score(asset, host, portable) >= 0;
+
     public static Asset? Select(IEnumerable<Asset> assets,Architecture host,string pattern="",bool portable=false)
     {
         var ranked=assets.Select((asset,index)=>(Asset:asset,Index:index,Score:Score(asset,host,portable))).Where(item=>item.Score>=0).ToArray();

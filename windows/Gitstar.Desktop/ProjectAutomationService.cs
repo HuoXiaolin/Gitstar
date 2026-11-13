@@ -6,9 +6,9 @@ public static class ProjectAutomationService
     private static bool Immutable(JsonElement release)=>release.TryGetProperty("immutable",out var value)&&value.GetBoolean();
     public static async Task<AutomationResult> Run(ProjectAutomation config,GitHubClient api,string stagingRoot,Func<CancellationToken,Task<GitProjectState>> uploadSource,Action<string,long?> progress,CancellationToken ct,Func<CancellationToken,Task<string>>? sourceNotes=null,Action<ReleaseUploadProgress>? uploadProgress=null)
     {
-        progress("读取版本与安装包",null);var plan=await Task.Run(()=>AutomationRules.Plan(config),ct);
+        progress("读取版本与安装包",null);var planTask=Task.Run(()=>AutomationRules.Plan(config),ct);var projectTask=api.Project(config.Repository,ct);await Task.WhenAll(planTask,projectTask);var plan=await planTask;
         var configuredNotes=ReleaseNotes.Read(config.SourceFolder,config.NotesFile,config.ManualNotes);
-        var current=await api.Project(config.Repository,ct);if(!current.CanPush||current.Archived)throw new IOException("当前项目没有提交权限或已归档。");
+        var current=await projectTask;if(!current.CanPush||current.Archived)throw new IOException("当前项目没有提交权限或已归档。");
         var found=await api.AutomationRelease(config.Repository,plan.Version,config.TagPrefix,plan.Prerelease,ct);if(found.Higher!=null)throw new IOException("GitHub 已有更高版本 "+found.Higher+"，不会用旧安装包覆盖最新版本。");
         if(found.Release is {} locked&&Immutable(locked)&&config.ReplaceSameVersion)throw new IOException("当前版本在 GitHub 已锁定，无法更新安装包；请构建更高版本。");
         var root=Path.GetFullPath(stagingRoot);Directory.CreateDirectory(root);var stage=Path.GetFullPath(Path.Combine(root,Guid.NewGuid().ToString("N")));if(!stage.StartsWith(root.TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))throw new IOException("安装包暂存目录无效。");Directory.CreateDirectory(stage);
