@@ -22,5 +22,33 @@ internal static class FollowHistoryChecks
         var root=Path.Combine(Path.GetTempPath(),"Gitstar-follow-history-"+Guid.NewGuid().ToString("N"));try{using(var store=new LocalStore(root))store.Set("settings",settings);using(var store=new LocalStore(root)){var saved=store.Get("settings",new Settings());check(saved.FollowHistory.Any(e=>e.Id==entry.Id&&e.RestoredAs==FollowKind.Local)&&saved.ExtraRepositories.Contains("example/editor"),"history and restoration result persist across store reopening");}}finally{Directory.Delete(root,true);}
         var bounded=new Settings{Account="alice"};for(var i=0;i<FollowHistory.Limit+3;i++)FollowHistory.Record(bounded,"example/repo"+i,FollowKind.Local,[],now.AddSeconds(i));check(bounded.FollowHistory.Count==FollowHistory.Limit&&bounded.FollowHistory[0].Repository=="example/repo502","history keeps the most recent bounded cancellation records");
         var exported=FollowLists.Export(settings.ExtraRepositories);check(!exported.Contains("RemovedAt")&&!exported.Contains("alice")&&!exported.Contains("private/secret"),"portable follow exports exclude account history and private metadata");
+
+        const string removedRepo = "example/retired";
+        var retainedBinding = new Binding { AppId = "retired-app", Repository = removedRepo, IgnoredTag = "v2.0" };
+        var removal = new Settings
+        {
+            Account = "alice", ExtraRepositories = ["EXAMPLE/Retired", "example/still-followed"], Bindings = [retainedBinding],
+            HiddenRepositories = ["example/unfollowed"], LocalGroups = [new("local", "本地分组", "本地", [removedRepo, "example/still-followed"])]
+        };
+        var cloudGroup = new StarGroup("cloud", "开发", "GitHub", [removedRepo]);
+        FollowLists.RemoveFromList(removal, removedRepo, [cloudGroup], now);
+        FollowLists.RemoveFromList(removal, "EXAMPLE/Retired", [cloudGroup], now);
+        var record = removal.FollowHistory.Single();
+        check(record.Kind == FollowKind.RemovedFromList && record.Groups.Count == 2 && removal.RemovedRepositories.SequenceEqual([removedRepo])
+            && removal.ExtraRepositories.SequenceEqual(["example/still-followed"]) && removal.LocalGroups[0].Repositories.SequenceEqual(["example/still-followed"])
+            && cloudGroup.Repositories.SequenceEqual([removedRepo]) && removal.Bindings.Single() == retainedBinding && retainedBinding.IgnoredTag == "v2.0",
+            "removing a project is idempotent and clears only its local follow and groups while preserving binding settings and remote memberships");
+
+        var synced = new[] { new Repository(removedRepo, "", false, true), new Repository("example/another-star", "", false, true) };
+        var restoredSettings = System.Text.Json.JsonSerializer.Deserialize<Settings>(System.Text.Json.JsonSerializer.Serialize(removal))!;
+        restoredSettings.Bindings.Add(new() { AppId = "unfollowed-app", Repository = "example/unfollowed" });
+        check(!FollowLists.IsVisible(restoredSettings, "EXAMPLE/Retired")
+            && RepositoryChecks.Targets(false, synced, restoredSettings).SequenceEqual(["example/another-star", "example/still-followed", "example/unfollowed"])
+            && RepositoryChecks.Targets(true, synced, restoredSettings).SequenceEqual(["example/unfollowed"]),
+            "explicit removal survives persistence and suppresses remote stars and bound checks without stopping a normally unfollowed binding");
+        FollowHistory.RestoreLocal(restoredSettings, record, now.AddMinutes(1));
+        check(FollowLists.IsVisible(restoredSettings, removedRepo) && restoredSettings.LocalGroups[0].Repositories.Contains(removedRepo)
+            && RepositoryChecks.Targets(true, [], restoredSettings).Contains(removedRepo),
+            "restoring an explicitly removed repository re-enables checks and restores its surviving local groups");
     }
 }

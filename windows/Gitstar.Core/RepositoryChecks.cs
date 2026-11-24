@@ -3,7 +3,13 @@ namespace Gitstar.Core;
 public static class RepositoryChecks
 {
     public const int DefaultConcurrency=24;
-    public static string[] Targets(bool matchedOnly,IEnumerable<Repository> stars,Settings settings)=>(matchedOnly?settings.Bindings.Where(binding=>!binding.Disabled).Select(binding=>binding.Repository):stars.Select(repo=>repo.FullName).Concat(settings.ExtraRepositories).Concat(settings.Bindings.Where(binding=>!binding.Disabled).Select(binding=>binding.Repository))).Where(Rules.ValidRepository).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    public static string[] Targets(bool matchedOnly, IEnumerable<Repository> stars, Settings settings)
+    {
+        var bound = settings.Bindings.Where(binding => !binding.Disabled).Select(binding => binding.Repository);
+        var names = matchedOnly ? bound : stars.Select(repo => repo.FullName).Concat(settings.ExtraRepositories).Concat(bound);
+        return names.Where(name => Rules.ValidRepository(name) && !FollowLists.IsRemoved(settings, name))
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
     public static string[] Prioritize(IEnumerable<string> names,IEnumerable<string> bound,IEnumerable<string> visible)
     {
         var bindings=bound.ToHashSet(StringComparer.OrdinalIgnoreCase);var shown=visible.ToHashSet(StringComparer.OrdinalIgnoreCase);

@@ -12,7 +12,7 @@ public partial class MainWindow
     }
     private void FollowManagementDialog(string repo,string? previewPath=null)
     {
-        if(!ManageReady())return;GitHubClient.Validate(repo);var account=settings.Account;
+        if(!ManageReady())return;GitHubClient.Validate(repo);var account=settings.Account;var accountKey=CacheKey;
         var info=repositories.FirstOrDefault(r=>r.FullName.Equals(repo,StringComparison.OrdinalIgnoreCase));var initialStar=info?.Starred??false;var initialLocal=HasLocalFollow(repo);
         var f=new Form(this,"关注与分组管理",800,720);f.Label(repo);
         f.Section("关注方式");var star=f.Check("GitHub Star（同步到当前账号）",initialStar);star.IsEnabled=api.Token.Length>0;var local=f.Check("本地关注（仅保存在本机）",initialLocal);f.Label("两种关注方式独立保存；同时存在时优先显示 GitHub Star。取消关注会写入历史，本机软件关联保持不变。");
@@ -30,6 +30,17 @@ public partial class MainWindow
         });
         f.Action("打开仓库",()=>{WindowsServices.Open("https://github.com/"+repo);return Task.CompletedTask;});
         f.Action("核对 GitHub 状态",async()=>{if(api.Token.Length==0)throw new IOException("请先登录 GitHub。");info=await ReadManagedRepo(repo,CancellationToken.None);groups=await api.Lists(CancellationToken.None);PutRepo(info);initialStar=info.Starred;star.IsChecked=initialStar;entries.Clear();RenderGroups();SaveCache();RebuildGroups();});
+        if (!FollowLists.IsRemoved(settings, repo))
+        {
+            var remove = f.Action("从列表移除", () =>
+            {
+                if (ConfirmFollowRemoval(f, accountKey, [repo])) f.Close();
+                return Task.CompletedTask;
+            });
+            remove.Name = "RemoveFollowedProject";
+            remove.ToolTip = "移除已删除或无法访问的仓库，适用于上次同步留下的记录。";
+            remove.SetResourceReference(Control.ForegroundProperty, "DangerInk");
+        }
         f.Action("保存",async()=>{
             if(account!=settings.Account)throw new IOException("账号已改变，请重新打开管理窗口。");
             var desiredStar=star.IsChecked==true;var desiredLocal=local.IsChecked==true;var changes=entries.Where(x=>x.Initial!=(x.Check.IsChecked==true)).Select(x=>(x.Group,Add:x.Check.IsChecked==true)).ToArray();var cloud=changes.Where(x=>x.Group.Source=="GitHub").ToArray();

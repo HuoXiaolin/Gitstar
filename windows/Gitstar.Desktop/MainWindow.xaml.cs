@@ -122,10 +122,24 @@ public partial class MainWindow : Window
     private void SwitchOperations(){operations.Clear();operations.AddRange(store.Get(OperationsKey,new List<Operation>()));}
     private void LoadCache() {
         PathPreferences.Migrate(settings);store.Set("settings",settings);repositories=store.Get(CacheKey+"/repos",new List<Repository>());recentCacheCleared=store.Get(CacheKey+"/recent-cleared",false);
-        var saved=store.Get(CacheKey+"/releases",new List<Release>()).Concat(store.Get(CacheKey+"/matched-releases",new List<Release>())).GroupBy(release=>(release.Repository.ToLowerInvariant(),release.Id)).Select(group=>group.First());releases=ReleaseRetention.Compact(saved,settings.Bindings);
+        repositories.RemoveAll(repo => FollowLists.IsRemoved(settings, repo.FullName));
+        var saved=store.Get(CacheKey+"/releases",new List<Release>()).Concat(store.Get(CacheKey+"/matched-releases",new List<Release>()))
+            .Where(release => !FollowLists.IsRemoved(settings, release.Repository))
+            .GroupBy(release=>(release.Repository.ToLowerInvariant(),release.Id)).Select(group=>group.First());releases=ReleaseRetention.Compact(saved,settings.Bindings);
         groups=store.Get(CacheKey+"/groups",new List<StarGroup>());packages=store.Get(PackagesKey,new List<DownloadedPackage>());var cachedApps=store.Get(CacheKey+"/installed",new InstalledSnapshot(DateTimeOffset.MinValue,[])).Apps;installed=InstalledSnapshot.Capture(InstalledIdentity.Reconcile(settings,cachedApps).Apps,settings.Bindings).Apps;store.Set("settings",settings);installedFresh=false;LoadProjects();LoadPendingInstallations();
     }
-    private void SaveCache() {releases=ReleaseRetention.Compact(releases,settings.Bindings);PruneTransfers();var bound=settings.Bindings.Select(binding=>binding.Repository).ToHashSet(StringComparer.OrdinalIgnoreCase);store.Set(CacheKey+"/repos",repositories);store.Set(CacheKey+"/releases",recentCacheCleared?new List<Release>():releases);store.Set(CacheKey+"/matched-releases",releases.Where(release=>bound.Contains(release.Repository)).ToList());store.Set(CacheKey+"/groups",groups);store.Set(CacheKey+"/recent-cleared",recentCacheCleared);}
+    private void SaveCache()
+    {
+        releases.RemoveAll(release => FollowLists.IsRemoved(settings, release.Repository));
+        releases=ReleaseRetention.Compact(releases,settings.Bindings);
+        PruneTransfers();
+        var bound=settings.Bindings.Select(binding=>binding.Repository).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        store.Set(CacheKey+"/repos",repositories.Where(repo => !FollowLists.IsRemoved(settings, repo.FullName)).ToList());
+        store.Set(CacheKey+"/releases",recentCacheCleared?new List<Release>():releases);
+        store.Set(CacheKey+"/matched-releases",releases.Where(release=>bound.Contains(release.Repository)).ToList());
+        store.Set(CacheKey+"/groups",groups);
+        store.Set(CacheKey+"/recent-cleared",recentCacheCleared);
+    }
     private void PruneTransfers()
     {
         var retained=releases.SelectMany(r=>new[]{TransferKey(r,false),TransferKey(r,true)}).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -135,10 +149,10 @@ public partial class MainWindow : Window
     private void RebuildGroups(bool refresh=true)
     {
         var selected=(GroupSidebar.SelectedItem as GroupEntry)?.Id??"all";var allGroups=groups.Concat(settings.LocalGroups).ToList();
-        var repoNames=repositories.Select(r=>r.FullName).Concat(releases.Select(r=>r.Repository)).Concat(settings.ExtraRepositories).Where(r=>!settings.HiddenRepositories.Contains(r,StringComparer.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var repoNames=repositories.Select(r=>r.FullName).Concat(releases.Select(r=>r.Repository)).Concat(settings.ExtraRepositories).Where(r=>FollowLists.IsVisible(settings,r)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var githubFollowed=FollowLists.GitHub(repositories).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var nextGroups=new List<GroupEntry>{new("all","全部收藏","所有项目",repoNames.Count),new(SpecialFollows.GroupId,"特别关注","心形标记 · 仅保存在本机",SpecialFollows.Visible(settings,repoNames).Length),new("local-following","本地关注","仅保存在本机",FollowLists.Local(repositories,settings.ExtraRepositories,settings.HiddenRepositories).Length),new("ungrouped","未分组","账号收藏中未分组",repoNames.Count(r=>githubFollowed.Contains(r)&&!allGroups.Any(g=>g.Repositories.Contains(r,StringComparer.OrdinalIgnoreCase))))};
-        nextGroups.AddRange(allGroups.Select(g=>new GroupEntry(g.Source+"/"+g.Id,g.Name,g.Source,g.Repositories.Distinct(StringComparer.OrdinalIgnoreCase).Count(r=>!settings.HiddenRepositories.Contains(r,StringComparer.OrdinalIgnoreCase)&&(g.Source!="GitHub"||githubFollowed.Contains(r))))));
+        var nextGroups=new List<GroupEntry>{new("all","全部收藏","所有项目",repoNames.Count),new(SpecialFollows.GroupId,"特别关注","心形标记 · 仅保存在本机",SpecialFollows.Visible(settings,repoNames).Length),new("local-following","本地关注","仅保存在本机",FollowLists.Local(repositories,settings.ExtraRepositories,settings.HiddenRepositories).Count(r=>!FollowLists.IsRemoved(settings,r))),new("ungrouped","未分组","账号收藏中未分组",repoNames.Count(r=>githubFollowed.Contains(r)&&!allGroups.Any(g=>g.Repositories.Contains(r,StringComparer.OrdinalIgnoreCase))))};
+        nextGroups.AddRange(allGroups.Select(g=>new GroupEntry(g.Source+"/"+g.Id,g.Name,g.Source,g.Repositories.Distinct(StringComparer.OrdinalIgnoreCase).Count(r=>FollowLists.IsVisible(settings,r)&&(g.Source!="GitHub"||githubFollowed.Contains(r))))));
         if(model.Groups.SequenceEqual(nextGroups)){if(refresh)Display();return;}
         syncingGroups=true;
         try{
@@ -154,6 +168,7 @@ public partial class MainWindow : Window
         var now = DateTimeOffset.UtcNow;
         foreach (var binding in settings.Bindings.Where(binding => binding.Enabled(now)))
         {
+            if (FollowLists.IsRemoved(settings, binding.Repository)) continue;
             var app = InstalledVersion.Find(installed, binding.AppId);
             if (app == null || app.VersionNeedsReview) continue;
             var release = Rules.SelectRelease(releases.Where(item => item.Repository.Equals(binding.Repository, StringComparison.OrdinalIgnoreCase)), binding);
@@ -185,7 +200,7 @@ public partial class MainWindow : Window
         IEnumerable<Card> cards=localPage?updates.Select(u=>new Card {Release=u.Release,Update=u,Metadata=metadata.GetValueOrDefault(u.Release.Repository)??new(),Transfer=TransferFor(u.Release,true)}):releases.Select(r=>new Card {Release=r,Metadata=metadata.GetValueOrDefault(r.Repository)??new(),RepositoryUpdated=repositoryTimes.GetValueOrDefault(r.Repository),ShowRepositoryUpdated=settings.RecentSort==UpdateSort.RepositoryUpdated,FollowSource=githubFollowed.Contains(r.Repository)?"GitHub 关注":"本地关注"});
         if(!localPage&&recentCacheCleared)cards=[];
         cards=cards.Where(c=>channel==1 || (channel==2?c.Release.Prerelease:!c.Release.Prerelease));
-        if(!localPage)cards=cards.Where(c=>!settings.HiddenRepositories.Contains(c.Repository,StringComparer.OrdinalIgnoreCase));
+        if(!localPage)cards=cards.Where(c=>FollowLists.IsVisible(settings,c.Repository));
         if(!localPage&&selectedGroup=="ungrouped")cards=cards.Where(c=>githubFollowed.Contains(c.Repository)&&!allGroups.Any(g=>g.Repositories.Contains(c.Repository,StringComparer.OrdinalIgnoreCase)));
         if(!localPage&&selectedGroup=="local-following")cards=cards.Where(c=>localFollowed.Contains(c.Repository));
         if(!localPage&&selectedGroup==SpecialFollows.GroupId)cards=cards.Where(c=>SpecialFollows.Contains(settings,c.Repository));
@@ -518,6 +533,7 @@ public partial class MainWindow : Window
         if(Environment.GetCommandLineArgs().Contains("--repository-search")){RepositorySearchDialog(this,"editor",value=>{},previewPath:path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--manual-software")){BindingDialog(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--source-sync")){SourceSyncSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
+        if(Environment.GetCommandLineArgs().Contains("--follow-removal")){await FollowRemovalSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--follow-management")){await FollowManagementSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         if(Environment.GetCommandLineArgs().Contains("--reminders")){ReminderSmoke(path);exit=true;tray.Dispose();api.Dispose();store.Dispose();Application.Current.Shutdown();return;}
         var workArea=Forms.Screen.FromHandle(new System.Windows.Interop.WindowInteropHelper(this).Handle).WorkingArea;

@@ -131,7 +131,7 @@ public partial class MainWindow
     private void BatchManagementDialog(string[] repos)
     {
         if(repos.Length==1){FollowManagementDialog(repos[0]);return;}
-        var f=new Form(this,"批量关注与分组管理",680,500);f.Label($"已选择 {repos.Length} 个项目。");
+        var accountKey=CacheKey;var f=new Form(this,"批量关注与分组管理",680,500);f.Label($"已选择 {repos.Length} 个项目。");
         f.Action("添加本地关注",()=>{foreach(var repo in repos)SetLocalFollow(repo,true,persist:false);Save();SaveCache();RebuildGroups();f.Close();return Task.CompletedTask;});
         f.Action("取消本地关注",()=>{if(DialogMessage.Show(f,$"取消 {repos.Length} 个项目的本地关注？GitHub Star 保留，取消记录可从历史恢复。","取消本地关注",MessageBoxButton.OKCancel)!=MessageBoxResult.OK)return Task.CompletedTask;foreach(var repo in repos)SetLocalFollow(repo,false,persist:false);Save();SaveCache();RebuildGroups();f.Close();return Task.CompletedTask;});
         f.Action("取消关注历史",()=>{FollowHistoryDialog(f);return Task.CompletedTask;});
@@ -143,12 +143,20 @@ public partial class MainWindow
                 var failed=new List<string>();foreach(var repo in repos){ct.ThrowIfCancellationRequested();try{var keepLocal=HasLocalFollow(repo);await SetManagedStar(repo,false,ct);if(keepLocal&&!settings.ExtraRepositories.Contains(repo,StringComparer.OrdinalIgnoreCase))settings.ExtraRepositories.Add(repo);PruneUnfollowed(repo);SaveCache();Save();BatchResult(repo,true);}catch(Exception ex)when(ex is not OperationCanceledException){failed.Add(repo+"："+ex.Message);BatchResult(repo,false,ex.Message);}}
                 RebuildGroups();model.Status=$"取消 Star：{repos.Length-failed.Count} 成功，{failed.Count} 待处理。";if(failed.Count>0)Form.Notes(this,"批量结果",string.Join("\n",failed));
             });
-        });f.Action("退出选择",()=>{model.SelectionMode=false;foreach(var card in model.Cards)card.IsSelected=false;f.Close();return Task.CompletedTask;});f.Action("关闭",()=>{f.Close();return Task.CompletedTask;});f.ShowDialog();
+        });
+        f.Action("退出选择",()=>{model.SelectionMode=false;foreach(var card in model.Cards)card.IsSelected=false;f.Close();return Task.CompletedTask;});
+        var remove = f.Action("从列表移除", () =>
+        {
+            if (ConfirmFollowRemoval(f, accountKey, repos)) f.Close();
+            return Task.CompletedTask;
+        });
+        remove.SetResourceReference(Control.ForegroundProperty, "DangerInk");
+        f.Action("关闭",()=>{f.Close();return Task.CompletedTask;});f.ShowDialog();
     }
     private void ProjectPicker()
     {
         var f=new Form(this,"选择要管理的项目",660,650);f.Label("包含没有 Release、已停止本地关注及本机已关联的项目。选择一个项目统一管理关注与分组；选择多个可批量管理 Star、本地关注和分组。");var search=f.Text("搜索项目");
-        var names=repositories.Select(r=>r.FullName).Concat(settings.ExtraRepositories).Concat(settings.HiddenRepositories).Concat(settings.Bindings.Select(b=>b.Repository)).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();
+        var names=repositories.Select(r=>r.FullName).Concat(settings.ExtraRepositories).Concat(settings.HiddenRepositories).Concat(settings.RemovedRepositories).Concat(settings.Bindings.Select(b=>b.Repository)).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();
         var choices=names.Select(n=>(Name:n,Check:f.Check(n))).ToList();search.TextChanged+=(_,_)=>{foreach(var row in choices)row.Check.Visibility=row.Name.Contains(search.Text.Trim(),StringComparison.OrdinalIgnoreCase)?Visibility.Visible:Visibility.Collapsed;};
         f.Action("全选当前结果",()=>{foreach(var row in choices.Where(r=>r.Check.Visibility==Visibility.Visible))row.Check.IsChecked=true;return Task.CompletedTask;});f.Action("清空",()=>{foreach(var row in choices)row.Check.IsChecked=false;return Task.CompletedTask;});
         f.Action("管理所选",()=>{var selected=choices.Where(r=>r.Check.IsChecked==true).Select(r=>r.Name).ToArray();if(selected.Length==0)throw new IOException("请先选择项目。");f.Close();BatchManagementDialog(selected);return Task.CompletedTask;},true);f.ShowDialog();
@@ -165,7 +173,7 @@ public partial class MainWindow
             await Execute("Star管理","添加项目 · "+repo,async ct=>{
                 if(chosen.Any(g=>g.Source=="GitHub"))await api.EnsureListWritePermission(ct);var info=await ReadManagedRepo(repo,ct);if(star){await api.SetStar(info.FullName,true,ct);info=info with{Starred=true};}
                 PutRepo(info);if(!star && !settings.ExtraRepositories.Contains(info.FullName,StringComparer.OrdinalIgnoreCase))settings.ExtraRepositories.Add(info.FullName);
-                settings.HiddenRepositories.RemoveAll(r=>r.Equals(info.FullName,StringComparison.OrdinalIgnoreCase));Save();SaveCache();
+                settings.HiddenRepositories.RemoveAll(r=>r.Equals(info.FullName,StringComparison.OrdinalIgnoreCase));FollowLists.RestoreToList(settings,info.FullName);Save();SaveCache();
                 var cloud=chosen.Where(g=>g.Source=="GitHub").ToList();
                 if(cloud.Count>0){
                     if(!info.Starred)throw new IOException("项目已添加为本地关注；加入 GitHub 分组前需先 Star。");

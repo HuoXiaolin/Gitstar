@@ -66,6 +66,7 @@ public class Settings
     public List<InstalledApp> PortableApps { get; set; } = [];
     public List<string> ExtraRepositories { get; set; } = [];
     public List<string> HiddenRepositories { get; set; } = [];
+    public List<string> RemovedRepositories { get; set; } = [];
     public List<StarGroup> LocalGroups { get; set; } = [];
     public List<string> Notified { get; set; } = [];
     public string SelfRepository { get; set; } = AppInfo.Repository;

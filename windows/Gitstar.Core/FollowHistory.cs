@@ -1,13 +1,13 @@
 namespace Gitstar.Core;
 
-public enum FollowKind { Unknown,GitHubStar,Local }
+public enum FollowKind { Unknown,GitHubStar,Local,RemovedFromList }
 public record FollowGroupSnapshot(string Id,string Name,string Source);
 public record FollowHistoryEntry(string Id,string Repository,FollowKind Kind,DateTimeOffset? RemovedAt,string Account,List<FollowGroupSnapshot> Groups)
 {
     public DateTimeOffset? RestoredAt {get;init;}
     public FollowKind? RestoredAs {get;init;}
     public string Note {get;init;}="";
-    public string SourceLabel=>Kind switch{FollowKind.GitHubStar=>"GitHub Star",FollowKind.Local=>"本地关注",_=>"旧版隐藏记录"};
+    public string SourceLabel=>Kind switch{FollowKind.GitHubStar=>"GitHub Star",FollowKind.Local=>"本地关注",FollowKind.RemovedFromList=>"从列表移除",_=>"旧版隐藏记录"};
 }
 public static class FollowHistory
 {
@@ -34,6 +34,7 @@ public static class FollowHistory
         if(entry.Account!=settings.Account||!Rules.ValidRepository(entry.Repository))throw new IOException("历史账号或仓库无效。");
         if(!settings.ExtraRepositories.Contains(entry.Repository,StringComparer.OrdinalIgnoreCase))settings.ExtraRepositories.Add(entry.Repository);
         settings.HiddenRepositories.RemoveAll(r=>r.Equals(entry.Repository,StringComparison.OrdinalIgnoreCase));
+        FollowLists.RestoreToList(settings,entry.Repository);
         foreach(var snapshot in entry.Groups.Where(g=>g.Source!="GitHub")){
             var group=settings.LocalGroups.FirstOrDefault(g=>g.Id==snapshot.Id&&g.Source==snapshot.Source);if(group!=null&&!group.Repositories.Contains(entry.Repository,StringComparer.OrdinalIgnoreCase))group.Repositories.Add(entry.Repository);
         }

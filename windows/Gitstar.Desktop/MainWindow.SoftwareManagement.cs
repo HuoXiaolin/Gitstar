@@ -13,7 +13,7 @@ public partial class MainWindow
         f.Label("按实际安装位置管理软件、仓库匹配和检查状态。支持搜索、多选与批量操作。");
         f.Footnote("管理操作即时保存；解除关联不删除软件文件。");
         var filters=new Grid();filters.ColumnDefinitions.Add(new());filters.ColumnDefinitions.Add(new(){Width=new GridLength(190)});var searchPanel=new StackPanel{Margin=new Thickness(0,0,12,0)};var statePanel=new StackPanel();filters.Children.Add(searchPanel);Grid.SetColumn(statePanel,1);filters.Children.Add(statePanel);f.Fields.Children.Add(filters);
-        TextBox search=null!;ComboBox filter=null!;f.Into(searchPanel,()=>search=f.Text("搜索软件或仓库",focus?.Repository??""));f.Into(statePanel,()=>filter=f.Select("检查状态",["全部软件","正常检查","已停止","已暂停","已忽略版本","版本待核对"]));
+        TextBox search=null!;ComboBox filter=null!;f.Into(searchPanel,()=>search=f.Text("搜索软件或仓库",focus?.Repository??""));f.Into(statePanel,()=>filter=f.Select("检查状态",["全部软件","正常检查","已停止","已暂停","已忽略版本","版本待核对","仓库已移除"]));
         var selectionLine=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(0,0,0,12)};var selectAll=new CheckBox{Content="全选当前结果",IsThreeState=true,VerticalAlignment=VerticalAlignment.Center};var count=ProjectText("",12,true);count.Margin=new Thickness(14,0,0,0);selectionLine.Children.Add(selectAll);selectionLine.Children.Add(count);f.Fields.Children.Add(selectionLine);
         var list=new StackPanel();f.Fields.Children.Add(list);var selected=new HashSet<Binding>();Binding[] visible=[];var selecting=false;
         var compact=false;
@@ -44,7 +44,7 @@ public partial class MainWindow
         void Render()
         {
             var now=DateTimeOffset.UtcNow;var query=search.Text.Trim();
-            visible=settings.Bindings.Where(b=>((InstalledVersion.Find(installed,b.AppId)?.Name??"")+" "+b.Repository+" "+b.AppId).Contains(query,StringComparison.OrdinalIgnoreCase)).Where(b=>filter.SelectedIndex switch{1=>!ReminderRules.Restricted(b,now),2=>b.Disabled,3=>b.PauseUntil>now,4=>b.IgnoredTag.Length>0,5=>InstalledVersion.Find(installed,b.AppId) is not {} app||app.VersionNeedsReview,_=>true}).OrderBy(b=>InstalledVersion.Find(installed,b.AppId)?.Name??b.Repository,StringComparer.OrdinalIgnoreCase).ToArray();
+            visible=settings.Bindings.Where(b=>((InstalledVersion.Find(installed,b.AppId)?.Name??"")+" "+b.Repository+" "+b.AppId).Contains(query,StringComparison.OrdinalIgnoreCase)).Where(b=>filter.SelectedIndex switch{1=>!ReminderRules.Restricted(b,now)&&!FollowLists.IsRemoved(settings,b.Repository),2=>b.Disabled,3=>b.PauseUntil>now,4=>b.IgnoredTag.Length>0,5=>InstalledVersion.Find(installed,b.AppId) is not {} app||app.VersionNeedsReview,6=>FollowLists.IsRemoved(settings,b.Repository),_=>true}).OrderBy(b=>InstalledVersion.Find(installed,b.AppId)?.Name??b.Repository,StringComparer.OrdinalIgnoreCase).ToArray();
             selected.IntersectWith(visible);list.Children.Clear();rowViews.Clear();
             if(visible.Length==0)list.Children.Add(ProjectText(settings.Bindings.Count==0?"尚未关联软件，可点击“添加软件”。":"没有符合条件的软件，请调整搜索或筛选。",13,true));
             foreach(var binding in visible){
@@ -53,7 +53,10 @@ public partial class MainWindow
                 var info=new StackPanel{Margin=new Thickness(0,0,14,0)};var name=app?.Name??(binding.AppName.Length>0?binding.AppName:binding.Repository.Split('/').Last());var title=ProjectText(name+(app!=null?"  ·  "+app.Version:""),14);title.Margin=new Thickness(0,0,0,3);info.Children.Add(title);
                 var source=app==null?(binding.ExecutablePath.Length>0?binding.ExecutablePath:binding.AppLocation.Length>0?binding.AppLocation:binding.AppId):app.ExecutablePath.Length>0?app.ExecutablePath:app.Location.Length>0?app.Location:app.Id;
                 var address=ProjectText(binding.Repository+"   ·   "+source,12,true);address.Margin=new Thickness(0);address.TextWrapping=TextWrapping.NoWrap;address.TextTrimming=TextTrimming.CharacterEllipsis;address.ToolTip=source+"\n版本来源："+(app?.VersionSource??"待核对")+"\n"+(app?.VersionDetails??"");info.Children.Add(address);Grid.SetColumn(info,1);row.Children.Add(info);
-                var state=ProjectText(app?.VersionNeedsReview==true?"版本待核对":app==null?"安装位置待核对":ReminderRules.Status(binding,now),12,true);state.VerticalAlignment=VerticalAlignment.Center;state.Margin=new Thickness(0,0,12,0);Grid.SetColumn(state,2);row.Children.Add(state);
+                var removed = FollowLists.IsRemoved(settings, binding.Repository);
+                var state=ProjectText(removed?"仓库已从列表移除":app?.VersionNeedsReview==true?"版本待核对":app==null?"安装位置待核对":ReminderRules.Status(binding,now),12,true);
+                if (removed) state.ToolTip = "可编辑仓库地址，或从「取消关注历史」恢复原仓库的检查。";
+                state.VerticalAlignment=VerticalAlignment.Center;state.Margin=new Thickness(0,0,12,0);Grid.SetColumn(state,2);row.Children.Add(state);
                 var actions=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(actions,3);row.Children.Add(actions);var edit=new Button{Content="编辑",Padding=new Thickness(10,6,10,6),ToolTip="修改软件匹配、路径与版本来源"};edit.Click+=(_,_)=>{EditSoftwareBinding(f,binding);Render();};actions.Children.Add(edit);
                 var menu=new ContextMenu();var more=new Button{Content="更多",Padding=new Thickness(10,6,10,6),Margin=new Thickness(0),ContextMenu=menu,ToolTip="忽略、暂停、恢复或解除关联"};more.Click+=(_,_)=>{menu.PlacementTarget=more;menu.IsOpen=true;};actions.Children.Add(more);
                 void Inline(string text,BindingAction operation,bool enabled=true){var item=new MenuItem{Header=text,IsEnabled=enabled};if(operation==BindingAction.Unlink)item.SetResourceReference(Control.ForegroundProperty,"DangerInk");item.Click+=(_,_)=>Apply([binding],operation);menu.Items.Add(item);}

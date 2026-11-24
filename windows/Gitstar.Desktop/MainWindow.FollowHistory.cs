@@ -5,7 +5,7 @@ namespace Gitstar.Desktop;
 
 public partial class MainWindow
 {
-    private bool HasLocalFollow(string repo)=>settings.ExtraRepositories.Contains(repo,StringComparer.OrdinalIgnoreCase)||(!settings.HiddenRepositories.Contains(repo,StringComparer.OrdinalIgnoreCase)&&repositories.Any(r=>!r.Starred&&r.FullName.Equals(repo,StringComparison.OrdinalIgnoreCase)));
+    private bool HasLocalFollow(string repo)=>!FollowLists.IsRemoved(settings,repo)&&(settings.ExtraRepositories.Contains(repo,StringComparer.OrdinalIgnoreCase)||(!settings.HiddenRepositories.Contains(repo,StringComparer.OrdinalIgnoreCase)&&repositories.Any(r=>!r.Starred&&r.FullName.Equals(repo,StringComparison.OrdinalIgnoreCase))));
     private void RecordFollowRemoval(string repo,FollowKind kind)
     {
         var entry=FollowHistory.Record(settings,repo,kind,groups.Concat(settings.LocalGroups),DateTimeOffset.UtcNow);
@@ -15,7 +15,7 @@ public partial class MainWindow
     {
         var before=previouslyFollowed??HasLocalFollow(repo);if(before&&!followed)RecordFollowRemoval(repo,FollowKind.Local);
         settings.ExtraRepositories.RemoveAll(r=>r.Equals(repo,StringComparison.OrdinalIgnoreCase));
-        if(followed){settings.ExtraRepositories.Add(repo);settings.HiddenRepositories.RemoveAll(r=>r.Equals(repo,StringComparison.OrdinalIgnoreCase));}
+        if(followed){settings.ExtraRepositories.Add(repo);settings.HiddenRepositories.RemoveAll(r=>r.Equals(repo,StringComparison.OrdinalIgnoreCase));FollowLists.RestoreToList(settings,repo);}
         PruneUnfollowed(repo);if(persist){Save();SaveCache();}
     }
     private async Task<Repository> SetManagedStar(string repo,bool desired,CancellationToken ct)
@@ -23,7 +23,7 @@ public partial class MainWindow
         var info=await ReadManagedRepo(repo,ct);
         if(info.Starred!=desired){await api.SetStar(info.FullName,desired,ct);if(!desired)RecordFollowRemoval(info.FullName,FollowKind.GitHubStar);}
         info=info with{Starred=desired};PutRepo(info);
-        if(desired)settings.HiddenRepositories.RemoveAll(r=>r.Equals(info.FullName,StringComparison.OrdinalIgnoreCase));
+        if(desired){settings.HiddenRepositories.RemoveAll(r=>r.Equals(info.FullName,StringComparison.OrdinalIgnoreCase));FollowLists.RestoreToList(settings,info.FullName);}
         else foreach(var group in groups)group.Repositories.RemoveAll(r=>r.Equals(info.FullName,StringComparison.OrdinalIgnoreCase));
         Save();SaveCache();return info;
     }
@@ -48,10 +48,10 @@ public partial class MainWindow
     }
     private void FollowHistoryDialog(Window? owner=null,string? previewPath=null)
     {
-        var account=settings.Account;var f=new Form(owner??this,"取消关注历史",900,720);f.Label("记录在 Gitstar 中取消的 Star 和本地关注，可按需恢复。账号分别保存；最多保留最近 500 条。旧版隐藏记录仅提供恢复入口，不推测取消时间或原关注方式。");
+        var account=settings.Account;var f=new Form(owner??this,"取消关注历史",900,720);f.Label("记录取消 Star、取消本地关注和从列表移除的项目，可按需恢复。每个账号保留最近 500 条操作记录。");
         var search=f.Text("搜索仓库");var pending=f.Check("仅显示待恢复或待核对的记录",true);var list=new StackPanel();f.Fields.Children.Add(list);
         void Render(){list.Children.Clear();var entries=FollowHistory.Entries(settings).Where(e=>(!pending.IsChecked.GetValueOrDefault()||e.RestoredAt==null||e.Note.Contains("分组待核对")||e.Note.Contains("尚未核对"))&&e.Repository.Contains(search.Text.Trim(),StringComparison.OrdinalIgnoreCase)).ToArray();
-            if(entries.Length==0)list.Children.Add(ProjectText("没有符合条件的取消关注记录。",13,true));
+            if(entries.Length==0)list.Children.Add(ProjectText("没有符合条件的历史记录。",13,true));
             foreach(var entry in entries){var box=FollowSection(list,entry.Repository);box.Children.Add(ProjectText(entry.SourceLabel+" · "+(entry.RemovedAt is {} time?time.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"):"取消时间未知"),12,true));if(entry.Groups.Count>0)box.Children.Add(ProjectText("原分组："+string.Join("、",entry.Groups.Select(g=>g.Name)),12,true));if(entry.RestoredAt is {} restored)box.Children.Add(ProjectText($"恢复时间：{restored.ToLocalTime():yyyy-MM-dd HH:mm:ss} · {(entry.RestoredAs==FollowKind.GitHubStar?"GitHub Star":"本地关注")}",12,true));if(entry.Note.Length>0)box.Children.Add(ProjectText(entry.Note,12,true));var actions=new WrapPanel();box.Children.Add(actions);
                 void Action(string label,FollowKind target){var button=new Button{Content=label,Margin=new Thickness(0,0,8,0)};button.IsEnabled=target==FollowKind.Local||api.Token.Length>0;button.ToolTip=target==FollowKind.GitHubStar&&api.Token.Length==0?"请先登录 GitHub":label;button.Click+=async(_,_)=>{if(settings.Account!=account)throw new IOException("账号已改变，请重新打开历史记录。");button.IsEnabled=false;try{await Execute("Star管理","恢复关注 · "+entry.Repository,async ct=>{await RestoreFollowEntry(entry,target,ct);RebuildGroups();model.Status="已恢复关注；点击检查更新获取该仓库版本。";});Render();}finally{button.IsEnabled=true;}};actions.Children.Add(button);}
                 Action("恢复 Star",FollowKind.GitHubStar);Action("恢复本地关注",FollowKind.Local);

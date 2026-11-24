@@ -22,7 +22,7 @@ public partial class MainWindow
     }
     private void ExportFollowDialog(Window owner,string? previewPath=null)
     {
-        var remote=FollowLists.GitHub(repositories);var local=FollowLists.Local(repositories,settings.ExtraRepositories,settings.HiddenRepositories);var f=new Form(owner,"导出关注列表",680,460);
+        var remote=FollowLists.GitHub(repositories).Where(repo=>!FollowLists.IsRemoved(settings,repo)).ToArray();var local=FollowLists.Local(repositories,settings.ExtraRepositories,settings.HiddenRepositories).Where(repo=>!FollowLists.IsRemoved(settings,repo)).ToArray();var f=new Form(owner,"导出关注列表",680,460);
         f.Label("所有勾选来源会合并、去重，导出为可在其他账号或电脑导入的本地关注清单。使用上次同步的账号收藏，不包含凭据、源码或分组设置；可能包含私有仓库名称，请妥善保管。");
         var github=f.Check($"当前 GitHub 账号：{settings.Account} · {remote.Length} 个项目",settings.Account.Length>0);github.IsEnabled=settings.Account.Length>0;
         var offline=f.Check($"本地关注 · {local.Length} 个项目",true);
@@ -37,7 +37,7 @@ public partial class MainWindow
         var rows=names.Select(name=>new FollowPick{Name=name}).ToArray();var list=new ListBox{ItemsSource=rows,Height=300,BorderThickness=new Thickness(0),Background=System.Windows.Media.Brushes.Transparent,ItemContainerStyle=(Style)f.FindResource("SourceChangeRow")};
         var factory=new FrameworkElementFactory(typeof(CheckBox));factory.SetBinding(CheckBox.IsCheckedProperty,new UiBinding("Selected"){Mode=BindingMode.TwoWay});factory.SetBinding(ContentControl.ContentProperty,new UiBinding("Name"));factory.SetValue(FrameworkElement.MarginProperty,new Thickness(0,5,0,5));list.ItemTemplate=new DataTemplate{VisualTree=factory};VirtualizingPanel.SetVirtualizationMode(list,VirtualizationMode.Recycling);f.Fields.Children.Add(list);
         f.Action("全选 / 清空",()=>{var selected=rows.Any(row=>!row.Selected);foreach(var row in rows)row.Selected=selected;return Task.CompletedTask;});f.Action("取消",()=>{f.Close();return Task.CompletedTask;}).IsCancel=true;
-        f.Action("导入本地关注",()=>{var selected=rows.Where(row=>row.Selected).Select(row=>row.Name).ToArray();if(selected.Length==0)throw new IOException("请至少选择一个项目。");var before=settings.ExtraRepositories.Count;settings.ExtraRepositories=FollowLists.Normalize(settings.ExtraRepositories.Concat(selected)).ToList();settings.HiddenRepositories.RemoveAll(repo=>selected.Contains(repo,StringComparer.OrdinalIgnoreCase));Save();SaveCache();RebuildGroups();Display();model.Status=$"已导入本地关注 · 新增 {settings.ExtraRepositories.Count-before} 项，已有项已去重。点击检查更新获取版本。";f.Close();return Task.CompletedTask;},true);f.ShowDialog();
+        f.Action("导入本地关注",()=>{var selected=rows.Where(row=>row.Selected).Select(row=>row.Name).ToArray();if(selected.Length==0)throw new IOException("请至少选择一个项目。");var before=settings.ExtraRepositories.Count;settings.ExtraRepositories=FollowLists.Normalize(settings.ExtraRepositories.Concat(selected)).ToList();settings.HiddenRepositories.RemoveAll(repo=>selected.Contains(repo,StringComparer.OrdinalIgnoreCase));foreach(var repo in selected)FollowLists.RestoreToList(settings,repo);Save();SaveCache();RebuildGroups();Display();model.Status=$"已导入本地关注 · 新增 {settings.ExtraRepositories.Count-before} 项，已有项已去重。点击检查更新获取版本。";f.Close();return Task.CompletedTask;},true);f.ShowDialog();
     }
     private void FollowListSmoke(string path)
     {
