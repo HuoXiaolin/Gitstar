@@ -123,6 +123,7 @@ public partial class MainWindow
         form.Fields.Children.Add(empty);
         Func<string, CancellationToken, Task<GitHubClient.RepositorySearchPage>> search = previewPath == null ? api.SearchRepositories : BatchRepositorySmokeSearch;
         var picker = new BatchRepositoryPicker(form, table, source, search);
+        var batchQueries = new Dictionary<string, GitHubClient.RepositorySearchPage>(StringComparer.OrdinalIgnoreCase);
         CancellationTokenSource? batchRequest = null;
         var closed = false;
         var clear = form.Action("取消勾选", () =>
@@ -199,7 +200,7 @@ public partial class MainWindow
             try
             {
                 if (previewPath == null) UseFeature(UsageFeature.RepositorySearch);
-                await SearchCheckedRepositories(selected, search, message =>
+                await SearchCheckedRepositories(selected, search, batchQueries, message =>
                 {
                     if (!closed) searchStatus.Text = message;
                 }, request.Token);
@@ -232,27 +233,40 @@ public partial class MainWindow
     }
 
     private static async Task SearchCheckedRepositories(IReadOnlyList<MatchRow> selected,
-        Func<string, CancellationToken, Task<GitHubClient.RepositorySearchPage>> search, Action<string> report, CancellationToken ct)
+        Func<string, CancellationToken, Task<GitHubClient.RepositorySearchPage>> search,
+        Dictionary<string, GitHubClient.RepositorySearchPage> batchQueries, Action<string> report, CancellationToken ct)
     {
         foreach (var row in selected) row.RequireRepositoryChoice();
         var completed = 0;
         var found = 0;
         var failed = 0;
         var heading = "批量搜索完成";
-        foreach (var group in selected.GroupBy(row => row.Name.Trim(), StringComparer.OrdinalIgnoreCase))
+        foreach (var row in selected)
         {
-            var count = group.Count();
-            var page = group.Select(row => row.BatchSearchPage).FirstOrDefault(result => result != null);
-            report($"正在搜索 GitHub · {completed}/{selected.Count} 项 · {group.Key}");
-            string reason;
+            var reason = "GitHub 未找到匹配";
             var stopped = false;
             try
             {
                 ct.ThrowIfCancellationRequested();
-                page ??= await search(group.Key, ct).WaitAsync(ct);
-                ct.ThrowIfCancellationRequested();
-                reason = page.Items.Count > 0 ? $"GitHub 找到 {page.Items.Count} 个候选" : "GitHub 未找到匹配";
-                if (page.Items.Count > 0) found += count;
+                var queries = RepositoryLookup.SoftwareSearchQueries(row.App);
+                if (queries.Length == 0) reason = "没有可用的搜索词";
+                foreach (var query in queries)
+                {
+                    if (!batchQueries.TryGetValue(query, out var page))
+                    {
+                        report($"正在搜索 GitHub · {completed}/{selected.Count} 项 · {query}");
+                        page = await search(query, ct).WaitAsync(ct);
+                        ct.ThrowIfCancellationRequested();
+                        batchQueries.Add(query, page);
+                    }
+                    if (page.Items.Count == 0) continue;
+
+                    row.SetBatchSearchPage(page);
+                    reason = $"GitHub 找到 {page.Items.Count} 个候选";
+                    if (!query.Equals(row.Name.Trim(), StringComparison.OrdinalIgnoreCase)) reason += $" · {query}";
+                    found++;
+                    break;
+                }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -268,16 +282,12 @@ public partial class MainWindow
             catch (Exception error)
             {
                 reason = "搜索失败 · " + error.Message;
-                failed += count;
+                failed++;
             }
 
-            foreach (var row in group)
-            {
-                if (page != null && !stopped) row.SetBatchSearchPage(page);
-                if (row.AwaitingRepositoryChoice) row.Reason = reason;
-            }
+            if (row.AwaitingRepositoryChoice) row.Reason = reason;
             if (stopped) break;
-            completed += count;
+            completed++;
         }
 
         var missing = completed - found - failed;

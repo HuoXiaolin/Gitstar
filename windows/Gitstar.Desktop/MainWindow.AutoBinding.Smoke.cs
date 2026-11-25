@@ -167,7 +167,52 @@ public partial class MainWindow
                 batch.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
                 var resumeAlreadySearched = namesSearched.Skip(2).SequenceEqual(new[] { item.Name, unmatched.Name })
                     && unmatched.Reason.Contains("未找到", StringComparison.Ordinal) && batchStatus.Text.Contains("1 项无匹配", StringComparison.Ordinal);
-                filter.Text = "";
+
+                var version64 = rows.Single(row => row.App.Id == "fixture6");
+                var version86 = rows.Single(row => row.App.Id == "fixture7");
+                var primary = rows.Single(row => row.App.Id == "fixture8");
+                var secondary = rows.Single(row => row.App.Id == "fixture9");
+                foreach (var row in rows) row.Selected = false;
+                version64.Selected = version86.Selected = primary.Selected = secondary.Selected = true;
+                namesSearched.Clear();
+                batchSearchSmoke = (query, _) =>
+                {
+                    namesSearched.Add(query);
+                    var address = query switch
+                    {
+                        "星图工具" => "example/star-chart",
+                        "DocLight" => "example/doc-light",
+                        "DocSide" => "example/doc-side",
+                        _ => ""
+                    };
+                    return Task.FromResult(new GitHubClient.RepositorySearchPage(
+                        address.Length > 0 ? [new(address, "测试候选", false)] : [], address.Length > 0 ? 1 : 0, false));
+                };
+                batch.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+                var simplifiedLookup = namesSearched.Where(name => name.StartsWith("星图工具", StringComparison.Ordinal))
+                        .SequenceEqual(new[] { version64.Name, "星图工具", version86.Name })
+                    && !namesSearched.Contains("AstralOverlay")
+                    && version64.BatchSearchPage?.Items.Single().FullName == "example/star-chart"
+                    && ReferenceEquals(version64.BatchSearchPage, version86.BatchSearchPage);
+                var executableLookup = namesSearched.Where(name => name.StartsWith("旧版文档助手", StringComparison.Ordinal) || name.StartsWith("Doc", StringComparison.Ordinal))
+                        .SequenceEqual(new[] { primary.Name, "旧版文档助手", "DocLight", "DocSide" })
+                    && namesSearched.All(name => !name.Contains('\\') && !name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                    && primary.BatchSearchPage?.Items.Single().FullName == "example/doc-light"
+                    && secondary.BatchSearchPage?.Items.Single().FullName == "example/doc-side";
+                var fallbackNeedsChoice = new[] { version64, version86, primary, secondary }
+                    .All(row => row.AwaitingRepositoryChoice && row.Repository.Length == 0)
+                    && !save.IsEnabled && settings.Bindings.Count == 0;
+
+                filter.Text = "旧版文档助手";
+                table.UpdateLayout();
+                var fallbackCell = column.GetCellContent(primary) ?? throw new IOException("Missing executable candidate cell");
+                var fallbackInput = Find<TextBox>(fallbackCell) ?? throw new IOException("Missing executable candidate input");
+                var fallbackAction = Find<Button>(fallbackCell) ?? throw new IOException("Missing executable candidate action");
+                fallbackAction.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+                Press(Key.Down, fallbackInput);
+                Press(Key.Enter, fallbackInput);
+                var fallbackManualSelection = primary.Repository == "example/doc-light" && !primary.AwaitingRepositoryChoice
+                    && secondary.AwaitingRepositoryChoice && Equals(save.Content, "关联已确认（1）") && settings.Bindings.Count == 0;
                 form.UpdateLayout();
                 var batchBounds = batch.TransformToAncestor((FrameworkElement)form.Content).TransformBounds(new Rect(batch.RenderSize));
                 var batchActionFits = batchBounds.Left >= 0 && batchBounds.Right <= ((FrameworkElement)form.Content).ActualWidth;
@@ -184,14 +229,17 @@ public partial class MainWindow
                     RequiresChoice = requiresChoice, ResultsArriveEarly = resultsArriveEarly,
                     OpensCandidatesWithoutSearch = opensCandidatesWithoutSearch, EnterNeedsHighlight = enterNeedsHighlight,
                     ChosenOnly = chosenOnly, CancellationPreservesResults = cancellationPreservesResults, StopAtLimit = stopAtLimit,
-                    ResumeAlreadySearched = resumeAlreadySearched, BatchActionFits = batchActionFits, Narrow = narrow
+                    ResumeAlreadySearched = resumeAlreadySearched, BatchActionFits = batchActionFits,
+                    SimplifiedLookup = simplifiedLookup, ExecutableLookup = executableLookup,
+                    FallbackNeedsChoice = fallbackNeedsChoice, FallbackManualSelection = fallbackManualSelection, Narrow = narrow
                 };
                 File.WriteAllText(Path.ChangeExtension(path, ".interaction.json"), JsonSerializer.Serialize(report));
                 if (!(suggested && filtered && local && queryKept && choseLocal && loading && remote && staleDropped && popupTheme
                     && choseRemote && failure && direct && fallback && escaped && empty && stableRows && validCount && toggled
                     && emptyAddressBlocksSave && rowActionFits && emptyBatchDisabled && checkedNamesOnly && preservesSelections
                     && requiresChoice && resultsArriveEarly && opensCandidatesWithoutSearch && enterNeedsHighlight && chosenOnly
-                    && cancellationPreservesResults && stopAtLimit && resumeAlreadySearched && batchActionFits))
+                    && cancellationPreservesResults && stopAtLimit && resumeAlreadySearched && batchActionFits
+                    && simplifiedLookup && executableLookup && fallbackNeedsChoice && fallbackManualSelection))
                     throw new IOException("Batch repository interaction did not pass");
 
                 var root = (FrameworkElement)form.Content;

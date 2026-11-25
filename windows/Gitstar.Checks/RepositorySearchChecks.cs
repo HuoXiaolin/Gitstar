@@ -35,5 +35,23 @@ internal static class RepositorySearchChecks
             && RepositoryLookup.Filter(repos, "https://github.com/z7786/wenxi/releases/latest", 8).Single() == repos[2]
             && RepositoryLookup.Address("https://github.com/example/example.github.io.git") == "example/example.github.io",
             "repository paste handling normalizes GitHub subpages without accepting a lookalike host");
+
+        var archive = new InstalledApp("zip", "7-Zip 24.08 (x64 / AMD64)", "24.08", "",
+            ExecutablePath: "\"C:\\Example Programs\\7-Zip\\7zFM.exe\"");
+        check(RepositoryLookup.SoftwareSearchQueries(archive).SequenceEqual(["7-Zip 24.08 (x64 / AMD64)", "7-Zip", "7zFM"]),
+            "software search removes version and architecture without losing a product digit or sending the executable path");
+        var chinese = new InstalledApp("editor", "文析助手2.0.0（64 位）", "2.0.0", "");
+        check(RepositoryLookup.SoftwareSearchQueries(chinese).SequenceEqual(["文析助手2.0.0（64 位）", "文析助手"]),
+            "software search accepts a version directly after a Chinese name and full-width architecture notation");
+        var editor = new InstalledApp("note", "Note++ v2.0.0-beta.1 (x86-64)", "2.0.0-beta.1", "",
+            ExecutablePath: @"D:\Example\bin\NoteLauncher_arm64.EXE");
+        check(RepositoryLookup.SoftwareSearchQueries(editor).SequenceEqual(["Note++ v2.0.0-beta.1 (x86-64)", "Note++", "NoteLauncher_arm64", "NoteLauncher"]),
+            "software search can simplify a versioned display name and an architecture-suffixed executable independently");
+        check(RepositoryLookup.SoftwareSearchQueries(new("major", "Studio 7 (x86)", "7.0.0", "")).SequenceEqual(["Studio 7 (x86)", "Studio"])
+            && RepositoryLookup.SoftwareSearchQueries(new("product", "Studio 365 (ARM64)", "7.0.0", "")).SequenceEqual(["Studio 365 (ARM64)", "Studio 365"]),
+            "a bare major version is removed only when installation metadata corroborates it");
+        check(RepositoryLookup.SoftwareSearchQueries(new("duplicate", " Sync ", "1.0", "", ExecutablePath: "C:/Example/bin/SYNC.exe")).SequenceEqual(["Sync"])
+            && RepositoryLookup.SoftwareSearchQueries(new("invalid", "???", "", "", ExecutablePath: @"D:\Example\ignored.dll")).Length == 0,
+            "software search skips equivalent names and unusable executable fallbacks");
     }
 }
