@@ -53,7 +53,8 @@ internal sealed class BatchRepositoryPicker
         table.GotKeyboardFocus += (_, e) =>
         {
             if (!applying && !searchingFromButton && e.NewFocus is TextBox { DataContext: MatchRow item } input && ReferenceEquals(input.Tag, EditorMarker)
-                && !item.Selected && (item.Repository.Length == 0 || item.Choices.Contains(item.Repository, StringComparer.OrdinalIgnoreCase)))
+                && (item.VisibleBatchSearchPage is { Items.Count: > 0 }
+                    || !item.Selected && (item.Repository.Length == 0 || item.Choices.Contains(item.Repository, StringComparer.OrdinalIgnoreCase))))
                 Open(input, item);
         };
         table.PreviewKeyDown += EditorKeyDown;
@@ -93,9 +94,9 @@ internal sealed class BatchRepositoryPicker
 
         var button = new FrameworkElementFactory(typeof(Button));
         button.SetValue(FrameworkElement.TagProperty, SearchMarker);
-        button.SetValue(ContentControl.ContentProperty, "搜索");
-        button.SetValue(AutomationProperties.NameProperty, "搜索 GitHub 仓库");
-        button.SetValue(FrameworkElement.ToolTipProperty, "搜索 GitHub。留空时使用本机软件名称。");
+        button.SetBinding(ContentControl.ContentProperty, new System.Windows.Data.Binding(nameof(MatchRow.RepositoryAction)));
+        button.SetValue(FrameworkElement.ToolTipProperty, "查看候选或搜索 GitHub。仓库栏为空时按软件名称搜索。");
+        button.SetValue(FrameworkElement.WidthProperty, 64.0);
         button.SetValue(FrameworkElement.MarginProperty, new Thickness(6, 0, 0, 0));
         button.SetValue(Control.PaddingProperty, new Thickness(9, 4, 9, 4));
         button.SetValue(DockPanel.DockProperty, Dock.Right);
@@ -111,7 +112,7 @@ internal sealed class BatchRepositoryPicker
         if (applying || e.OriginalSource is not TextBox { DataContext: MatchRow item } input
             || !ReferenceEquals(input.Tag, EditorMarker) || !input.IsKeyboardFocused) return;
         var address = RepositoryLookup.Address(input.Text);
-        item.Selected = address.Length > 0;
+        item.EditRepository(address.Length > 0);
         item.Reason = address.Length > 0 ? "已填写仓库地址" : input.Text.Trim().Length == 0 ? "待匹配" : "待确认仓库";
         Open(input, item, refresh: true);
     }
@@ -124,8 +125,9 @@ internal sealed class BatchRepositoryPicker
         searchingFromButton = true;
         try { input.Focus(); }
         finally { searchingFromButton = false; }
-        Open(input, item);
-        await SearchAsync();
+        var hasBatchCandidates = item.VisibleBatchSearchPage is { Items.Count: > 0 };
+        Open(input, item, refresh: hasBatchCandidates);
+        if (!hasBatchCandidates) await SearchAsync();
     }
 
     private async void EditorKeyDown(object sender, KeyEventArgs e)
@@ -155,6 +157,7 @@ internal sealed class BatchRepositoryPicker
                 return;
             }
             if (!ReferenceEquals(row, item) || !popup.IsOpen) Open(input, item);
+            if (item.VisibleBatchSearchPage is { Items.Count: > 0 }) return;
             var address = RepositoryLookup.Address(input.Text);
             if (address.Length > 0) Choose(address, "已填写仓库地址");
             else await SearchAsync();
@@ -176,19 +179,20 @@ internal sealed class BatchRepositoryPicker
             popup.Width = Math.Min(640, Math.Max(200, ((FrameworkElement)popup.PlacementTarget).ActualWidth));
         }
         CancelSearch();
-        Render(input.Text.Trim());
+        if (item.VisibleBatchSearchPage is { Items.Count: > 0 } page) Render(item.Name, page, batch: true);
+        else Render(input.Text.Trim());
         popup.IsOpen = true;
     }
 
-    private void Render(string query, GitHubClient.RepositorySearchPage? page = null)
+    private void Render(string query, GitHubClient.RepositorySearchPage? page = null, bool batch = false)
     {
         var suggestions = row is { Selected: false, Choices.Count: > 0 }
             && (query.Length == 0 || row.Choices.Contains(query, StringComparer.OrdinalIgnoreCase));
         var known = suggestions
             ? row!.Choices.Select(name => local.FirstOrDefault(repo => repo.FullName.Equals(name, StringComparison.OrdinalIgnoreCase)) ?? new Repository(name, "", false))
             : RepositoryLookup.Filter(local, query.Length == 0 ? row?.Name ?? "" : query, 8);
-        var choices = known.Select(repo => (Repo: repo, Source: "本机"))
-            .Concat(page?.Items.Select(repo => (Repo: repo, Source: "GitHub")) ?? [])
+        var online = page?.Items.Select(repo => (Repo: repo, Source: "GitHub")) ?? [];
+        var choices = (batch ? online : known.Select(repo => (Repo: repo, Source: "本机")).Concat(online))
             .DistinctBy(candidate => candidate.Repo.FullName, StringComparer.OrdinalIgnoreCase).Take(30).ToArray();
         results.Items.Clear();
         foreach (var (repo, source) in choices)

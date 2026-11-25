@@ -98,14 +98,48 @@ public class MatchRow : Observable
     public string Version=>App.Version;
     public IReadOnlyList<string> Choices {get;init;}=[];
     private bool selected;
+    private bool repositoryConfirmed, awaitingRepositoryChoice, showBatchCandidates;
     private string repository="",reason="";
     public bool Selected {get=>selected;set=>Set(ref selected,value);}
     public string Repository {get=>repository;set=>Set(ref repository,value);}
     public string Reason {get=>reason;set=>Set(ref reason,value);}
+    public bool AwaitingRepositoryChoice
+    {
+        get => awaitingRepositoryChoice;
+        private set => Set(ref awaitingRepositoryChoice, value);
+    }
+    internal GitHubClient.RepositorySearchPage? BatchSearchPage { get; private set; }
+    internal GitHubClient.RepositorySearchPage? VisibleBatchSearchPage => showBatchCandidates ? BatchSearchPage : null;
+    public string RepositoryAction => VisibleBatchSearchPage is { Items.Count: > 0 } page ? $"候选 {page.Items.Count}" : "搜索";
+
+    internal void RequireRepositoryChoice()
+    {
+        AwaitingRepositoryChoice = !repositoryConfirmed;
+        showBatchCandidates = true;
+        Changed(nameof(RepositoryAction));
+    }
+
+    internal void EditRepository(bool hasAddress)
+    {
+        repositoryConfirmed = hasAddress;
+        Selected = hasAddress;
+        if (hasAddress) AwaitingRepositoryChoice = false;
+        showBatchCandidates = false;
+        Changed(nameof(RepositoryAction));
+    }
+
+    internal void SetBatchSearchPage(GitHubClient.RepositorySearchPage? page)
+    {
+        BatchSearchPage = page;
+        Changed(nameof(RepositoryAction));
+    }
+
     public void ChooseRepository(string value,string basis)
     {
         Repository=value;
         Reason=basis;
+        repositoryConfirmed=true;
+        AwaitingRepositoryChoice=false;
         Selected=true;
     }
 }

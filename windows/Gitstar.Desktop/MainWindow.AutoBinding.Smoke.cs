@@ -16,7 +16,7 @@ public partial class MainWindow
         (batchSearchSmoke ?? throw new InvalidOperationException("Missing batch repository fixture"))(query, ct);
 
     private void AttachBatchBindingSmoke(Form form, DataGrid table, DataGridTemplateColumn column, TextBox filter,
-        Button save, BatchRepositoryPicker picker, IReadOnlyList<MatchRow> rows, string path)
+        Button batch, TextBlock batchStatus, Button save, BatchRepositoryPicker picker, IReadOnlyList<MatchRow> rows, string path)
     {
         var narrow = Environment.GetCommandLineArgs().Contains("--narrow");
         if (narrow) form.Width = 540;
@@ -39,15 +39,16 @@ public partial class MainWindow
                     && names.All(name => name.Contains("wenxi", StringComparison.OrdinalIgnoreCase));
                 var queryKept = editor.Text == "wenxi" && item.Repository == "wenxi" && !item.Selected;
 
-                void Press(Key key)
+                void Press(Key key, TextBox? target = null)
                 {
-                    var source = PresentationSource.FromVisual(editor) ?? throw new IOException("Missing input source");
-                    editor.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, source, 0, key) { RoutedEvent = Keyboard.PreviewKeyDownEvent });
+                    var input = target ?? editor;
+                    var source = PresentationSource.FromVisual(input) ?? throw new IOException("Missing input source");
+                    input.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, source, 0, key) { RoutedEvent = Keyboard.PreviewKeyDownEvent });
                 }
                 Press(Key.Down);
                 Press(Key.Enter);
                 var choseLocal = item.Repository == "z7786/wenxi" && item.Selected && !picker.Popup.IsOpen;
-                var original = rows.Single(row => row.Name == "Sync");
+                var original = rows.Single(row => row.App.Id == "fixture2");
                 var otherSelection = original.Selected;
                 var slow = new TaskCompletionSource<GitHubClient.RepositorySearchPage>(TaskCreationOptions.RunContinuationsAsynchronously);
                 CancellationToken slowToken = default;
@@ -102,6 +103,74 @@ public partial class MainWindow
                     ?? throw new IOException("Missing search button after clearing filter");
                 var bounds = shownSearch.TransformToAncestor(table).TransformBounds(new Rect(shownSearch.RenderSize));
                 var rowActionFits = bounds.Left >= 0 && bounds.Right <= table.ActualWidth + 1;
+
+                var duplicate = rows.Single(row => row.App.Id == "fixture5");
+                var unmatched = rows.Single(row => row.App.Id == "fixture3");
+                foreach (var row in rows) row.Selected = false;
+                var emptyBatchDisabled = !batch.IsEnabled;
+                filter.Text = "Sync";
+                original.Selected = duplicate.Selected = unmatched.Selected = true;
+                var namesSearched = new List<string>();
+                var pending = new TaskCompletionSource<GitHubClient.RepositorySearchPage>(TaskCreationOptions.RunContinuationsAsynchronously);
+                CancellationToken pendingToken = default;
+                batchSearchSmoke = (query, token) =>
+                {
+                    namesSearched.Add(query);
+                    if (query == original.Name) return Task.FromResult(new GitHubClient.RepositorySearchPage(
+                        [new("example/sync-app", "跨平台同步工具", false), new("example/sync-fork", "其他候选", false)], 2, false));
+                    if (query != unmatched.Name) throw new IOException("Unexpected software search: " + query);
+                    pendingToken = token;
+                    return pending.Task;
+                };
+                batch.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+                var checkedNamesOnly = namesSearched.SequenceEqual(new[] { original.Name, unmatched.Name })
+                    && !table.Items.Contains(unmatched) && item.BatchSearchPage == null;
+                var preservesSelections = original.Repository == "example/sync" && duplicate.Repository == "example/sync"
+                    && unmatched.Repository.Length == 0 && original.Selected && duplicate.Selected && unmatched.Selected;
+                var requiresChoice = !save.IsEnabled && original.AwaitingRepositoryChoice && duplicate.AwaitingRepositoryChoice
+                    && settings.Bindings.Count == 0;
+                var resultsArriveEarly = batch.Content as string == "取消搜索" && batchStatus.Text.Contains("2/3", StringComparison.Ordinal)
+                    && original.RepositoryAction == "候选 2" && duplicate.RepositoryAction == "候选 2";
+
+                table.UpdateLayout();
+                var batchCell = column.GetCellContent(original) ?? throw new IOException("Missing batch candidate cell");
+                var batchInput = Find<TextBox>(batchCell) ?? throw new IOException("Missing batch candidate input");
+                var rowCandidates = Find<Button>(batchCell) ?? throw new IOException("Missing batch candidate action");
+                rowCandidates.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+                var opensCandidatesWithoutSearch = picker.Popup.IsOpen && namesSearched.Count == 2
+                    && Candidates().SequenceEqual(new[] { "example/sync-app", "example/sync-fork" });
+                Press(Key.Enter, batchInput);
+                var enterNeedsHighlight = original.AwaitingRepositoryChoice && !save.IsEnabled;
+                Press(Key.Down, batchInput);
+                Press(Key.Enter, batchInput);
+                var chosenOnly = original.Repository == "example/sync-app" && !original.AwaitingRepositoryChoice
+                    && duplicate.AwaitingRepositoryChoice && unmatched.AwaitingRepositoryChoice && save.IsEnabled
+                    && Equals(save.Content, "关联已确认（1）") && settings.Bindings.Count == 0;
+
+                batch.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+                pending.SetResult(new([new("example/late", "", false)], 1, false));
+                await form.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+                var cancellationPreservesResults = pendingToken.IsCancellationRequested && unmatched.BatchSearchPage == null
+                    && original.RepositoryAction == "候选 2" && batchStatus.Text.Contains("已取消", StringComparison.Ordinal);
+
+                item.Selected = true;
+                batchSearchSmoke = (query, _) =>
+                {
+                    namesSearched.Add(query);
+                    if (query == item.Name) throw new GitHubRateLimitException("fixture rate limit");
+                    return Task.FromResult(new GitHubClient.RepositorySearchPage([], 0, false));
+                };
+                batch.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+                var stopAtLimit = namesSearched.Skip(2).SequenceEqual(new[] { item.Name })
+                    && batchStatus.Text.Contains("搜索受限", StringComparison.Ordinal) && unmatched.BatchSearchPage == null;
+                item.Selected = false;
+                batch.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+                var resumeAlreadySearched = namesSearched.Skip(2).SequenceEqual(new[] { item.Name, unmatched.Name })
+                    && unmatched.Reason.Contains("未找到", StringComparison.Ordinal) && batchStatus.Text.Contains("1 项无匹配", StringComparison.Ordinal);
+                filter.Text = "";
+                form.UpdateLayout();
+                var batchBounds = batch.TransformToAncestor((FrameworkElement)form.Content).TransformBounds(new Rect(batch.RenderSize));
+                var batchActionFits = batchBounds.Left >= 0 && batchBounds.Right <= ((FrameworkElement)form.Content).ActualWidth;
                 var report = new
                 {
                     ChineseNameSuggestedForReview = suggested, SoftwareFilter = filtered, ExactLocalMatch = local,
@@ -110,12 +179,19 @@ public partial class MainWindow
                     RemoteSelectionChecksCorrectRow = choseRemote, ErrorVisible = failure, PastedReleaseUrlNormalized = direct,
                     EmptyQueryUsesSoftwareName = fallback, EscapeCloses = escaped, EmptyFilter = empty,
                     FilteringPreservesOtherSelections = stableRows, SaveCountUpdated = validCount, OneClickCheckbox = toggled,
-                    EmptyAddressBlocksSave = emptyAddressBlocksSave, SearchButtonFits = rowActionFits, Narrow = narrow
+                    EmptyAddressBlocksSave = emptyAddressBlocksSave, SearchButtonFits = rowActionFits,
+                    EmptyBatchDisabled = emptyBatchDisabled, CheckedNamesOnly = checkedNamesOnly, PreservesSelections = preservesSelections,
+                    RequiresChoice = requiresChoice, ResultsArriveEarly = resultsArriveEarly,
+                    OpensCandidatesWithoutSearch = opensCandidatesWithoutSearch, EnterNeedsHighlight = enterNeedsHighlight,
+                    ChosenOnly = chosenOnly, CancellationPreservesResults = cancellationPreservesResults, StopAtLimit = stopAtLimit,
+                    ResumeAlreadySearched = resumeAlreadySearched, BatchActionFits = batchActionFits, Narrow = narrow
                 };
                 File.WriteAllText(Path.ChangeExtension(path, ".interaction.json"), JsonSerializer.Serialize(report));
                 if (!(suggested && filtered && local && queryKept && choseLocal && loading && remote && staleDropped && popupTheme
                     && choseRemote && failure && direct && fallback && escaped && empty && stableRows && validCount && toggled
-                    && emptyAddressBlocksSave && rowActionFits))
+                    && emptyAddressBlocksSave && rowActionFits && emptyBatchDisabled && checkedNamesOnly && preservesSelections
+                    && requiresChoice && resultsArriveEarly && opensCandidatesWithoutSearch && enterNeedsHighlight && chosenOnly
+                    && cancellationPreservesResults && stopAtLimit && resumeAlreadySearched && batchActionFits))
                     throw new IOException("Batch repository interaction did not pass");
 
                 var root = (FrameworkElement)form.Content;

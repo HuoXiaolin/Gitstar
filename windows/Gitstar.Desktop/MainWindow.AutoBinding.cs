@@ -56,7 +56,14 @@ public partial class MainWindow
             .ThenBy(row => row.Name, StringComparer.OrdinalIgnoreCase).ToList();
 
         var form = new Form(this, "自动匹配 / 批量关联", 1030, 700);
-        form.Label("输入关键词筛选仓库，点「搜索」查 GitHub。选中仓库即勾选该行。");
+        var searchStatus = ProjectText("勾选软件后可批量搜索 GitHub。选择仓库后统一确认关联。", 12, true);
+        searchStatus.Margin = new Thickness(0, 5, 0, 9);
+        searchStatus.TextWrapping = TextWrapping.Wrap;
+        System.Windows.Automation.AutomationProperties.SetLiveSetting(searchStatus, System.Windows.Automation.AutomationLiveSetting.Polite);
+        form.Fields.Children.Add(searchStatus);
+        var batch = new Button { Content = "批量搜索 GitHub", Padding = new Thickness(13, 7, 13, 7) };
+        batch.ToolTip = "按已勾选软件的名称搜索 GitHub，包括被筛选隐藏的勾选项。";
+        form.HeaderAction(batch);
         var filter = form.Text("搜索本机软件");
         var table = new DataGrid
         {
@@ -116,6 +123,8 @@ public partial class MainWindow
         form.Fields.Children.Add(empty);
         Func<string, CancellationToken, Task<GitHubClient.RepositorySearchPage>> search = previewPath == null ? api.SearchRepositories : BatchRepositorySmokeSearch;
         var picker = new BatchRepositoryPicker(form, table, source, search);
+        CancellationTokenSource? batchRequest = null;
+        var closed = false;
         var clear = form.Action("取消勾选", () =>
         {
             foreach (var row in rows) row.Selected = false;
@@ -129,7 +138,7 @@ public partial class MainWindow
             table.CommitEdit();
             table.CommitEdit(DataGridEditingUnit.Row, true);
             if (account != CacheKey) throw new IOException("账号已改变，请重新打开关联窗口。");
-            var selected = rows.Where(row => row.Selected).ToArray();
+            var selected = RowsReadyForBinding().ToArray();
             if (selected.Length == 0) throw new IOException("请勾选需要关联的软件。");
             foreach (var row in selected)
             {
@@ -143,17 +152,64 @@ public partial class MainWindow
 
         var view = new ListCollectionView(rows);
         table.ItemsSource = view;
+        IEnumerable<MatchRow> RowsReadyForBinding() => rows.Where(row => row.Selected && !row.AwaitingRepositoryChoice);
+
         void UpdateCount()
         {
             var selected = rows.Count(row => row.Selected);
-            var valid = rows.Count(row => row.Selected && RepositoryLookup.Address(row.Repository).Length > 0);
-            save.Content = selected > 0 ? $"关联所选（{selected}）" : "关联所选";
-            save.IsEnabled = valid > 0 && selected == valid;
+            var ready = RowsReadyForBinding().ToArray();
+            var awaiting = selected - ready.Length;
+            var saveLabel = awaiting > 0 ? "关联已确认" : "关联所选";
+            save.Content = ready.Length > 0 ? $"{saveLabel}（{ready.Length}）" : saveLabel;
+            save.IsEnabled = ready.Length > 0 && ready.All(row => RepositoryLookup.Address(row.Repository).Length > 0);
+            batch.IsEnabled = batchRequest == null ? selected > 0 : !batchRequest.IsCancellationRequested;
+            batch.Content = batchRequest == null ? "批量搜索 GitHub" : batchRequest.IsCancellationRequested ? "正在取消…" : "取消搜索";
             clear.IsEnabled = selected > 0;
             var visibleSelected = view.Cast<MatchRow>().Count(row => row.Selected);
             var other = selected > visibleSelected ? $"，含筛选外 {selected - visibleSelected} 项" : "";
-            form.Footnote($"显示 {view.Count}/{rows.Count} 项 · 已勾选 {selected} 项{other}");
+            var pending = awaiting > 0 ? $" · {awaiting} 项待选仓库" : "";
+            form.Footnote($"显示 {view.Count}/{rows.Count} 项 · 已勾选 {selected} 项{other}{pending}");
         }
+        form.Closed += (_, _) =>
+        {
+            closed = true;
+            if (batchRequest != null) ApplicationExit.Cancel(batchRequest);
+        };
+        batch.Click += async (_, _) =>
+        {
+            if (batchRequest != null)
+            {
+                ApplicationExit.Cancel(batchRequest);
+                UpdateCount();
+                return;
+            }
+
+            var selected = rows.Where(row => row.Selected).ToArray();
+            if (closed || selected.Length == 0) return;
+            if (account != CacheKey)
+            {
+                searchStatus.Text = "账号已改变，请重新打开关联窗口。";
+                return;
+            }
+
+            picker.Close();
+            using var request = new CancellationTokenSource();
+            batchRequest = request;
+            UpdateCount();
+            try
+            {
+                if (previewPath == null) UseFeature(UsageFeature.RepositorySearch);
+                await SearchCheckedRepositories(selected, search, message =>
+                {
+                    if (!closed) searchStatus.Text = message;
+                }, request.Token);
+            }
+            finally
+            {
+                batchRequest = null;
+                if (!closed) UpdateCount();
+            }
+        };
         void Filter()
         {
             picker.Close();
@@ -168,11 +224,66 @@ public partial class MainWindow
         filter.TextChanged += (_, _) => Filter();
         foreach (var row in rows) row.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName is nameof(MatchRow.Selected) or nameof(MatchRow.Repository)) UpdateCount();
+            if (!closed && e.PropertyName is (nameof(MatchRow.Selected) or nameof(MatchRow.Repository) or nameof(MatchRow.AwaitingRepositoryChoice))) UpdateCount();
         };
         Filter();
-        if (previewPath != null) AttachBatchBindingSmoke(form, table, repositoryColumn, filter, save, picker, rows, previewPath);
+        if (previewPath != null) AttachBatchBindingSmoke(form, table, repositoryColumn, filter, batch, searchStatus, save, picker, rows, previewPath);
         form.ShowDialog();
+    }
+
+    private static async Task SearchCheckedRepositories(IReadOnlyList<MatchRow> selected,
+        Func<string, CancellationToken, Task<GitHubClient.RepositorySearchPage>> search, Action<string> report, CancellationToken ct)
+    {
+        foreach (var row in selected) row.RequireRepositoryChoice();
+        var completed = 0;
+        var found = 0;
+        var failed = 0;
+        var heading = "批量搜索完成";
+        foreach (var group in selected.GroupBy(row => row.Name.Trim(), StringComparer.OrdinalIgnoreCase))
+        {
+            var count = group.Count();
+            var page = group.Select(row => row.BatchSearchPage).FirstOrDefault(result => result != null);
+            report($"正在搜索 GitHub · {completed}/{selected.Count} 项 · {group.Key}");
+            string reason;
+            var stopped = false;
+            try
+            {
+                ct.ThrowIfCancellationRequested();
+                page ??= await search(group.Key, ct).WaitAsync(ct);
+                ct.ThrowIfCancellationRequested();
+                reason = page.Items.Count > 0 ? $"GitHub 找到 {page.Items.Count} 个候选" : "GitHub 未找到匹配";
+                if (page.Items.Count > 0) found += count;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                reason = heading = "搜索已取消";
+                stopped = true;
+            }
+            catch (GitHubRateLimitException error)
+            {
+                reason = error.Message;
+                heading = "GitHub 搜索受限，请稍后重试。" + reason;
+                stopped = true;
+            }
+            catch (Exception error)
+            {
+                reason = "搜索失败 · " + error.Message;
+                failed += count;
+            }
+
+            foreach (var row in group)
+            {
+                if (page != null && !stopped) row.SetBatchSearchPage(page);
+                if (row.AwaitingRepositoryChoice) row.Reason = reason;
+            }
+            if (stopped) break;
+            completed += count;
+        }
+
+        var missing = completed - found - failed;
+        var details = $"{heading} · 已处理 {completed}/{selected.Count} 项，{found} 项有候选"
+            + (missing > 0 ? $"，{missing} 项无匹配" : "") + (failed > 0 ? $"，{failed} 项失败" : "");
+        report(details + (found > 0 ? "。点击软件行的「候选」选择仓库。" : "。"));
     }
 
     private async Task ApplyBatchBindings(IReadOnlyList<MatchRow> selected, string account)
