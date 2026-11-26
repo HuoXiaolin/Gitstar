@@ -4,7 +4,8 @@ namespace Gitstar.Desktop;
 public sealed partial class GitHubClient
 {
     private readonly Dictionary<string,long> rankingFloors=[];
-    public async Task<RankingPage> Rankings(RankingKind kind,int period,int page,string query,CancellationToken ct)
+    public async Task<RankingPage> Rankings(RankingKind kind,int period,int page,string query,CancellationToken ct,
+        string? searchQuery=null, Action<string>? progress=null)
     {
         ct.ThrowIfCancellationRequested();if(!Enum.IsDefined(kind)||page<1||page>40||kind==RankingKind.Trending&&page!=1)throw new IOException("榜单页码无效。");RepositoryRankings.Period(period);
         if(kind==RankingKind.Trending){
@@ -17,13 +18,57 @@ public sealed partial class GitHubClient
             await using var input=await response.Content.ReadAsStreamAsync(deadline.Token);using var content=new MemoryStream();var buffer=new byte[16384];int count;while((count=await input.ReadAsync(buffer,deadline.Token))>0){if(content.Length+count>2*1024*1024)throw new IOException("趋势页超过读取限制。");content.Write(buffer,0,count);}
             var entries=RepositoryRankings.ParseTrending(Encoding.UTF8.GetString(content.ToArray()));return new(kind,period,1,DateTimeOffset.UtcNow,entries,entries.Count,false);
         }
-        var searchedAt=DateTimeOffset.UtcNow;var q=RepositoryRankings.SearchQuery(kind,period,query,searchedAt);var sort=kind==RankingKind.Search?"":"&sort=stars&order=desc";
-        var floorKey=kind+"/"+period;var floor=kind==RankingKind.Search?0:rankingFloors.GetValueOrDefault(floorKey,kind==RankingKind.Popular?100000L:1000L);JsonElement data;
+        if (kind == RankingKind.Search) return await SearchRankings(period, page, query, searchQuery, progress, ct);
+
+        var searchedAt=DateTimeOffset.UtcNow;var q=RepositoryRankings.SearchQuery(kind,period,query,searchedAt);
+        var floorKey=kind+"/"+period;var floor=rankingFloors.GetValueOrDefault(floorKey,kind==RankingKind.Popular?100000L:1000L);JsonElement data;
         // Narrow high-star candidates first to avoid broad-query search timeouts. Expand
         // the same page when the range is too small; never skip a rank at a boundary.
         var expansions=0;
-        while(true){var filtered=q+(floor>0?" stars:>="+floor:"");data=await Request("search/repositories?q="+Uri.EscapeDataString(filtered)+sort+$"&per_page=25&page={page}",ct:ct);if(floor==0||data.GetProperty("total_count").GetInt32()>=page*25)break;floor=++expansions>=2?0:floor/2;}
-        if(kind!=RankingKind.Search)rankingFloors[floorKey]=floor;
+        while(true){var filtered=q+(floor>0?" stars:>="+floor:"");data=await Request("search/repositories?q="+Uri.EscapeDataString(filtered)+$"&sort=stars&order=desc&per_page=25&page={page}",ct:ct);if(floor==0||data.GetProperty("total_count").GetInt32()>=page*25)break;floor=++expansions>=2?0:floor/2;}
+        rankingFloors[floorKey]=floor;
+        return ReadRankingPage(kind,period,page,searchedAt,data,floor);
+    }
+
+    private async Task<RankingPage> SearchRankings(int period, int page, string text, string? searchQuery,
+        Action<string>? progress, CancellationToken ct)
+    {
+        var steps = RepositoryRankings.SearchSteps(text);
+        // Later pages stay on the same query that produced the original page.
+        var chosen = steps.FirstOrDefault(step => step.Query == searchQuery);
+        if (chosen != null) steps = [chosen];
+        else if (page > 1) steps = [steps[0]];
+
+        var searchedAt = DateTimeOffset.UtcNow;
+        var result = new RankingPage(RankingKind.Search, period, page, searchedAt, [], 0, false);
+        var incomplete = false;
+        foreach (var step in steps)
+        {
+            ct.ThrowIfCancellationRequested();
+            progress?.Invoke(page > 1 ? $"正在搜索第 {page} 页…" : step.Progress);
+            HttpStatusCode status = default;
+            JsonElement data;
+            try
+            {
+                data = await Request("search/repositories?q=" + Uri.EscapeDataString(step.Query) + $"&per_page=25&page={page}",
+                    ct: ct, headers: response => status = response.StatusCode);
+            }
+            catch (IOException) when (steps.Count > 1 && step.OptionalScope && status == HttpStatusCode.UnprocessableEntity)
+            {
+                // GitHub can reject an unknown owner or repository in a scope qualifier.
+                continue;
+            }
+
+            ct.ThrowIfCancellationRequested();
+            result = ReadRankingPage(RankingKind.Search, period, page, searchedAt, data, 0) with { SearchQuery = step.Query };
+            if (result.Items.Count > 0) return result;
+            incomplete |= result.Incomplete;
+        }
+        return result with { Incomplete = incomplete };
+    }
+
+    private static RankingPage ReadRankingPage(RankingKind kind, int period, int page, DateTimeOffset searchedAt, JsonElement data, long floor)
+    {
         var entriesApi=new List<RankingEntry>();foreach(var item in data.GetProperty("items").EnumerateArray()){
             if(!Rules.ValidRepository(S(item,"full_name"))||item.GetProperty("private").GetBoolean())continue;var repo=ParseRepository(item,false);if(kind!=RankingKind.Search&&(repo.Metadata.Stars is not {} stars||stars<floor))throw new IOException("GitHub 返回的项目不满足 Stars 筛选，已停止替换榜单结果。");if(entriesApi.Any(entry=>entry.Repository.FullName.Equals(repo.FullName,StringComparison.OrdinalIgnoreCase)))continue;
             DateTimeOffset? created=DateTimeOffset.TryParse(S(item,"created_at"),out var date)?date:null;if(kind==RankingKind.New&&(created==null||created.Value.UtcDateTime<searchedAt.UtcDateTime.Date.AddDays(-RepositoryRankings.NewDays(period))))throw new IOException("GitHub 返回的项目不满足新建时间筛选，已保留原有结果。");

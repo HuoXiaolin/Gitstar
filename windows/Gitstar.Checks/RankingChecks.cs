@@ -19,6 +19,16 @@ internal static class RankingChecks
         var now=new DateTimeOffset(2026,10,29,12,0,0,TimeSpan.Zero);check(RepositoryRankings.SearchQuery(RankingKind.New,1,"",now).Contains("created:>=2026-09-29"),"new projects ranking uses a thirty-day creation window by default");
         check(!RepositoryRankings.SearchQuery(RankingKind.Popular,0,"",now).Contains("created:"),"popular ranking uses lifetime stars without a creation window");
         check(RepositoryRankings.SearchQuery(RankingKind.Search,0,"https://github.com/example/editor",now).Contains("repo:example/editor"),"ranking search accepts full GitHub repository URLs");
+        var fuzzy = RepositoryRankings.SearchSteps("  Big-Fish_Dock  ");
+        check(fuzzy.Count == 3 && fuzzy[0].Query.Contains("\"Big\" \"Fish\" \"Dock\" in:name,description,topics")
+            && fuzzy[1].Query.Contains("\"BigFishDock\"") && fuzzy[2].Query.Contains("\"Fish\""), "repository fragment search normalizes separators and has bounded broader keyword attempts");
+        check(RepositoryRankings.SearchSteps("@Example").Single().Query == "is:public user:Example"
+            && RepositoryRankings.SearchSteps("org:Example").Single().Query == "is:public org:Example"
+            && RepositoryRankings.SearchSteps("https://github.com/example").Single().Query == "is:public user:example",
+            "ranking search accepts author names, organization scopes and profile URLs");
+        check(RepositoryRankings.SearchSteps("example/edit").Last().Query == "is:public user:example \"edit\" in:name,description,topics"
+            && RepositoryRankings.SearchSteps("https://github.com/example/edit/releases/latest").Single().Query == "is:public repo:example/edit",
+            "shorthand repository fragments can expand while a linked repository stays exact");
         var calls=new List<(string Path,string Query,HttpMethod Method,bool Auth)>();var total=30;
         object Repo(string name,bool secret=false)=>new{full_name=name,description="Repository introduction, not release notes",@private=secret,stargazers_count=200000,language="C#",created_at=DateTimeOffset.UtcNow.AddDays(-1).ToString("O")};
         using var api=new GitHubClient(new(),new FakeHttp((request,ct)=>{calls.Add((request.RequestUri!.AbsolutePath,Uri.UnescapeDataString(request.RequestUri.Query),request.Method,request.Headers.Authorization!=null));return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent(request.RequestUri.Host=="github.com"?html:JsonSerializer.Serialize(new{total_count=total,incomplete_results=false,items=new[]{Repo("example/editor"),Repo("private/secret",true)}}))});})){Token="fixture"};
@@ -34,5 +44,42 @@ internal static class RankingChecks
         var ranges=new List<string>();using var adaptive=new GitHubClient(new(),new FakeHttp((request,ct)=>{var query=Uri.UnescapeDataString(request.RequestUri!.Query);ranges.Add(query);var narrow=query.Contains("stars:>=100000");return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent(JsonSerializer.Serialize(new{total_count=narrow?30:60,incomplete_results=false,items=Enumerable.Range(0,25).Select(index=>new{full_name="example/project"+index,description="intro",@private=false,stargazers_count=narrow?150000:80000})}))});}));
         var expanded=await adaptive.Rankings(RankingKind.Popular,0,2,"",CancellationToken.None);check(ranges.Count==2&&ranges.All(query=>query.Contains("page=2"))&&expanded.Items[0].Position==26&&expanded.Items.Count==25&&expanded.StarsFloor==50000,"star-range expansion refetches the same page without skipping boundary ranks");
         check(ranges.All(query=>System.Text.RegularExpressions.Regex.Matches(query,"stars:").Count==1),"ranking requests use one stars qualifier so broad and narrow ranges cannot be combined incorrectly");
+
+        var searches = new List<string>();
+        var progress = new List<string>();
+        using var fallback = new GitHubClient(new(), new FakeHttp((request, _) =>
+        {
+            var query = Uri.UnescapeDataString(request.RequestUri!.Query);
+            searches.Add(query);
+            if (query.Contains("repo:example/edit") || query.Contains("user:missing-fixture"))
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.UnprocessableEntity) { Content = new StringContent("Validation Failed") });
+            var items = query.Contains("\"BigFishDock\"") ? new[] { Repo("example/BigFishDock") }
+                : query.Contains("user:example") ? new[] { Repo("example/editor") } : [];
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(new
+                {
+                    total_count = items.Length == 0 ? 0 : 55,
+                    incomplete_results = query.Contains("\"missing\""),
+                    items
+                }))
+            });
+        }));
+        var firstPage = await fallback.Rankings(RankingKind.Search, 0, 1, "Big Fish Dock", CancellationToken.None, progress: progress.Add);
+        check(firstPage.Items.Single().Repository.FullName == "example/BigFishDock" && firstPage.More && searches.Count == 2
+            && progress.Count == 2 && progress[1].Contains("补搜"), "ranking search tries the combined keyword after an empty result and reports the actual step");
+        var nextPage = await fallback.Rankings(RankingKind.Search, 0, 2, "Big Fish Dock", CancellationToken.None, firstPage.SearchQuery);
+        check(nextPage.SearchQuery == firstPage.SearchQuery && nextPage.Items.Single().Position == 26
+            && searches.Count == 3 && searches.Last().Contains("\"BigFishDock\"") && searches.Last().Contains("page=2"),
+            "ranking pages continue on the query that produced the first results");
+        result = await fallback.Rankings(RankingKind.Search, 0, 1, "example", CancellationToken.None);
+        check(result.Items.Single().Repository.FullName == "example/editor" && result.SearchQuery == "is:public user:example",
+            "a bare author account can find its public repositories after an empty keyword search");
+        result = await fallback.Rankings(RankingKind.Search, 0, 1, "example/edit", CancellationToken.None);
+        check(result.Items.Single().Repository.FullName == "example/editor" && result.SearchQuery.Contains("user:example") && result.SearchQuery.Contains("\"edit\""),
+            "a rejected exact repository qualifier still permits the owner's fuzzy project search");
+        result = await fallback.Rankings(RankingKind.Search, 0, 1, "missing-fixture", CancellationToken.None);
+        check(result.Items.Count == 0 && result.Incomplete && searches.Any(query => query.Contains("user:missing-fixture")),
+            "no-match fallback attempts cannot turn an incomplete response into a confirmed empty result");
     }
 }
